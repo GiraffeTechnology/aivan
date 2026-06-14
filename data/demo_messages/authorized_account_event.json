@@ -1,0 +1,21 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-wangwang",
+  "channel_account_id": "salesperson-main",
+  "account_connection_id": "acct_alibaba_main_001",
+  "conversation_id": "demo_conv_authorized_01",
+  "message_id": "msg_authorized_001",
+  "sender_id": "customer_authorized_001",
+  "sender_display_name": "Verified Buyer Charlie",
+  "message_text": "Hello, I need 20000 units of women's linen blouse, natural color, sizes XS/S/M/L, target price USD 6.50/pc, FOB Shanghai, sea freight to Hamburg, lead time 50 days. Please proceed with supplier inquiries.",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T09:00:00Z",
+  "mode": "auto",
+  "account_meta": {
+    "platform": "alibaba",
+    "authorized_at": "2026-01-10T12:00:00Z",
+    "scopes": ["im_send", "im_receive", "marketplace_search"],
+    "wangwang_id": "ww_verified_charlie_001"
+  }
+}

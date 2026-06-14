@@ -1,0 +1,15 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-weixin",
+  "channel_account_id": "salesperson-main",
+  "conversation_id": "demo_conv_apparel_01",
+  "message_id": "msg_002",
+  "sender_id": "customer_hk_001",
+  "sender_display_name": "HK Buyer Alice",
+  "message_text": "补充说明：尺码比例是 S:M:L:XL = 20:40:30:10，面料要求180gsm纯棉，颜色只要白色，每件独立OPP袋包装，外箱12件/箱。付款方式接受30%预付T/T，余款见提单复印件付清。如果供应商有OEKO-TEX认证更好。",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T08:15:00Z",
+  "mode": "auto",
+  "in_reply_to_message_id": "msg_001"
+}

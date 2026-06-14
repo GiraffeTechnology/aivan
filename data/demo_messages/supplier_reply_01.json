@@ -1,0 +1,15 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-weixin",
+  "channel_account_id": "salesperson-main",
+  "conversation_id": "demo_conv_apparel_01",
+  "message_id": "msg_supplier_001",
+  "sender_id": "supplier_gz_trendy_001",
+  "sender_display_name": "Guangzhou Trendy Garment",
+  "message_text": "Hello, regarding your inquiry for white cotton shirts: We can offer USD 4.50/pc, MOQ 3000pcs. Daily capacity 500pcs. Lead time 35 days ex-factory FOB Guangzhou. Payment 30% deposit T/T, balance before shipment. We have ISO 9001 and OEKO-TEX certificates.",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T10:00:00Z",
+  "role_context": "supplier",
+  "mode": "auto"
+}

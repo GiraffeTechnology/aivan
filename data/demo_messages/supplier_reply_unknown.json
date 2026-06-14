@@ -1,0 +1,21 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-weixin",
+  "channel_account_id": "salesperson-main",
+  "conversation_id": "demo_conv_apparel_01",
+  "message_id": "msg_supplier_unknown_001",
+  "sender_id": "supplier_unknown_new_001",
+  "sender_display_name": "New Textile Co",
+  "message_text": "Hi, we are interested in your order. We can produce the shirts you need. Price is negotiable. Please send your detailed spec sheet and we will reply with a formal quotation. We are a small factory in Guangdong.",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T11:30:00Z",
+  "role_context": "supplier",
+  "risk_signals": [
+    "insufficient_public_presence",
+    "storefront_new_or_low_history",
+    "identity_unverified"
+  ],
+  "notes": "No platform badges, no web presence found, no contact details beyond WeChat. Requires manual review before proceeding.",
+  "mode": "auto"
+}

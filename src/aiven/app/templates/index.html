@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIVEN - AI Trade Salesperson</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+    <h1>AIVEN <span class="badge">AI Trade Salesperson</span></h1>
+    <nav>
+        <button onclick="showPanel('projects')">Projects</button>
+        <button onclick="showPanel('messages')">Messages</button>
+        <button onclick="showPanel('suppliers')">Suppliers</button>
+        <button onclick="showPanel('marketplace')">Marketplace</button>
+        <button onclick="showPanel('platforms')">Platforms</button>
+        <button onclick="showPanel('accounts')">Accounts</button>
+        <button onclick="showPanel('approvals')">Approvals</button>
+    </nav>
+</header>
+
+<div class="warning-banner">
+    ⚠️ AIVEN does not store your platform passwords. Accounts are managed by OpenClaw. All outbound messages require your approval before sending.
+</div>
+<div class="warning-banner info">
+    ℹ️ Adding a platform to the whitelist only means AIVEN may use it as a supplier source. It does not mean suppliers on that platform are automatically trusted.
+</div>
+
+<main>
+    <!-- Projects Panel -->
+    <div id="panel-projects" class="panel active">
+        <h2>Projects</h2>
+        <button onclick="loadProjects()">Refresh</button>
+        <div id="projects-list" class="card-list"></div>
+    </div>
+
+    <!-- Messages Panel -->
+    <div id="panel-messages" class="panel">
+        <h2>Incoming Messages</h2>
+        <div class="form-group">
+            <label>Simulate Customer Message:</label>
+            <textarea id="msg-text" rows="4" placeholder="e.g. 我需要采购10000件白色纯棉男士衬衣..."></textarea>
+            <input id="msg-conv" placeholder="Conversation ID" value="conv_demo_001">
+            <input id="msg-sender" placeholder="Sender ID" value="customer_001">
+            <button onclick="sendMessage()">Send to AIVEN</button>
+        </div>
+        <div id="message-result" class="result-box"></div>
+    </div>
+
+    <!-- Suppliers Panel -->
+    <div id="panel-suppliers" class="panel">
+        <h2>Supplier Registry</h2>
+        <button onclick="loadSuppliers()">Load Suppliers</button>
+        <div id="suppliers-list" class="card-list"></div>
+    </div>
+
+    <!-- Marketplace Panel -->
+    <div id="panel-marketplace" class="panel">
+        <h2>Marketplace Search</h2>
+        <p>Marketplace search is triggered automatically when local registry has insufficient matches.</p>
+        <div id="marketplace-results" class="card-list"></div>
+    </div>
+
+    <!-- Platforms Panel -->
+    <div id="panel-platforms" class="panel">
+        <h2>Trusted Platform Whitelist</h2>
+        <button onclick="loadPlatforms()">Refresh</button>
+        <div id="platforms-list" class="card-list"></div>
+        <h3>Platform Suggestions (pending review)</h3>
+        <button onclick="loadSuggestions()">Load Suggestions</button>
+        <div id="suggestions-list" class="card-list"></div>
+    </div>
+
+    <!-- Accounts Panel -->
+    <div id="panel-accounts" class="panel">
+        <h2>Connected OpenClaw Accounts</h2>
+        <button onclick="loadAccounts()">Refresh</button>
+        <div id="accounts-list" class="card-list"></div>
+        <h3>Register Account (Demo)</h3>
+        <button onclick="registerDemoAccount()">Register Demo 1688 Account</button>
+    </div>
+
+    <!-- Approvals Panel -->
+    <div id="panel-approvals" class="panel">
+        <h2>Pending Outbound Drafts (Approval Required)</h2>
+        <input id="approval-project-id" placeholder="Project ID">
+        <button onclick="loadDrafts()">Load Drafts</button>
+        <div id="drafts-list" class="card-list"></div>
+    </div>
+</main>
+
+<footer>
+    <p>AIVEN v0.1.0 — Local-first AI Trade Salesperson. All data stays on your machine.</p>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

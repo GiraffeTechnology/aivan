@@ -1,0 +1,44 @@
+{
+  "apparel": {
+    "material_procurement_days": 7,
+    "sample_days": 5,
+    "production_days_per_1000_qty": 2,
+    "risk_buffer_days": 5,
+    "notes": "Includes fabric, trims, and thread sourcing. Sample review adds ~5 days before bulk production approval."
+  },
+  "fabric": {
+    "material_procurement_days": 3,
+    "sample_days": 3,
+    "production_days_per_1000_qty": 1,
+    "risk_buffer_days": 3,
+    "notes": "Raw yarn or greige fabric sourcing. Lab-dip approval adds ~3 days for colored fabric orders."
+  },
+  "cnc": {
+    "material_procurement_days": 5,
+    "sample_days": 7,
+    "production_days_per_1000_qty": 5,
+    "risk_buffer_days": 7,
+    "notes": "Tight tolerances require first-article inspection (FAI) before bulk run. Allow extra days for anodizing or surface treatment."
+  },
+  "packaging": {
+    "material_procurement_days": 3,
+    "sample_days": 2,
+    "production_days_per_1000_qty": 1,
+    "risk_buffer_days": 3,
+    "notes": "Printing plates add 2-3 days on first order. Reorder without design change is faster."
+  },
+  "electronics": {
+    "material_procurement_days": 10,
+    "sample_days": 10,
+    "production_days_per_1000_qty": 3,
+    "risk_buffer_days": 10,
+    "notes": "Component lead times vary significantly (ICs may be 8–16 weeks). PCBA requires functional testing per batch."
+  },
+  "trims_accessories": {
+    "material_procurement_days": 5,
+    "sample_days": 3,
+    "production_days_per_1000_qty": 1,
+    "risk_buffer_days": 3,
+    "notes": "Custom mold tooling adds 10-15 days on first order for injection-molded components."
+  }
+}

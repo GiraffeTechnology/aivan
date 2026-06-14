@@ -1,0 +1,14 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-weixin",
+  "channel_account_id": "salesperson-main",
+  "conversation_id": "demo_conv_apparel_01",
+  "message_id": "msg_001",
+  "sender_id": "customer_hk_001",
+  "sender_display_name": "HK Buyer Alice",
+  "message_text": "您好，我需要采购10000件白色纯棉男士衬衣，发货到温哥华，45天内到货。目标价USD 4.80以内/件，空运优先，DDP。规格180gsm，S/M/L/XL四个尺码，比例20/40/30/10，单件独立袋装。请帮我询价。",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T08:00:00Z",
+  "mode": "auto"
+}

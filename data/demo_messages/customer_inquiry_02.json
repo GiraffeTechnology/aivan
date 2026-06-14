@@ -1,0 +1,14 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-weixin",
+  "channel_account_id": "salesperson-main",
+  "conversation_id": "demo_conv_cnc_01",
+  "message_id": "msg_cnc_001",
+  "sender_id": "customer_us_002",
+  "sender_display_name": "US Buyer Bob",
+  "message_text": "Hi, I need to source 500 units of custom aluminum CNC-machined brackets (6061-T6 alloy). Dimensions approx 120x60x8mm, tolerances ±0.05mm, surface finish anodized black. Delivery to Los Angeles by sea, target price under USD 12/pc, DDP. Lead time 30 days OK. Can you help find qualified suppliers?",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T08:30:00Z",
+  "mode": "auto"
+}

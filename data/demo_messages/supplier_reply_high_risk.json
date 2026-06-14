@@ -1,0 +1,22 @@
+{
+  "source": "openclaw",
+  "channel": "openclaw-weixin",
+  "channel_account_id": "salesperson-main",
+  "conversation_id": "demo_conv_apparel_01",
+  "message_id": "msg_supplier_highrisk_001",
+  "sender_id": "supplier_unknown_fake_001",
+  "sender_display_name": "Cheap Fake Goods Co",
+  "message_text": "We offer shirts USD 1.20/pc, no MOQ, ship in 5 days. Pay 100% upfront via WeChat Pay personal account. No sample needed, trust us. We also sell luxury brand replica goods at wholesale. Contact our private WhatsApp +86 138 0000 9999 to avoid platform fees.",
+  "message_type": "text",
+  "attachments": [],
+  "timestamp": "2026-06-14T11:00:00Z",
+  "role_context": "supplier",
+  "risk_signals": [
+    "off_platform_payment_pressure",
+    "price_too_low_vs_market",
+    "lead_time_too_aggressive",
+    "identity_unverified",
+    "replica_counterfeit_signal"
+  ],
+  "mode": "auto"
+}
