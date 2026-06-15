@@ -6,11 +6,11 @@ os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("AIVAN_HIDE_SUPPLIER_IDENTITY_FROM_BUYER", "false")
 os.environ.setdefault("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "false")
 
-from aiven.agents.buyer_option_agent import generate_buyer_options
-from aiven.schemas.requirement import BuyerRequirement
-from aiven.schemas.response import SupplierReply
-from aiven.schemas.leadtime import LeadTimeEstimate
-from aiven.leadtime.calculator import calculate_apparel_leadtime
+from aivan.agents.buyer_option_agent import generate_buyer_options
+from aivan.schemas.requirement import BuyerRequirement
+from aivan.schemas.response import SupplierReply
+from aivan.schemas.leadtime import LeadTimeEstimate
+from aivan.leadtime.calculator import calculate_apparel_leadtime
 
 
 def _make_requirement() -> BuyerRequirement:

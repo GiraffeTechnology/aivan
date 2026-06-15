@@ -1,7 +1,7 @@
 """Tests for aiven.risk.risk_scorer — score_supplier_risk()."""
 import pytest
-from aiven.risk.risk_scorer import score_supplier_risk
-from aiven.risk.models import SupplierRiskEvidence
+from aivan.risk.risk_scorer import score_supplier_risk
+from aivan.risk.models import SupplierRiskEvidence
 
 
 def _make_evidence(risk_signal: str, source_type: str = "web", reliability: float = 0.9) -> SupplierRiskEvidence:

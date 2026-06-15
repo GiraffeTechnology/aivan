@@ -1,7 +1,7 @@
 """Tests for aiven.openclaw.event_adapter."""
 import pytest
-from aiven.openclaw.event_adapter import parse_openclaw_event, is_customer_message, is_supplier_reply
-from aiven.openclaw.contracts import OpenClawEvent
+from aivan.openclaw.event_adapter import parse_openclaw_event, is_customer_message, is_supplier_reply
+from aivan.openclaw.contracts import OpenClawEvent
 
 
 FULL_CUSTOMER_EVENT = {

@@ -1,0 +1,72 @@
+{
+  "name": "@giraffetechnology/openclaw-aivan",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenClaw plugin bridge for AIVAN, a local-first AI trade salesperson assistant",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GiraffeTechnology/aivan.git"
+  },
+  "license": "MIT",
+  "author": "Giraffe Technology",
+  "keywords": [
+    "openclaw",
+    "clawhub",
+    "trade",
+    "sourcing",
+    "aivan",
+    "ai-agent"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "openclaw": {
+    "compat": {
+      "pluginApi": "1.0"
+    },
+    "build": {
+      "openclawVersion": ">=1.0.0"
+    },
+    "extensions": [
+      {
+        "id": "aivan.health",
+        "type": "command",
+        "description": "Check whether AIVAN local server is running"
+      },
+      {
+        "id": "aivan.forwardEvent",
+        "type": "event-handler",
+        "description": "Forward a normalised OpenClaw event to the local AIVAN endpoint"
+      },
+      {
+        "id": "aivan.openDashboard",
+        "type": "command",
+        "description": "Open the AIVAN local web dashboard"
+      },
+      {
+        "id": "aivan.getPendingDrafts",
+        "type": "query",
+        "description": "List outbound message drafts awaiting human approval"
+      },
+      {
+        "id": "aivan.approveDraft",
+        "type": "action",
+        "description": "Approve a pending outbound draft so AIVAN can send it via OpenClaw"
+      },
+      {
+        "id": "aivan.rejectDraft",
+        "type": "action",
+        "description": "Reject and discard a pending outbound draft"
+      }
+    ]
+  }
+}

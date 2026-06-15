@@ -1,7 +1,7 @@
 """Tests for aiven.platforms.domain_utils."""
 import pytest
-from aiven.platforms.domain_utils import normalize_domain, is_domain_allowed, detect_typosquatting
-from aiven.platforms.models import TrustedPlatform
+from aivan.platforms.domain_utils import normalize_domain, is_domain_allowed, detect_typosquatting
+from aivan.platforms.models import TrustedPlatform
 
 
 def _make_platform(domain_patterns: list[str]) -> TrustedPlatform:

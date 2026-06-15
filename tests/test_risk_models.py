@@ -1,6 +1,6 @@
 """Tests for aiven.risk.models — SupplierRiskEvidence and related models."""
 import pytest
-from aiven.risk.models import (
+from aivan.risk.models import (
     SupplierRiskEvidence,
     SupplierRiskScore,
     SupplierRiskReport,

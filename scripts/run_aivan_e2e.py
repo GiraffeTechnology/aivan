@@ -14,9 +14,9 @@ os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
 os.environ.setdefault("AIVAN_DB_URL", "sqlite:///./data/aiven_e2e.db")
 
 from aivan.db.session import init_db, db_session
-from aiven.openclaw.event_adapter import parse_openclaw_event
-from aiven.agents.trade_salesperson_agent import handle_trade_salesperson_event
-from aiven.platforms.platform_registry import _ensure_init
+from aivan.openclaw.event_adapter import parse_openclaw_event
+from aivan.agents.trade_salesperson_agent import handle_trade_salesperson_event
+from aivan.platforms.platform_registry import _ensure_init
 
 
 def _build_msg(base: dict, override: dict) -> dict:

@@ -430,6 +430,62 @@ AIVAN is a decision-support tool. It does not make final legal, credit, sanction
 
 ---
 
+## ClawHub / OpenClaw Plugin Publication
+
+AIVAN ships with a ready-to-publish ClawHub code plugin and an optional skill listing.
+
+### Prerequisites
+
+```bash
+npm install -g clawhub
+clawhub login
+clawhub whoami
+```
+
+### Validate before publishing
+
+```bash
+# Python validation (no npm required)
+python scripts/validate_clawhub_aivan_plugin.py
+
+# Smoke test against a running AIVAN mock server
+uv run aivan serve &
+python scripts/run_aivan_openclaw_plugin_smoke_test.py
+# Or: offline safe-failure checks only
+python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
+```
+
+### Publish the code plugin
+
+```bash
+# Dry run (validates without publishing)
+clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin --dry-run
+
+# Publish
+clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin
+```
+
+### Publish the optional skill listing
+
+```bash
+clawhub skill publish skills/aivan-trade-salesperson \
+  --slug aivan-trade-salesperson \
+  --name "AIVAN Trade Salesperson" \
+  --version 0.1.0 \
+  --changelog "Initial AIVAN ClawHub skill listing"
+```
+
+### Plugin package
+
+| Field | Value |
+|---|---|
+| Package name | `@giraffetechnology/openclaw-aivan` |
+| Plugin API compat | `1.0` |
+| OpenClaw version | `>=1.0.0` |
+| Skill slug | `aivan-trade-salesperson` |
+
+---
+
 ## License
 
 MIT License

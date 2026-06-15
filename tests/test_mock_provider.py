@@ -1,6 +1,6 @@
 """Tests for MockLLMProvider — verifies all major task types return dicts."""
 import pytest
-from aiven.llm.providers.mock_provider import MockLLMProvider
+from aivan.llm.providers.mock_provider import MockLLMProvider
 
 
 @pytest.fixture

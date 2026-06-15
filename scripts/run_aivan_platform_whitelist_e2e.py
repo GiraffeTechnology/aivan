@@ -13,8 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from aiven.platforms.whitelist import BUILT_IN_PLATFORMS
-from aiven.platforms.domain_utils import (
+from aivan.platforms.whitelist import BUILT_IN_PLATFORMS
+from aivan.platforms.domain_utils import (
     is_domain_allowed,
     normalize_domain,
     detect_typosquatting,

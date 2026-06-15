@@ -1,6 +1,6 @@
 """Tests for aiven.platforms.whitelist — built-in platform entries."""
 import pytest
-from aiven.platforms.whitelist import get_built_in_platforms, is_built_in, BUILT_IN_PLATFORMS
+from aivan.platforms.whitelist import get_built_in_platforms, is_built_in, BUILT_IN_PLATFORMS
 
 
 def test_alibaba_is_built_in():

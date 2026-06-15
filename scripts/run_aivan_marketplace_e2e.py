@@ -22,7 +22,7 @@ def main():
     # ------------------------------------------------------------------
     # 1. Verify Alibaba and AliExpress are in the built-in platform list
     # ------------------------------------------------------------------
-    from aiven.platforms.whitelist import BUILT_IN_PLATFORMS
+    from aivan.platforms.whitelist import BUILT_IN_PLATFORMS
 
     print("\n[1] Verifying built-in platform whitelist...")
     assert "alibaba" in BUILT_IN_PLATFORMS, "FAIL: 'alibaba' not in BUILT_IN_PLATFORMS"
@@ -33,8 +33,8 @@ def main():
     # ------------------------------------------------------------------
     # 2. Build marketplace search queries from a BuyerRequirement
     # ------------------------------------------------------------------
-    from aiven.schemas.requirement import BuyerRequirement
-    from aiven.sourcing.marketplaces.search_query_builder import build_marketplace_queries
+    from aivan.schemas.requirement import BuyerRequirement
+    from aivan.sourcing.marketplaces.search_query_builder import build_marketplace_queries
 
     req = BuyerRequirement(
         project_id="demo_marketplace_e2e_001",
@@ -63,7 +63,7 @@ def main():
     # ------------------------------------------------------------------
     # 3. Search Alibaba via mock connector
     # ------------------------------------------------------------------
-    from aiven.sourcing.marketplaces.alibaba_connector import search_alibaba
+    from aivan.sourcing.marketplaces.alibaba_connector import search_alibaba
 
     print("\n[3] Searching Alibaba (mock mode)...")
     results = search_alibaba(queries[0])
@@ -88,7 +88,7 @@ def main():
     # ------------------------------------------------------------------
     # 4. Risk-screen the top 2 candidates
     # ------------------------------------------------------------------
-    from aiven.risk.supplier_risk_agent import run_risk_screening
+    from aivan.risk.supplier_risk_agent import run_risk_screening
 
     print("\n[4] Running risk screening on top 2 candidates...")
     screened_count = 0
