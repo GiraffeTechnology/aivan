@@ -14,8 +14,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from aiven.risk.risk_scorer import score_supplier_risk
-from aiven.risk.models import SupplierRiskEvidence
+from aivan.risk.risk_scorer import score_supplier_risk
+from aivan.risk.models import SupplierRiskEvidence
 
 
 def _make_evidence(

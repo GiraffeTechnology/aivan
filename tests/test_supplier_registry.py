@@ -1,6 +1,6 @@
 """Tests for aiven.sourcing.supplier_registry."""
 import pytest
-from aiven.sourcing.supplier_registry import (
+from aivan.sourcing.supplier_registry import (
     register_supplier,
     get_supplier,
     list_suppliers,
@@ -8,7 +8,7 @@ from aiven.sourcing.supplier_registry import (
     count,
     clear_registry,
 )
-from aiven.sourcing.supplier_models import SupplierProfile
+from aivan.sourcing.supplier_models import SupplierProfile
 
 
 @pytest.fixture(autouse=True)

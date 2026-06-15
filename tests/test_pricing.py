@@ -1,6 +1,6 @@
 """Tests for aiven.pricing.quote_calculator."""
 import pytest
-from aiven.pricing.quote_calculator import calculate_buyer_quote, calculate_supplier_total
+from aivan.pricing.quote_calculator import calculate_buyer_quote, calculate_supplier_total
 
 
 # --- calculate_supplier_total ---

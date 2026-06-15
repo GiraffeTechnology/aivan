@@ -1,7 +1,7 @@
 """Tests for aiven.db.repositories.draft_repo — DraftRepository."""
 import pytest
-from aiven.db.repositories.draft_repo import DraftRepository
-from aiven.db.models.inquiry import InquiryDraftRecord
+from aivan.db.repositories.draft_repo import DraftRepository
+from aivan.db.models.inquiry import InquiryDraftRecord
 
 
 def _create_draft(repo: DraftRepository, project_id: str = "proj_001", message: str = "Hello supplier") -> InquiryDraftRecord:

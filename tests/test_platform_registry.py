@@ -1,6 +1,6 @@
 """Tests for aiven.platforms.platform_registry — PlatformRegistry."""
 import pytest
-from aiven.platforms.platform_registry import (
+from aivan.platforms.platform_registry import (
     get_platform,
     list_all_platforms,
     list_trusted_platforms,
@@ -9,8 +9,8 @@ from aiven.platforms.platform_registry import (
     add_platform,
     reset_registry,
 )
-from aiven.platforms.models import TrustedPlatform
-from aiven.utils.time_utils import utcnow_iso
+from aivan.platforms.models import TrustedPlatform
+from aivan.utils.time_utils import utcnow_iso
 
 
 @pytest.fixture(autouse=True)

@@ -4,7 +4,7 @@ import pytest
 
 os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 
-from aiven.llm.gateway import llm_complete_json, reset_provider
+from aivan.llm.gateway import llm_complete_json, reset_provider
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +59,7 @@ def test_llm_complete_json_falls_back_on_provider_error(monkeypatch):
         raise RuntimeError("Simulated provider failure")
 
     reset_provider()
-    from aiven.llm.gateway import get_provider
+    from aivan.llm.gateway import get_provider
     provider = get_provider()
     monkeypatch.setattr(provider, "complete_json", bad_complete)
 

@@ -1,6 +1,6 @@
 """Tests for aiven.schemas.requirement — BuyerRequirement and MissingField."""
 import pytest
-from aiven.schemas.requirement import BuyerRequirement, MissingField
+from aivan.schemas.requirement import BuyerRequirement, MissingField
 
 
 def test_buyer_requirement_complete():

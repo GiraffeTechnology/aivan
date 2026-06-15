@@ -1,6 +1,6 @@
 """Tests for aiven.leadtime.calculator — calculate_apparel_leadtime()."""
 import pytest
-from aiven.leadtime.calculator import calculate_apparel_leadtime
+from aivan.leadtime.calculator import calculate_apparel_leadtime
 
 
 def test_basic_sea_routing_returns_estimate():

@@ -7,7 +7,7 @@ os.environ.setdefault("AIVAN_REQUIRE_HUMAN_APPROVAL", "true")
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from aiven.db.models import Base
+from aivan.db.models import Base
 
 
 @pytest.fixture

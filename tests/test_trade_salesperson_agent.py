@@ -5,10 +5,10 @@ import pytest
 os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
 
-from aiven.agents.trade_salesperson_agent import handle_trade_salesperson_event, AgentTurnResult
-from aiven.openclaw.event_adapter import parse_openclaw_event
-from aiven.openclaw.contracts import OpenClawEvent
-from aiven.openclaw.binding_store import bind_conversation
+from aivan.agents.trade_salesperson_agent import handle_trade_salesperson_event, AgentTurnResult
+from aivan.openclaw.event_adapter import parse_openclaw_event
+from aivan.openclaw.contracts import OpenClawEvent
+from aivan.openclaw.binding_store import bind_conversation
 
 
 def _customer_event(conversation_id: str = "conv_test_001", message: str = "I need 10000 white cotton shirts") -> OpenClawEvent:
