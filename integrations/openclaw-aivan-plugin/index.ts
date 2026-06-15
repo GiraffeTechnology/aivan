@@ -32,7 +32,7 @@ function buildHeaders(): Record<string, string> {
   };
   const key = apiKey();
   if (key) {
-    headers["Authorization"] = `Bearer ${key}`;
+    headers["X-AIVAN-API-Key"] = key;
   }
   return headers;
 }

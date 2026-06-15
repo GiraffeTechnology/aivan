@@ -1,14 +1,13 @@
-"""Tests for aiven.db.repositories.draft_repo — DraftRepository."""
-import pytest
+"""Tests for aivan.db.repositories.draft_repo — DraftRepository."""
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.models.inquiry import InquiryDraftRecord
 
 
-def _create_draft(repo: DraftRepository, project_id: str = "proj_001", message: str = "Hello supplier") -> InquiryDraftRecord:
+def _create_draft(repo: DraftRepository, project_id: str = "proj_001", message_text: str = "Hello supplier") -> InquiryDraftRecord:
     return repo.create(
         project_id=project_id,
         data={
-            "message_text": message,
+            "message_text": message_text,
             "channel": "email",
             "target_peer_id": "supplier@example.com",
             "target_role": "supplier",
@@ -23,7 +22,7 @@ def test_create_draft(db_session):
     assert draft is not None
     assert draft.draft_id is not None
     assert draft.project_id == "proj_001"
-    assert draft.status == "pending"
+    assert draft.status == "pending_approval"
 
 
 def test_get_draft_by_id(db_session):
@@ -69,10 +68,9 @@ def test_approve_already_approved_does_nothing(db_session):
     repo = DraftRepository(db_session)
     draft = _create_draft(repo)
     repo.approve(draft.draft_id)
-    # Second approve should not change status (already approved, not pending)
+    # Second approve returns the draft unchanged (not pending_approval → no-op)
     result = repo.approve(draft.draft_id)
     assert result is not None
-    # Status remains approved (not reset)
     assert result.status == "approved"
 
 
@@ -85,12 +83,12 @@ def test_reject_draft(db_session):
 
 
 def test_reject_approved_draft_no_change(db_session):
-    """reject() only acts on pending drafts."""
+    """reject() only acts on pending_approval drafts; approved ones are untouched."""
     repo = DraftRepository(db_session)
     draft = _create_draft(repo)
     repo.approve(draft.draft_id)
     result = repo.reject(draft.draft_id)
-    # Should still be approved (not pending, so reject has no effect)
+    assert result is not None
     assert result.status == "approved"
 
 
@@ -117,16 +115,3 @@ def test_message_text_stored(db_session):
     draft = _create_draft(repo, message_text="Custom message for supplier")
     fetched = repo.get(draft.draft_id)
     assert fetched.message_text == "Custom message for supplier"
-
-
-def _create_draft(repo: DraftRepository, project_id: str = "proj_001", message_text: str = "Hello supplier") -> InquiryDraftRecord:
-    return repo.create(
-        project_id=project_id,
-        data={
-            "message_text": message_text,
-            "channel": "email",
-            "target_peer_id": "supplier@example.com",
-            "target_role": "supplier",
-            "created_by_agent": "test_agent",
-        },
-    )

@@ -92,7 +92,7 @@ clawhub package link .
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AIVAN_BASE_URL` | Yes | `http://127.0.0.1:8765` | URL of the local AIVAN server |
-| `AIVAN_API_KEY` | No | *(none)* | Optional bearer token if you enabled auth in `.env` |
+| `AIVAN_API_KEY` | No | *(none)* | Optional API key sent as `X-AIVAN-API-Key` header; set in AIVAN `.env` to enable auth |
 
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
 

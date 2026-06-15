@@ -78,7 +78,8 @@ check("Legal/compliance disclaimer present", "legal" in sec_text.lower())
 
 section("No secrets in tracked files")
 index_text = (PLUGIN_DIR / "index.ts").read_text() if (PLUGIN_DIR / "index.ts").is_file() else ""
-check("No hardcoded API key in index.ts", "sk-" not in index_text and "Bearer " not in index_text.replace("Bearer ${", ""))
+check("No hardcoded API key in index.ts", "sk-" not in index_text and "Authorization" not in index_text)
+check("AIVAN_API_KEY sent as X-AIVAN-API-Key header", 'X-AIVAN-API-Key' in index_text)
 check("AIVAN_API_KEY only read from env", 'process.env?.AIVAN_API_KEY' in index_text or 'process.env.AIVAN_API_KEY' in index_text)
 
 section("Skill listing")

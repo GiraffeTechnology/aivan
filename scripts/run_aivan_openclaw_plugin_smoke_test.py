@@ -53,8 +53,12 @@ def section(title: str) -> None:
 
 
 def http_get(url: str, timeout: int = 5) -> tuple[int, dict | None]:
+    req = urllib.request.Request(url)
+    key = os.environ.get("AIVAN_API_KEY")
+    if key:
+        req.add_header("X-AIVAN-API-Key", key)
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
         return e.code, None
@@ -68,7 +72,7 @@ def http_post(url: str, data: dict, timeout: int = 5) -> tuple[int, dict | None]
     req.add_header("Content-Type", "application/json")
     key = os.environ.get("AIVAN_API_KEY")
     if key:
-        req.add_header("Authorization", f"Bearer {key}")
+        req.add_header("X-AIVAN-API-Key", key)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read())
@@ -165,7 +169,7 @@ def main(offline: bool) -> None:
                 check("draft has message_text", "message_text" in d)
                 check("draft has status field", "status" in d)
                 status_val = d.get("status", "")
-                check("draft status is 'pending'", status_val == "pending",
+                check("draft status is 'pending_approval'", status_val == "pending_approval",
                       f"got '{status_val}'")
 
         section("Approval gate enforcement")

@@ -20,15 +20,23 @@ class DraftRepository:
     def list_pending(self, project_id: str) -> list[InquiryDraftRecord]:
         return self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.project_id == project_id,
-            InquiryDraftRecord.status == "pending"
+            InquiryDraftRecord.status == "pending_approval",
         ).order_by(InquiryDraftRecord.created_at.asc()).all()
 
     def list_all_pending(self) -> list[InquiryDraftRecord]:
-        return self.db.query(InquiryDraftRecord).filter(InquiryDraftRecord.status == "pending").order_by(InquiryDraftRecord.created_at.asc()).all()
+        return self.db.query(InquiryDraftRecord).filter(
+            InquiryDraftRecord.status == "pending_approval"
+        ).order_by(InquiryDraftRecord.created_at.asc()).all()
 
     def approve(self, draft_id: str, approved_by: str = "user") -> InquiryDraftRecord | None:
+        """Transition draft to 'approved'. Returns None if not found.
+        If the draft exists but is not in 'pending_approval' state, returns it
+        unchanged (caller checks .status to detect the conflict).
+        """
         d = self.get(draft_id)
-        if d and d.status == "pending":
+        if d is None:
+            return None
+        if d.status == "pending_approval":
             d.status = "approved"
             d.approved_by = approved_by
             d.approved_at = datetime.now(timezone.utc)
@@ -36,8 +44,14 @@ class DraftRepository:
         return d
 
     def reject(self, draft_id: str) -> InquiryDraftRecord | None:
+        """Transition draft to 'rejected'. Returns None if not found.
+        If the draft exists but is not in 'pending_approval' state, returns it
+        unchanged (caller checks .status to detect the conflict).
+        """
         d = self.get(draft_id)
-        if d and d.status == "pending":
+        if d is None:
+            return None
+        if d.status == "pending_approval":
             d.status = "rejected"
             self.db.flush()
         return d

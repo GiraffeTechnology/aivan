@@ -15,7 +15,7 @@ class InquiryDraftRecord(Base):
     message_text: Mapped[str] = mapped_column(Text, default="")
     message_type: Mapped[str] = mapped_column(String(64), default="text")
     attachments_json: Mapped[list] = mapped_column(JSON, default=list)
-    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending_approval", index=True)
     created_by_agent: Mapped[str] = mapped_column(String(128), default="")
     approved_by: Mapped[str] = mapped_column(String(128), default="")
     notes: Mapped[str] = mapped_column(Text, default="")

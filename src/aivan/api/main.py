@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import secrets
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +14,18 @@ from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
+
+
+def _require_api_key(request: Request) -> None:
+    """Enforce X-AIVAN-API-Key when AIVAN_API_KEY is configured."""
+    configured = os.environ.get("AIVAN_API_KEY", "").strip()
+    if not configured:
+        return  # auth not enabled
+    provided = request.headers.get("X-AIVAN-API-Key", "").strip()
+    if not provided:
+        raise HTTPException(status_code=401, detail="Missing X-AIVAN-API-Key header")
+    if not secrets.compare_digest(provided, configured):
+        raise HTTPException(status_code=403, detail="Invalid API key")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,6 +55,7 @@ except Exception:
     pass
 
 @app.get("/health")
+@app.get("/api/health")
 def health():
     return {"status": "ok", "product": "AIVAN", "version": "0.1.0"}
 
@@ -51,7 +65,11 @@ def serve_app(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "title": "AIVAN"})
 
 @app.post("/api/openclaw/events")
-def openclaw_event(event_data: dict, db: Session = Depends(get_db)):
+def openclaw_event(
+    event_data: dict,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
     try:
         from aivan.openclaw.event_adapter import parse_openclaw_event
         from aivan.agents.trade_salesperson_agent import handle_trade_salesperson_event
@@ -71,29 +89,111 @@ def openclaw_event(event_data: dict, db: Session = Depends(get_db)):
 def skill_invoke(event_data: dict, db: Session = Depends(get_db)):
     return openclaw_event(event_data, db)
 
-@app.post("/api/openclaw/drafts/{draft_id}/approve")
-def approve_draft(draft_id: str, body: dict = None, db: Session = Depends(get_db)):
+
+def _do_approve_draft(draft_id: str, body: dict | None, db: Session) -> dict:
     repo = DraftRepository(db)
+    draft = repo.get(draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found")
+    if draft.status != "pending_approval":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Draft {draft_id} cannot be approved: current status is '{draft.status}'",
+        )
     approved_by = (body or {}).get("approved_by", "user")
-    draft = repo.approve(draft_id, approved_by)
-    if not draft:
-        raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found or not pending")
+    repo.approve(draft_id, approved_by)
     from aivan.openclaw.outbound_approval import send_if_approved
     response = send_if_approved(draft_id, db)
     db.commit()
     return {"draft_id": draft_id, "status": "approved", "sent": response.success, "error": response.error}
 
-@app.post("/api/openclaw/drafts/{draft_id}/reject")
-def reject_draft(draft_id: str, db: Session = Depends(get_db)):
+
+def _do_reject_draft(draft_id: str, db: Session) -> dict:
     repo = DraftRepository(db)
-    draft = repo.reject(draft_id)
-    if not draft:
+    draft = repo.get(draft_id)
+    if draft is None:
         raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found")
+    if draft.status != "pending_approval":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Draft {draft_id} cannot be rejected: current status is '{draft.status}'",
+        )
+    repo.reject(draft_id)
     db.commit()
     return {"draft_id": draft_id, "status": "rejected"}
 
+
+@app.post("/api/openclaw/drafts/{draft_id}/approve")
+def approve_draft(
+    draft_id: str,
+    body: dict = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    return _do_approve_draft(draft_id, body, db)
+
+
+@app.post("/api/openclaw/drafts/{draft_id}/reject")
+def reject_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    return _do_reject_draft(draft_id, db)
+
+
+# Short-form aliases used by the OpenClaw plugin and dashboard
+@app.post("/api/drafts/{draft_id}/approve")
+def approve_draft_alias(
+    draft_id: str,
+    body: dict = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    return _do_approve_draft(draft_id, body, db)
+
+
+@app.post("/api/drafts/{draft_id}/reject")
+def reject_draft_alias(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    return _do_reject_draft(draft_id, db)
+
+
+@app.get("/api/drafts")
+def list_all_drafts(
+    project_id: str | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    repo = DraftRepository(db)
+    if project_id:
+        drafts = repo.list_pending(project_id)
+    else:
+        drafts = repo.list_all_pending()
+    return {"drafts": [
+        {
+            "draft_id": d.draft_id,
+            "project_id": d.project_id,
+            "channel": d.channel,
+            "target_role": d.target_role,
+            "message_text": d.message_text[:200],
+            "created_by_agent": d.created_by_agent,
+            "status": d.status,
+            "created_at": str(d.created_at),
+        }
+        for d in drafts
+    ]}
+
+
 @app.get("/api/openclaw/projects/{project_id}/pending-drafts")
-def get_pending_drafts(project_id: str, db: Session = Depends(get_db)):
+def get_pending_drafts(
+    project_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
     repo = DraftRepository(db)
     drafts = repo.list_pending(project_id)
     return {"project_id": project_id, "drafts": [
@@ -102,7 +202,7 @@ def get_pending_drafts(project_id: str, db: Session = Depends(get_db)):
     ]}
 
 @app.get("/api/openclaw/projects/{project_id}/state")
-def get_project_state(project_id: str, db: Session = Depends(get_db)):
+def get_project_state(project_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     repo = ProjectRepository(db)
     project = repo.get(project_id)
     if not project:
@@ -243,7 +343,7 @@ def get_project_options(project_id: str, db: Session = Depends(get_db)):
     return {"project_id": project_id, "selected_option": project.selected_option_json}
 
 @app.post("/api/openclaw/accounts/register")
-def register_account(body: dict, db: Session = Depends(get_db)):
+def register_account(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.openclaw.account_delegation import register_account
     try:
         account = register_account(db, body)
@@ -253,13 +353,13 @@ def register_account(body: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/openclaw/accounts")
-def list_accounts(db: Session = Depends(get_db)):
+def list_accounts(db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.openclaw.account_delegation import list_accounts
     accounts = list_accounts(db)
     return {"accounts": [a.model_dump() for a in accounts]}
 
 @app.get("/api/openclaw/accounts/{account_connection_id}")
-def get_account(account_connection_id: str, db: Session = Depends(get_db)):
+def get_account(account_connection_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db)
     account = repo.get(account_connection_id)
@@ -268,14 +368,14 @@ def get_account(account_connection_id: str, db: Session = Depends(get_db)):
     return {"account_connection_id": account.account_connection_id, "platform": account.platform, "status": account.status, "permissions": account.permissions_json}
 
 @app.post("/api/openclaw/accounts/{account_connection_id}/revoke")
-def revoke_account(account_connection_id: str, db: Session = Depends(get_db)):
+def revoke_account(account_connection_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.openclaw.account_delegation import revoke_account
     revoked = revoke_account(db, account_connection_id)
     db.commit()
     return {"account_connection_id": account_connection_id, "revoked": revoked}
 
 @app.get("/api/openclaw/accounts/{account_connection_id}/permissions")
-def get_account_permissions(account_connection_id: str, db: Session = Depends(get_db)):
+def get_account_permissions(account_connection_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db)
     account = repo.get(account_connection_id)
