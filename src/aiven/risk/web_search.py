@@ -58,7 +58,7 @@ class MockWebSearchProvider(WebSearchProvider):
         return FetchedPage(url=url, title="Mock Page", content="Mock content for testing.", fetched_at=utcnow_iso())
 
 def get_web_search_provider(risk_profile: str = "medium") -> WebSearchProvider:
-    provider_name = os.environ.get("AIVEN_WEB_SEARCH_PROVIDER", "mock").lower()
+    provider_name = os.environ.get("AIVAN_WEB_SEARCH_PROVIDER", "mock").lower()
     if provider_name == "mock":
         return MockWebSearchProvider(risk_profile=risk_profile)
     return MockWebSearchProvider(risk_profile=risk_profile)

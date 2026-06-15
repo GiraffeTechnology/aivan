@@ -10,7 +10,7 @@ class DeepSeekProvider(LLMProvider):
         self.api_key = os.environ.get("DEEPSEEK_API_KEY", "")
         self.base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         self.model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-        self.timeout = int(os.environ.get("AIVEN_LLM_TIMEOUT_SECONDS", "30"))
+        self.timeout = int(os.environ.get("AIVAN_LLM_TIMEOUT_SECONDS", "30"))
 
     def complete_json(self, task: str, system_prompt: str, user_prompt: str, schema_hint: dict, temperature: float = 0.0) -> dict:
         if not self.api_key:

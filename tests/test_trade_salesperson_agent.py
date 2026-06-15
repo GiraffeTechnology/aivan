@@ -2,7 +2,7 @@
 import os
 import pytest
 
-os.environ.setdefault("AIVEN_LLM_PROVIDER", "mock")
+os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
 
 from aiven.agents.trade_salesperson_agent import handle_trade_salesperson_event, AgentTurnResult

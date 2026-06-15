@@ -30,7 +30,7 @@ class OpenClawSearchProvider(WebSearchProvider):
         return FetchedPage(url=url, content="", fetched_at=utcnow_iso(), error="fetch not implemented in mock")
 
 def get_search_provider_for_risk(supplier_name: str = "") -> WebSearchProvider:
-    provider_name = os.environ.get("AIVEN_WEB_SEARCH_PROVIDER", "mock").lower()
+    provider_name = os.environ.get("AIVAN_WEB_SEARCH_PROVIDER", "mock").lower()
     if provider_name == "mock":
         return MockWebSearchProvider()
     elif provider_name == "openclaw_search":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AIVEN Core E2E Test - Trade Salesperson Flow
+"""AIVAN Core E2E Test - Trade Salesperson Flow
 
 Tests the full buyer-inquiry → structured-requirement → supplier-inquiry →
 supplier-reply → Top-3 buyer options pipeline using mock providers.
@@ -9,11 +9,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-os.environ.setdefault("AIVEN_LLM_PROVIDER", "mock")
+os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
-os.environ.setdefault("AIVEN_DB_URL", "sqlite:///./data/aiven_e2e.db")
+os.environ.setdefault("AIVAN_DB_URL", "sqlite:///./data/aiven_e2e.db")
 
-from aiven.db.session import init_db, db_session
+from aivan.db.session import init_db, db_session
 from aiven.openclaw.event_adapter import parse_openclaw_event
 from aiven.agents.trade_salesperson_agent import handle_trade_salesperson_event
 from aiven.platforms.platform_registry import _ensure_init
@@ -27,7 +27,7 @@ def _build_msg(base: dict, override: dict) -> dict:
 
 def main():
     print("=" * 60)
-    print("AIVEN CORE E2E: Trade Salesperson Flow")
+    print("AIVAN CORE E2E: Trade Salesperson Flow")
     print("=" * 60)
 
     os.makedirs("data", exist_ok=True)
@@ -149,7 +149,7 @@ def main():
     # Done
     # ---------------------------------------------------------------------------
     print("\n" + "=" * 60)
-    print("AIVEN CORE E2E: PASS")
+    print("AIVAN CORE E2E: PASS")
     print("=" * 60)
 
 

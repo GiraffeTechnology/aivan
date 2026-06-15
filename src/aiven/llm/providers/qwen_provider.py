@@ -10,7 +10,7 @@ class QwenProvider(LLMProvider):
         self.api_key = os.environ.get("QWEN_API_KEY", "")
         self.base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.model = os.environ.get("QWEN_MODEL", "qwen-turbo")
-        self.timeout = int(os.environ.get("AIVEN_LLM_TIMEOUT_SECONDS", "30"))
+        self.timeout = int(os.environ.get("AIVAN_LLM_TIMEOUT_SECONDS", "30"))
 
     def complete_json(self, task: str, system_prompt: str, user_prompt: str, schema_hint: dict, temperature: float = 0.0) -> dict:
         if not self.api_key:

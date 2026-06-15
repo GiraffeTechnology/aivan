@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AIVEN Unknown Supplier Risk E2E
+"""AIVAN Unknown Supplier Risk E2E
 
 Tests the risk scorer (aiven.risk.risk_scorer.score_supplier_risk) with four
 distinct evidence scenarios:
@@ -40,7 +40,7 @@ def _make_evidence(
 
 def main():
     print("=" * 60)
-    print("AIVEN RISK SCREENING E2E")
+    print("AIVAN RISK SCREENING E2E")
     print("=" * 60)
 
     # ------------------------------------------------------------------
@@ -184,7 +184,7 @@ def main():
     # Done
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
-    print("AIVEN RISK E2E: PASS")
+    print("AIVAN RISK E2E: PASS")
     print("=" * 60)
 
 

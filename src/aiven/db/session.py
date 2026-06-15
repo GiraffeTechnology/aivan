@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 
 def _get_db_url() -> str:
-    url = os.environ.get("AIVEN_DB_URL", "sqlite:///./data/aiven.db")
+    url = os.environ.get("AIVAN_DB_URL", "sqlite:///./data/aiven.db")
     return url
 
 def _make_engine():

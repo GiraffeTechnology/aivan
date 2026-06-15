@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AIVEN Marketplace E2E - Alibaba Discovery Flow
+"""AIVAN Marketplace E2E - Alibaba Discovery Flow
 
 Tests the marketplace sourcing pipeline:
   build queries → search Alibaba (mock) → risk-screen top candidates → verify results.
@@ -9,14 +9,14 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-os.environ.setdefault("AIVEN_LLM_PROVIDER", "mock")
+os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
-os.environ.setdefault("AIVEN_ALIBABA_MODE", "mock")
+os.environ.setdefault("AIVAN_ALIBABA_MODE", "mock")
 
 
 def main():
     print("=" * 60)
-    print("AIVEN MARKETPLACE E2E: Alibaba Discovery")
+    print("AIVAN MARKETPLACE E2E: Alibaba Discovery")
     print("=" * 60)
 
     # ------------------------------------------------------------------
@@ -117,7 +117,7 @@ def main():
     # Done
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
-    print("AIVEN MARKETPLACE E2E: PASS")
+    print("AIVAN MARKETPLACE E2E: PASS")
     print("=" * 60)
 
 

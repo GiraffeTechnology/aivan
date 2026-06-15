@@ -2,9 +2,9 @@
 import os
 import pytest
 
-os.environ.setdefault("AIVEN_LLM_PROVIDER", "mock")
-os.environ.setdefault("AIVEN_HIDE_SUPPLIER_IDENTITY_FROM_BUYER", "false")
-os.environ.setdefault("AIVEN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "false")
+os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
+os.environ.setdefault("AIVAN_HIDE_SUPPLIER_IDENTITY_FROM_BUYER", "false")
+os.environ.setdefault("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "false")
 
 from aiven.agents.buyer_option_agent import generate_buyer_options
 from aiven.schemas.requirement import BuyerRequirement

@@ -33,7 +33,7 @@ def run_risk_screening(
     risk_profile: str = "medium",
 ) -> SupplierRiskReport:
     """Run a full risk screening for an unknown supplier."""
-    if not os.environ.get("AIVEN_ENABLE_UNKNOWN_SUPPLIER_RISK_SEARCH", "true").lower() == "true":
+    if not os.environ.get("AIVAN_ENABLE_UNKNOWN_SUPPLIER_RISK_SEARCH", "true").lower() == "true":
         from aiven.risk.models import SupplierRiskScore
         return SupplierRiskReport(
             report_id=new_risk_report_id(),

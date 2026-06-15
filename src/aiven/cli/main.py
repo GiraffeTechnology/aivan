@@ -16,8 +16,8 @@ def cmd_init(args):
 
 def cmd_serve(args):
     import uvicorn
-    host = os.environ.get("AIVEN_HOST", "127.0.0.1")
-    port = int(os.environ.get("AIVEN_PORT", "8765"))
+    host = os.environ.get("AIVAN_HOST", "127.0.0.1")
+    port = int(os.environ.get("AIVAN_PORT", "8765"))
     print(f"Starting AIVEN on http://{host}:{port}/app")
     uvicorn.run("aiven.api.main:app", host=host, port=port, reload=False)
 

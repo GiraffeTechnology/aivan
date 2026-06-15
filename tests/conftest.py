@@ -1,8 +1,8 @@
 import os
-os.environ.setdefault("AIVEN_LLM_PROVIDER", "mock")
+os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
-os.environ.setdefault("AIVEN_DB_URL", "sqlite:///:memory:")
-os.environ.setdefault("AIVEN_REQUIRE_HUMAN_APPROVAL", "true")
+os.environ.setdefault("AIVAN_DB_URL", "sqlite:///:memory:")
+os.environ.setdefault("AIVAN_REQUIRE_HUMAN_APPROVAL", "true")
 
 import pytest
 from sqlalchemy import create_engine

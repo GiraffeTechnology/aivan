@@ -4,7 +4,7 @@ from aiven.openclaw.contracts import OpenClawSendRequest, OpenClawSendResponse
 from aiven.openclaw.client import get_openclaw_client
 
 def require_human_approval() -> bool:
-    return os.environ.get("AIVEN_REQUIRE_HUMAN_APPROVAL", "true").lower() == "true"
+    return os.environ.get("AIVAN_REQUIRE_HUMAN_APPROVAL", "true").lower() == "true"
 
 def send_if_approved(draft_id: str, db_session) -> OpenClawSendResponse:
     """Send a draft message if it has been approved. Used after human approves."""

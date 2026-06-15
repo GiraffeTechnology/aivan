@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AIVEN Platform Whitelist E2E
+"""AIVAN Platform Whitelist E2E
 
 Verifies:
   1. Built-in platforms (alibaba, aliexpress) are present
@@ -32,7 +32,7 @@ def _check(label: str, result, expected):
 
 def main():
     print("=" * 60)
-    print("AIVEN PLATFORM WHITELIST E2E")
+    print("AIVAN PLATFORM WHITELIST E2E")
     print("=" * 60)
 
     alibaba_platform = BUILT_IN_PLATFORMS["alibaba"]
@@ -133,7 +133,7 @@ def main():
     # Done
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
-    print("AIVEN PLATFORM WHITELIST E2E: PASS")
+    print("AIVAN PLATFORM WHITELIST E2E: PASS")
     print("=" * 60)
 
 

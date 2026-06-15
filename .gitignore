@@ -59,7 +59,7 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-data/aiven.db
+data/aivan.db
 data/*.db
 logs/
 *.log

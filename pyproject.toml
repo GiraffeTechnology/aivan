@@ -1,7 +1,7 @@
 [project]
-name = "aiven"
+name = "aivan"
 version = "0.1.0"
-description = "AIVEN - local-first AI trade salesperson assistant powered by OpenClaw and multi-LLM orchestration"
+description = "AIVAN - local-first AI trade salesperson assistant powered by OpenClaw and multi-LLM orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-aiven = "aiven.cli.main:main"
+aivan = "aiven.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

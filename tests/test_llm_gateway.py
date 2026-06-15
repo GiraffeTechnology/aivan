@@ -2,7 +2,7 @@
 import os
 import pytest
 
-os.environ.setdefault("AIVEN_LLM_PROVIDER", "mock")
+os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 
 from aiven.llm.gateway import llm_complete_json, reset_provider
 

@@ -36,5 +36,5 @@ def format_risk_report_text(report: SupplierRiskReport) -> str:
 
 def should_block_supplier(report: SupplierRiskReport) -> bool:
     import os
-    block_critical = os.environ.get("AIVEN_BLOCK_CRITICAL_RISK_SUPPLIERS", "false").lower() == "true"
+    block_critical = os.environ.get("AIVAN_BLOCK_CRITICAL_RISK_SUPPLIERS", "false").lower() == "true"
     return block_critical and report.risk_score.risk_level == "critical"

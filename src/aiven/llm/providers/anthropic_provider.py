@@ -9,7 +9,7 @@ class AnthropicProvider(LLMProvider):
     def __init__(self):
         self.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self.model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-        self.timeout = int(os.environ.get("AIVEN_LLM_TIMEOUT_SECONDS", "30"))
+        self.timeout = int(os.environ.get("AIVAN_LLM_TIMEOUT_SECONDS", "30"))
 
     def complete_json(self, task: str, system_prompt: str, user_prompt: str, schema_hint: dict, temperature: float = 0.0) -> dict:
         if not self.api_key:

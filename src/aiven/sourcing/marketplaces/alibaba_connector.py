@@ -122,7 +122,7 @@ def search_alibaba_mock(query: str, platform: str = "alibaba", limit: int = 5) -
     )
 
 def search_alibaba(query: str, platform: str = "alibaba", limit: int = 10) -> SearchResult:
-    mode = os.environ.get("AIVEN_ALIBABA_MODE", "mock").lower()
+    mode = os.environ.get("AIVAN_ALIBABA_MODE", "mock").lower()
     if mode == "mock":
         return search_alibaba_mock(query, platform, limit)
-    return SearchResult(query=query, platform=platform, connector_mode="not_configured", error="Alibaba API not configured. Set AIVEN_ALIBABA_MODE=official_api and provide credentials.")
+    return SearchResult(query=query, platform=platform, connector_mode="not_configured", error="Alibaba API not configured. Set AIVAN_ALIBABA_MODE=official_api and provide credentials.")

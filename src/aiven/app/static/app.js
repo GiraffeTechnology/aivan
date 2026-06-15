@@ -1,4 +1,4 @@
-// AIVEN Frontend Application
+// AIVAN Frontend Application
 
 function showPanel(name) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -93,7 +93,7 @@ async function loadSuppliers() {
     try {
         const data = await apiFetch('/api/suppliers');
         if (!data.suppliers.length) {
-            list.innerHTML = '<p style="color:#888">No suppliers loaded. Run: uv run aiven import-suppliers data/sample_suppliers.csv</p>';
+            list.innerHTML = '<p style="color:#888">No suppliers loaded. Run: uv run aivan import-suppliers data/sample_suppliers.csv</p>';
             return;
         }
         list.innerHTML = data.suppliers.map(s => `
@@ -160,7 +160,7 @@ async function loadAccounts() {
     try {
         const data = await apiFetch('/api/openclaw/accounts');
         if (!data.accounts.length) {
-            list.innerHTML = '<p style="color:#888">No OpenClaw accounts registered. AIVEN does not store platform credentials — accounts are managed by OpenClaw.</p>';
+            list.innerHTML = '<p style="color:#888">No OpenClaw accounts registered. AIVAN does not store platform credentials — accounts are managed by OpenClaw.</p>';
             return;
         }
         list.innerHTML = data.accounts.map(a => `

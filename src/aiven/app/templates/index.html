@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIVEN - AI Trade Salesperson</title>
+    <title>AIVAN - AI Trade Salesperson</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
-    <h1>AIVEN <span class="badge">AI Trade Salesperson</span></h1>
+    <h1>AIVAN <span class="badge">AI Trade Salesperson</span></h1>
     <nav>
         <button onclick="showPanel('projects')">Projects</button>
         <button onclick="showPanel('messages')">Messages</button>
@@ -21,10 +21,10 @@
 </header>
 
 <div class="warning-banner">
-    ⚠️ AIVEN does not store your platform passwords. Accounts are managed by OpenClaw. All outbound messages require your approval before sending.
+    ⚠️ AIVAN does not store your platform passwords. Accounts are managed by OpenClaw. All outbound messages require your approval before sending.
 </div>
 <div class="warning-banner info">
-    ℹ️ Adding a platform to the whitelist only means AIVEN may use it as a supplier source. It does not mean suppliers on that platform are automatically trusted.
+    ℹ️ Adding a platform to the whitelist only means AIVAN may use it as a supplier source. It does not mean suppliers on that platform are automatically trusted.
 </div>
 
 <main>
@@ -43,7 +43,7 @@
             <textarea id="msg-text" rows="4" placeholder="e.g. 我需要采购10000件白色纯棉男士衬衣..."></textarea>
             <input id="msg-conv" placeholder="Conversation ID" value="conv_demo_001">
             <input id="msg-sender" placeholder="Sender ID" value="customer_001">
-            <button onclick="sendMessage()">Send to AIVEN</button>
+            <button onclick="sendMessage()">Send to AIVAN</button>
         </div>
         <div id="message-result" class="result-box"></div>
     </div>
@@ -91,7 +91,7 @@
 </main>
 
 <footer>
-    <p>AIVEN v0.1.0 — Local-first AI Trade Salesperson. All data stays on your machine.</p>
+    <p>AIVAN v0.1.0 — Local-first AI Trade Salesperson. All data stays on your machine.</p>
 </footer>
 
 <script src="/static/app.js"></script>
