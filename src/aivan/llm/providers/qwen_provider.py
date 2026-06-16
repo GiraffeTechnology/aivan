@@ -42,6 +42,13 @@ class QwenProvider(LLMProvider):
                 response = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
                 response.raise_for_status()
                 return response.json()
+            except httpx.HTTPStatusError as exc:
+                # 4xx errors (bad request, invalid image size, auth, etc.) are not transient — retrying wastes quota.
+                if 400 <= exc.response.status_code < 500:
+                    raise RuntimeError(f"Qwen API rejected the request: {exc.response.text}") from exc
+                last_exc = exc
+                if attempt < self.max_retries:
+                    time.sleep(2 ** attempt)
             except Exception as exc:
                 last_exc = exc
                 if attempt < self.max_retries:
