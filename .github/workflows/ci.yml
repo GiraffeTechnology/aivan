@@ -66,7 +66,16 @@ jobs:
         run: |
           python - << 'EOF'
           import os, re, sys
-          BIDI = re.compile('[​-‏‪-‮⁠-⁩﻿]')
+          # Build pattern with chr() so this file stays pure ASCII.
+          # Ranges: U+200B-200F, U+202A-202E, U+2060-2069, U+FEFF
+          BIDI = re.compile(
+              '['
+              + chr(0x200b) + '-' + chr(0x200f)
+              + chr(0x202a) + '-' + chr(0x202e)
+              + chr(0x2060) + '-' + chr(0x2069)
+              + chr(0xfeff)
+              + ']'
+          )
           bad = []
           for root, dirs, files in os.walk('.'):
               dirs[:] = [d for d in dirs if d not in ('.git', '.venv', '__pycache__', 'node_modules', 'dist')]
