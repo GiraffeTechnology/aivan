@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, JSON
+from sqlalchemy import String, Text, DateTime, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from aivan.db.models import Base
+
 
 class ExecutionEventRecord(Base):
     __tablename__ = "execution_events"
@@ -12,4 +13,9 @@ class ExecutionEventRecord(Base):
     actor: Mapped[str] = mapped_column(String(128), default="system")
     summary: Mapped[str] = mapped_column(Text, default="")
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    # Reversal support: reversal events reference the original; original gets superseded=True
+    references_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    superseded: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )

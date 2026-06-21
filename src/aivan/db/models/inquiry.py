@@ -3,6 +3,15 @@ from sqlalchemy import String, Text, DateTime, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from aivan.db.models import Base
 
+
+# Draft status machine:
+#   pending_approval
+#     -> approved -> sent           (auto channels: email, line)
+#     -> approved -> awaiting_relay (guided-relay: wechat, wangwang)
+#                    -> relayed
+#     -> approved -> send_failed    (auto channels: delivery error)
+#     -> rejected
+
 class InquiryDraftRecord(Base):
     __tablename__ = "inquiry_drafts"
 
@@ -19,6 +28,17 @@ class InquiryDraftRecord(Base):
     created_by_agent: Mapped[str] = mapped_column(String(128), default="")
     approved_by: Mapped[str] = mapped_column(String(128), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # Auto-channel send receipt (message_id, sent_at from adapter)
+    sent_receipt_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Guided-relay confirmation
+    relay_confirmed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    relay_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Delivery failure reason
+    send_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Tracks which inbound event caused this draft (for reversal cascade)
+    derived_from_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
