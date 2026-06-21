@@ -139,18 +139,21 @@ export function openDashboard(): { url: string } {
   return { url: `${baseUrl()}/app` };
 }
 
+// Element type for the drafts array returned by getPendingDrafts.
+type DraftItem = {
+  draft_id: string;
+  project_id: string;
+  channel: string;
+  target_role: string;
+  message_text: string;
+  created_at: string;
+};
+
 /**
  * aivan.getPendingDrafts — List outbound drafts awaiting human approval.
  */
 export async function getPendingDrafts(projectId?: string): Promise<{
-  drafts: Array<{
-    draft_id: string;
-    project_id: string;
-    channel: string;
-    target_role: string;
-    message_text: string;
-    created_at: string;
-  }>;
+  drafts: DraftItem[];
   error?: string;
 }> {
   const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
@@ -159,18 +162,8 @@ export async function getPendingDrafts(projectId?: string): Promise<{
     return { drafts: [], error: "Failed to fetch drafts" };
   }
   const d = result.data as Record<string, unknown>;
-  return { drafts: (d["drafts"] as typeof drafts) ?? [] };
+  return { drafts: (d["drafts"] as DraftItem[]) ?? [] };
 }
-
-// TypeScript helper — mirrors the drafts array element type
-type drafts = Array<{
-  draft_id: string;
-  project_id: string;
-  channel: string;
-  target_role: string;
-  message_text: string;
-  created_at: string;
-}>;
 
 /**
  * aivan.approveDraft — Approve a pending draft for sending.

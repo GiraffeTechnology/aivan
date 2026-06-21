@@ -7,6 +7,25 @@ import os
 import pytest
 from aivan.channels.line import send_line_push, verify_line_signature
 
+_LINE_ENV_KEYS = (
+    "AIVAN_LINE_ENABLED",
+    "AIVAN_LINE_MODE",
+    "LINE_CHANNEL_ACCESS_TOKEN",
+    "LINE_CHANNEL_SECRET",
+)
+
+
+@pytest.fixture(autouse=True)
+def restore_line_env():
+    """Restore LINE env vars after each test so they don't pollute sibling tests."""
+    saved = {k: os.environ.get(k) for k in _LINE_ENV_KEYS}
+    yield
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
 
 def test_line_disabled_by_default():
     os.environ.pop("AIVAN_LINE_ENABLED", None)
