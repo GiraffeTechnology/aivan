@@ -1,5 +1,8 @@
 """Tests for LINE Push adapter (Workstream B)."""
 from __future__ import annotations
+import base64
+import hashlib
+import hmac
 import os
 import pytest
 from aivan.channels.line import send_line_push, verify_line_signature
@@ -36,11 +39,10 @@ def test_verify_signature_no_secret():
 
 
 def test_verify_signature_correct():
-    import hmac, hashlib, base64
     secret = "test_secret_key"
     os.environ["LINE_CHANNEL_SECRET"] = secret
     body = b'{"events":[]}'
-    digest = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+    digest = hmac.HMAC(secret.encode(), body, hashlib.sha256).digest()
     signature = base64.b64encode(digest).decode()
     assert verify_line_signature(body, signature)
 

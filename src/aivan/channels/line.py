@@ -25,9 +25,9 @@ def send_line_push(user_id: str, message_text: str) -> LineSendResult:
     """Push a text message to a LINE userId via the official Push API.
 
     - AIVAN_LINE_ENABLED must be 'true'.
-    - AIVAN_LINE_MODE=mock (default) returns a stub response without hitting api.line.me.
-    - 429 responses trigger exponential back-off retry (2s, 4s, 8s).
-    - Any non-200 / non-429 error is returned as a structured failure; errors are never swallowed.
+    - AIVAN_LINE_MODE=mock (default) returns a stub without hitting api.line.me.
+    - 429 responses trigger exponential back-off retry (2 s, 4 s, 8 s).
+    - Non-200 / non-429 errors are returned as structured failures; never swallowed.
     """
     from aivan.utils.time_utils import utcnow_iso
 
@@ -80,10 +80,10 @@ def send_line_push(user_id: str, message_text: str) -> LineSendResult:
 
 
 def verify_line_signature(body: bytes, x_line_signature: str) -> bool:
-    """Verify the HMAC-SHA256 signature sent by LINE webhook."""
+    """Verify the HMAC-SHA256 signature sent by the LINE webhook."""
     secret = os.environ.get("LINE_CHANNEL_SECRET", "")
     if not secret:
         return False
-    digest = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+    digest = hmac.HMAC(secret.encode(), body, hashlib.sha256).digest()
     expected = base64.b64encode(digest).decode()
     return hmac.compare_digest(expected, x_line_signature)

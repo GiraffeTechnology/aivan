@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 import secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Request, Header
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
@@ -239,7 +239,7 @@ def relay_outbox(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    """List drafts waiting for human relay (awaiting_relay)."""
+    """List drafts waiting for human relay (status=awaiting_relay)."""
     repo = DraftRepository(db)
     cards = repo.list_awaiting_relay()
     return {"relay_cards": [
@@ -262,7 +262,7 @@ def relay_confirm(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    """Human confirms they have manually sent the relay card message."""
+    """Human confirms they have manually forwarded the relay message."""
     repo = DraftRepository(db)
     draft = repo.get(draft_id)
     if draft is None:
@@ -286,30 +286,25 @@ def relay_inbound(
 ):
     """Paste a counterparty reply into AIVAN from the Giraffe relay UI.
 
-    body: { thread_id, counterparty_id, pasted_text, channel? }
-
-    The pasted text is recorded as an InboundRelayEvent and then fed into
-    the trade-salesperson pipeline as a synthetic inbound event.
+    body: { thread_id, counterparty_id, pasted_text, channel?, role_context? }
+    The text is recorded, linked to an execution event, and fed into the pipeline.
     """
-    thread_id = body.get("thread_id", "")
-    counterparty_id = body.get("counterparty_id", "")
-    pasted_text = body.get("pasted_text", "").strip()
-    channel = body.get("channel", "")
+    thread_id = (body.get("thread_id") or "").strip()
+    counterparty_id = (body.get("counterparty_id") or "").strip()
+    pasted_text = (body.get("pasted_text") or "").strip()
+    channel = (body.get("channel") or "").strip()
 
     if not thread_id:
         raise HTTPException(status_code=400, detail="thread_id required")
     if not pasted_text:
         raise HTTPException(status_code=400, detail="pasted_text required")
 
-    # Record the inbound event for auditability and reversal support
     from aivan.db.repositories.inbound_repo import InboundRelayRepository
     from aivan.db.repositories.event_repo import ExecutionEventRepository
 
     inbound_repo = InboundRelayRepository(db)
     event_repo = ExecutionEventRepository(db)
 
-    # Synthesise a project_id from thread_id (or look up an existing project)
-    # Use thread_id as project_id for traceability
     exec_event = event_repo.append(
         project_id=thread_id,
         event_type="inbound_relay_paste",
@@ -317,7 +312,6 @@ def relay_inbound(
         payload={"counterparty_id": counterparty_id, "pasted_text": pasted_text, "channel": channel},
         actor="relay_ui",
     )
-
     inbound = inbound_repo.create(
         thread_id=thread_id,
         counterparty_id=counterparty_id,
@@ -326,7 +320,8 @@ def relay_inbound(
         linked_execution_event_id=exec_event.event_id,
     )
 
-    # Feed into the pipeline as a synthetic OpenClaw event
+    # Feed into the trade-salesperson pipeline as a synthetic inbound event
+    pipeline_warning = None
     try:
         from aivan.openclaw.event_adapter import parse_openclaw_event
         from aivan.agents.trade_salesperson_agent import handle_trade_salesperson_event
@@ -340,21 +335,19 @@ def relay_inbound(
             "role_context": body.get("role_context", "supplier"),
         })
         handle_trade_salesperson_event(synthetic, db)
-    except Exception as e:
-        db.commit()
-        return {
-            "inbound_id": inbound.inbound_id,
-            "execution_event_id": exec_event.event_id,
-            "pipeline_warning": str(e),
-        }
+    except Exception as exc:
+        pipeline_warning = str(exc)
 
     db.commit()
-    return {
+    result = {
         "inbound_id": inbound.inbound_id,
         "execution_event_id": exec_event.event_id,
         "thread_id": thread_id,
         "status": "processed",
     }
+    if pipeline_warning:
+        result["pipeline_warning"] = pipeline_warning
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +363,6 @@ def event_impact(
     """Preview the blast radius of reversing *event_id* without committing."""
     from aivan.db.repositories.event_repo import ExecutionEventRepository
     from aivan.db.repositories.draft_repo import DraftRepository
-    from aivan.db.repositories.inbound_repo import InboundRelayRepository
 
     event_repo = ExecutionEventRepository(db)
     draft_repo = DraftRepository(db)
@@ -390,7 +382,6 @@ def event_impact(
         for d in affected_drafts
         if d.status not in ("sent", "relayed")
     ]
-
     return {
         "event_id": event_id,
         "superseded": event.superseded,
@@ -407,13 +398,10 @@ def reverse_event(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    """Reverse an inbound event.  Requires { reason, confirm: true }.
+    """Reverse an inbound event with audit trail and cascade invalidation.
 
-    Returns:
-    - reversal_event_id
-    - affected_drafts: invalidated draft ids
-    - already_sent: drafts that were already sent/relayed (cannot be recalled)
-    - correction_draft_id: auto-generated correction draft (if already_sent non-empty)
+    Requires body: { reason: str, confirm: true, actor?: str }
+    Returns: reversal_event_id, affected_drafts, already_sent list, correction_draft_id.
     """
     if not body.get("confirm"):
         raise HTTPException(
@@ -426,9 +414,11 @@ def reverse_event(
     from aivan.db.repositories.event_repo import ExecutionEventRepository
     from aivan.db.repositories.draft_repo import DraftRepository
     from aivan.db.repositories.inbound_repo import InboundRelayRepository
+    from aivan.db.models.inbound_event import InboundRelayEvent
 
     event_repo = ExecutionEventRepository(db)
     draft_repo = DraftRepository(db)
+    inbound_repo = InboundRelayRepository(db)
 
     event = event_repo.get(event_id)
     if event is None:
@@ -444,17 +434,7 @@ def reverse_event(
         actor=actor,
     )
 
-    # Supersede the InboundRelayEvent record if applicable
-    inbound_repo = InboundRelayRepository(db)
-    if event.payload_json:
-        # Find the inbound record linked to this execution event
-        linked = (
-            db.query(type(None).__class__)
-            .filter()  # placeholder; done via inbound_repo below
-            .first() if False else None
-        )
-    # Simpler: supersede any inbound whose linked_execution_event_id == event_id
-    from aivan.db.models.inbound_event import InboundRelayEvent
+    # Supersede any InboundRelayEvent linked to this execution event
     inbounds = (
         db.query(InboundRelayEvent)
         .filter(InboundRelayEvent.linked_execution_event_id == event_id)
@@ -462,6 +442,7 @@ def reverse_event(
     )
     for inb in inbounds:
         inb.superseded = True
+    db.flush()
 
     # Cascade: invalidate non-sent drafts derived from this event
     affected_draft_ids = draft_repo.invalidate_derived(event_id)
@@ -478,14 +459,13 @@ def reverse_event(
     correction_draft_id = None
     if already_sent:
         correction_text = (
-            f"[Correction] A previous message sent around {already_sent[0].get('sent_at', 'unknown')} "
-            f"was based on incorrect information. Please disregard it. "
-            f"Correction reason: {reason}"
+            f"[Correction] A message sent based on information now found to be incorrect "
+            f"may need a follow-up. Correction reason: {reason}"
         )
         correction = draft_repo.create(
             project_id=event.project_id,
             data={
-                "channel": "email",  # operator will adjust before approving
+                "channel": "email",
                 "message_text": correction_text,
                 "created_by_agent": "reversal_engine",
                 "notes": f"Auto-generated correction for reversal of {event_id}",
@@ -511,7 +491,7 @@ def reverse_event(
 
 @app.post("/webhook/line")
 async def line_webhook(request: Request, db: Session = Depends(get_db)):
-    """Receive LINE webhook events.  Verifies HMAC-SHA256 signature."""
+    """Receive LINE webhook events, verified by HMAC-SHA256 signature."""
     body = await request.body()
     signature = request.headers.get("X-Line-Signature", "")
 
@@ -534,7 +514,6 @@ async def line_webhook(request: Request, db: Session = Depends(get_db)):
             continue
         user_id = line_event.get("source", {}).get("userId", "")
         text = msg.get("text", "")
-        reply_token = line_event.get("replyToken", "")
         try:
             from aivan.openclaw.event_adapter import parse_openclaw_event
             from aivan.agents.trade_salesperson_agent import handle_trade_salesperson_event
@@ -548,8 +527,8 @@ async def line_webhook(request: Request, db: Session = Depends(get_db)):
             })
             result = handle_trade_salesperson_event(event, db)
             results.append({"user_id": user_id, "action": result.action})
-        except Exception as e:
-            results.append({"user_id": user_id, "error": str(e)})
+        except Exception as exc:
+            results.append({"user_id": user_id, "error": str(exc)})
 
     db.commit()
     return {"processed": len(results), "results": results}
@@ -583,7 +562,8 @@ def match_suppliers(body: dict, db: Session = Depends(get_db)):
     from aivan.sourcing.supplier_matcher import match_suppliers_for_requirement
     req = BuyerRequirement(**body)
     matches = match_suppliers_for_requirement(req, limit=10)
-    return {"matches": [{"supplier": m.supplier.model_dump(), "match_score": m.match_score, "match_reason": m.match_reason} for m in matches]}
+    return {"matches": [{"supplier": m.supplier.model_dump(), "match_score": m.match_score,
+                         "match_reason": m.match_reason} for m in matches]}
 
 
 # ---------------------------------------------------------------------------
