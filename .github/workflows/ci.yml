@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "feature/**", "claude/**"]
   pull_request:
     branches: ["main"]
 
@@ -31,12 +31,30 @@ jobs:
           OPENCLAW_MOCK_MODE: "true"
           AIVAN_DB_URL: "sqlite:///:memory:"
           AIVAN_REQUIRE_HUMAN_APPROVAL: "true"
+          AIVAN_LINE_ENABLED: "true"
+          AIVAN_LINE_MODE: "mock"
+          AIVAN_EMAIL_MODE: "mock"
 
       - name: Validate ClawHub plugin metadata
         run: uv run python scripts/validate_clawhub_aivan_plugin.py
 
       - name: Run plugin smoke test (offline)
         run: uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
+        env:
+          AIVAN_LLM_PROVIDER: mock
+          OPENCLAW_MOCK_MODE: "true"
+
+      - name: Run relay E2E (mock)
+        run: uv run python scripts/run_aivan_relay_e2e.py
+        env:
+          AIVAN_LLM_PROVIDER: mock
+          OPENCLAW_MOCK_MODE: "true"
+          AIVAN_LINE_ENABLED: "true"
+          AIVAN_LINE_MODE: "mock"
+          AIVAN_EMAIL_MODE: "mock"
+
+      - name: Run reversal E2E (mock)
+        run: uv run python scripts/run_aivan_reversal_e2e.py
         env:
           AIVAN_LLM_PROVIDER: mock
           OPENCLAW_MOCK_MODE: "true"
