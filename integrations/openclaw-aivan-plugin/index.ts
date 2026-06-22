@@ -222,14 +222,22 @@ export async function rejectDraft(
 // ─── OpenClaw Plugin Entry Point ──────────────────────────────────────────────
 export function register(api: any): void {
   if (typeof api.registerInteractiveHandler === "function") {
+    // channel: required by PluginInteractiveRegistration — OpenClaw calls .trim() on it
+    // namespace: required identifier (previously mis-named as "id", which is not a valid field)
     api.registerInteractiveHandler({
-      id: "aivan-procurement-handler",
+      channel: "openclaw-weixin",
+      namespace: "aivan",
       handler: async (ctx: any) => {
         const msg = ctx?.message?.text ?? ctx?.text ?? "";
         const channelId = ctx?.channel ?? ctx?.channelId ?? "openclaw-weixin";
         const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
         const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
         const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
+        // Extract project_id and role_context from ctx — pass through for supplier-reply routing
+        const projectId =
+          ctx?.metadata?.project_id ?? ctx?.projectId ?? ctx?.project_id ?? null;
+        const roleContext =
+          ctx?.metadata?.role_context ?? ctx?.roleContext ?? ctx?.role_context ?? null;
         const event: any = {
           source: "openclaw",
           channel: channelId,
@@ -241,15 +249,15 @@ export function register(api: any): void {
           message_type: "text",
           attachments: [],
           timestamp: new Date().toISOString(),
-          project_id: null,
-          role_context: null,
+          project_id: projectId,
+          role_context: roleContext,
           mode: "auto",
         };
         const result: any = await forwardEvent(event);
         if (result?.accepted && result?.reply_text) {
           return { text: result.reply_text };
         }
-        return null;
+        return;
       },
     });
   }
