@@ -1,0 +1,262 @@
+name: Deploy OpenClaw + AIVAN Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip smoke tests (faster)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+      target_host:
+        description: 'Target server IP (default: 113.249.119.30)'
+        required: false
+        default: '113.249.119.30'
+
+env:
+  SERVER_HOST: ${{ inputs.target_host || '113.249.119.30' }}
+  SERVER_USER: root
+  AGENT_DIR: /opt/giraffe/giraffe-agent
+  PLUGIN_DIR: /opt/giraffe/giraffe-agent/integrations/openclaw-aivan-plugin
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.target_host || '113.249.119.30' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      # ──────────────────────────────────────────
+      # 0. Tooling
+      # ──────────────────────────────────────────
+      - name: Install sshpass
+        run: sudo apt-get install -y sshpass
+
+      # ──────────────────────────────────────────
+      # 1. Connectivity check
+      # ──────────────────────────────────────────
+      - name: '[1/8] Check SSH connectivity'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=10 \
+            $SERVER_USER@$SERVER_HOST \
+            'echo "✓ SSH connected: $(hostname) | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+             echo "OS: $(cat /etc/os-release | grep PRETTY | cut -d= -f2)"
+             echo "Node: $(node --version 2>/dev/null || echo not-found)"
+             echo "openclaw: $(openclaw --version 2>/dev/null || echo not-found)"'
+
+      # ──────────────────────────────────────────
+      # 2. Compile plugin (TypeScript → JS)
+      # ──────────────────────────────────────────
+      - name: '[2/8] Compile AIVAN plugin'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            echo "=== Compiling openclaw-aivan plugin ==="
+            PLUGIN_DIR="/opt/giraffe/giraffe-agent/integrations/openclaw-aivan-plugin"
+
+            if [ ! -d "$PLUGIN_DIR" ]; then
+              echo "ERROR: plugin directory not found: $PLUGIN_DIR"
+              ls /opt/giraffe/giraffe-agent/ || true
+              exit 1
+            fi
+
+            cd "$PLUGIN_DIR"
+            echo "→ npm install"
+            npm install --prefer-offline 2>&1 | tail -5
+            echo "→ npx tsc"
+            npx tsc
+            echo "→ compiled files:"
+            ls -lh dist/
+            echo "✓ Plugin compiled"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # 3. Install plugin into OpenClaw
+      # ──────────────────────────────────────────
+      - name: '[3/8] Install plugin into OpenClaw'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            PLUGIN_DIR="/opt/giraffe/giraffe-agent/integrations/openclaw-aivan-plugin"
+            echo "=== Installing plugin ==="
+            openclaw plugins install "$PLUGIN_DIR"
+            echo "→ Plugin list:"
+            openclaw plugins list | grep -i aivan || { echo "WARN: plugin not found in list after install"; openclaw plugins list; }
+            echo "✓ Plugin installed"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # 4. Inject env vars into Gateway systemd unit
+      # ──────────────────────────────────────────
+      - name: '[4/8] Set Gateway environment (AIVAN_BASE_URL)'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            echo "=== Setting Gateway env vars ==="
+            OVERRIDE_DIR="$HOME/.config/systemd/user/openclaw-gateway.service.d"
+            mkdir -p "$OVERRIDE_DIR"
+            cat > "$OVERRIDE_DIR/env.conf" << 'EOF'
+          [Service]
+          Environment="AIVAN_BASE_URL=http://localhost:8000"
+          Environment="GIRAFFE_API_BASE=http://localhost:8000"
+          EOF
+            echo "→ Written: $OVERRIDE_DIR/env.conf"
+            cat "$OVERRIDE_DIR/env.conf"
+            systemctl --user daemon-reload
+            echo "✓ Gateway env configured"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # 5. Enable plugin + restart Gateway
+      # ──────────────────────────────────────────
+      - name: '[5/8] Enable plugin and restart Gateway'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            echo "=== Enabling plugin and restarting Gateway ==="
+            openclaw config set plugins.entries.openclaw-aivan.enabled true
+            openclaw gateway restart
+            sleep 5
+            echo "→ Gateway status:"
+            openclaw channels status --probe || true
+            echo "→ Gateway logs (aivan lines):"
+            journalctl --user -u openclaw-gateway.service -n 30 --no-pager | grep -i aivan || echo "(no aivan lines yet)"
+            echo "✓ Gateway restarted"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # 6. Daemonize AIVAN FastAPI
+      # ──────────────────────────────────────────
+      - name: '[6/8] Daemonize AIVAN FastAPI service'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            echo "=== Setting up aivan.service ==="
+
+            # Stop any foreground uvicorn that may be running
+            pkill -f "uvicorn api.main:app" 2>/dev/null && echo "→ Stopped existing uvicorn" || echo "→ No existing uvicorn to stop"
+            sleep 2
+
+            # Enable lingering so user services survive SSH logout
+            loginctl enable-linger root 2>/dev/null || true
+
+            SERVICE_FILE="$HOME/.config/systemd/user/aivan.service"
+            cat > "$SERVICE_FILE" << 'EOF'
+          [Unit]
+          Description=AIVAN Procurement AI Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/giraffe/giraffe-agent
+          Environment="GIRAFFE_DB_MODE=off"
+          ExecStart=/opt/giraffe/giraffe-agent/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=default.target
+          EOF
+
+            systemctl --user daemon-reload
+            systemctl --user enable --now aivan.service
+            echo "→ Waiting 5s for service to start..."
+            sleep 5
+            systemctl --user status aivan.service --no-pager
+            echo "✓ aivan.service enabled and started"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # 7. Health check
+      # ──────────────────────────────────────────
+      - name: '[7/8] Health check'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            echo "=== Health checks ==="
+
+            echo "→ AIVAN /health:"
+            HEALTH=$(curl -sf http://localhost:8000/health)
+            echo "$HEALTH"
+            echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', f'Expected status=ok, got: {d}'"
+            echo "✓ AIVAN health OK"
+
+            echo "→ OpenClaw plugin list:"
+            openclaw plugins list | grep -i aivan && echo "✓ Plugin present" || { echo "FAIL: plugin not in list"; exit 1; }
+
+            echo "→ Channel status:"
+            openclaw channels status --probe
+
+            echo "→ WeChat pairing status:"
+            openclaw pairing list openclaw-weixin || echo "(no pairs found)"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # 8. Smoke tests
+      # ──────────────────────────────────────────
+      - name: '[8/8] Run smoke tests'
+        if: inputs.skip_tests != 'true'
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -euo pipefail
+            cd /opt/giraffe/giraffe-agent
+            echo "=== Smoke test: bside invoke ==="
+            uv run python scripts/test_openclaw_bside_invoke.py
+            echo "=== Smoke test: mside invoke ==="
+            uv run python scripts/test_openclaw_mside_invoke.py
+            echo "✓ All smoke tests passed"
+          ENDSSH
+
+      # ──────────────────────────────────────────
+      # Final summary
+      # ──────────────────────────────────────────
+      - name: Print success criteria
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            echo ""
+            echo "╔══════════════════════════════════════════════════╗"
+            echo "║          SUCCESS CRITERIA VERIFICATION           ║"
+            echo "╚══════════════════════════════════════════════════╝"
+
+            # 1. AIVAN health
+            printf '[1] AIVAN health: '
+            curl -sf http://localhost:8000/health | python3 -c "import sys,json; d=json.load(sys.stdin); print('PASS -', d)" 2>/dev/null || echo 'FAIL'
+
+            # 2. Plugin list
+            printf '[2] Plugin enabled: '
+            openclaw plugins list 2>/dev/null | grep -iq aivan && echo 'PASS' || echo 'FAIL'
+
+            # 3. Channel status
+            printf '[3] WeChat channel: '
+            openclaw channels status --probe 2>/dev/null | grep -i weixin | head -1 || echo 'check manually'
+
+            # 4. aivan.service
+            printf '[4] aivan.service: '
+            systemctl --user is-active aivan.service 2>/dev/null || echo 'FAIL'
+
+            # 5. Gateway logs
+            printf '[5] Gateway sees aivan: '
+            journalctl --user -u openclaw-gateway.service -n 50 --no-pager 2>/dev/null | grep -iq aivan && echo 'PASS (aivan in logs)' || echo 'not yet / check manually'
+          ENDSSH
