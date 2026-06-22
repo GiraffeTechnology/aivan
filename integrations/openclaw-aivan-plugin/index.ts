@@ -159,7 +159,7 @@ export async function getPendingDrafts(projectId?: string): Promise<{
     return { drafts: [], error: "Failed to fetch drafts" };
   }
   const d = result.data as Record<string, unknown>;
-  return { drafts: (d["drafts"] as typeof drafts) ?? [] };
+  return { drafts: (d["drafts"] as drafts) ?? [] };
 }
 
 // TypeScript helper — mirrors the drafts array element type
@@ -217,4 +217,40 @@ export async function rejectDraft(
     };
   }
   return { rejected: true, draft_id: draftId };
+}
+
+// ─── OpenClaw Plugin Entry Point ──────────────────────────────────────────────
+export function register(api: any): void {
+  if (typeof api.registerInteractiveHandler === "function") {
+    api.registerInteractiveHandler({
+      id: "aivan-procurement-handler",
+      handler: async (ctx: any) => {
+        const msg = ctx?.message?.text ?? ctx?.text ?? "";
+        const channelId = ctx?.channel ?? ctx?.channelId ?? "openclaw-weixin";
+        const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
+        const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
+        const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
+        const event: any = {
+          source: "openclaw",
+          channel: channelId,
+          channel_account_id: accountId,
+          conversation_id: convId,
+          sender_id: senderId,
+          sender_display_name: ctx?.peer?.name ?? "",
+          message_text: msg,
+          message_type: "text",
+          attachments: [],
+          timestamp: new Date().toISOString(),
+          project_id: null,
+          role_context: null,
+          mode: "auto",
+        };
+        const result: any = await forwardEvent(event);
+        if (result?.accepted && result?.reply_text) {
+          return { text: result.reply_text };
+        }
+        return null;
+      },
+    });
+  }
 }

@@ -27,46 +27,17 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.0.0"
   },
   "openclaw": {
+    "extensions": ["./index.ts"],
+    "runtimeExtensions": ["./dist/index.js"],
     "compat": {
       "pluginApi": "1.0"
     },
     "build": {
-      "openclawVersion": ">=1.0.0"
-    },
-    "extensions": [
-      {
-        "id": "aivan.health",
-        "type": "command",
-        "description": "Check whether AIVAN local server is running"
-      },
-      {
-        "id": "aivan.forwardEvent",
-        "type": "event-handler",
-        "description": "Forward a normalised OpenClaw event to the local AIVAN endpoint"
-      },
-      {
-        "id": "aivan.openDashboard",
-        "type": "command",
-        "description": "Open the AIVAN local web dashboard"
-      },
-      {
-        "id": "aivan.getPendingDrafts",
-        "type": "query",
-        "description": "List outbound message drafts awaiting human approval"
-      },
-      {
-        "id": "aivan.approveDraft",
-        "type": "action",
-        "description": "Approve a pending outbound draft so AIVAN can send it via OpenClaw"
-      },
-      {
-        "id": "aivan.rejectDraft",
-        "type": "action",
-        "description": "Reject and discard a pending outbound draft"
-      }
-    ]
+      "openclawVersion": ">=2026.3.22"
+    }
   }
 }
