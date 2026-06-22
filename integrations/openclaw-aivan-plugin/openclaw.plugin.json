@@ -1,9 +1,19 @@
 {
   "id": "openclaw-aivan",
+  "name": "AIVAN OpenClaw Bridge",
+  "description": "OpenClaw bridge for forwarding IM/email/marketplace events to the local AIVAN service with human approval.",
   "version": "0.1.0",
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "aivanBaseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:8765"
+      }
+    }
   }
 }
