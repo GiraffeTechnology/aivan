@@ -43,6 +43,7 @@ export declare function forwardEvent(event: {
     accepted: boolean;
     project_id?: string;
     action?: string;
+    reply_text?: string;
     error?: string;
 }>;
 /**
