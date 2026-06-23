@@ -13,6 +13,7 @@
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import { Type } from "typebox";
 const DEFAULT_BASE_URL = "http://127.0.0.1:8765";
+const DEFAULT_INTERACTIVE_CHANNELS = "wechat,openclaw-weixin";
 function baseUrl() {
     return ((typeof process !== "undefined" && process.env?.AIVAN_BASE_URL) ||
         DEFAULT_BASE_URL);
@@ -29,6 +30,21 @@ function buildHeaders() {
         headers["X-AIVAN-API-Key"] = key;
     }
     return headers;
+}
+function configuredInteractiveChannels() {
+    const raw = (typeof process !== "undefined" && process.env?.AIVAN_OPENCLAW_CHANNELS) ||
+        DEFAULT_INTERACTIVE_CHANNELS;
+    const channels = raw
+        .split(",")
+        .map((channel) => channel.trim())
+        .filter(Boolean);
+    return channels.length > 0 ? channels : ["wechat"];
+}
+function logNonFatal(message, err) {
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err ?? "");
+    if (typeof console !== "undefined" && typeof console.warn === "function") {
+        console.warn(`[openclaw-aivan] ${message}${detail ? ` (${detail})` : ""}`);
+    }
 }
 async function safeFetch(path, options) {
     const url = `${baseUrl()}${path}`;
@@ -166,44 +182,67 @@ export default defineToolPlugin({
     configSchema: Type.Object({ aivanBaseUrl: Type.Optional(Type.String({ default: "http://127.0.0.1:8765" })) }, { additionalProperties: false }),
     tools: (_tool) => [],
 });
+function createInteractiveHandler(defaultChannel) {
+    return async (ctx) => {
+        try {
+            const msg = ctx?.message?.text ?? ctx?.text ?? "";
+            const channelId = ctx?.channel ?? ctx?.channelId ?? defaultChannel;
+            const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
+            const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
+            const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
+            // Extract project_id and role_context from ctx — pass through for supplier-reply routing
+            const projectId = ctx?.metadata?.project_id ?? ctx?.projectId ?? ctx?.project_id ?? null;
+            const roleContext = ctx?.metadata?.role_context ?? ctx?.roleContext ?? ctx?.role_context ?? null;
+            const event = {
+                source: "openclaw",
+                channel: channelId,
+                channel_account_id: accountId,
+                conversation_id: convId,
+                sender_id: senderId,
+                sender_display_name: ctx?.peer?.name ?? "",
+                message_text: msg,
+                message_type: "text",
+                attachments: [],
+                timestamp: new Date().toISOString(),
+                project_id: projectId,
+                role_context: roleContext,
+                mode: "auto",
+            };
+            const result = await forwardEvent(event);
+            if (result?.accepted && result?.reply_text) {
+                return { text: result.reply_text };
+            }
+            return;
+        }
+        catch (err) {
+            logNonFatal("interactive handler failed; Gateway will continue", err);
+            return;
+        }
+    };
+}
 // ─── OpenClaw Plugin Entry Point ──────────────────────────────────────────────
 export function register(api) {
-    if (typeof api.registerInteractiveHandler === "function") {
-        // channel: required by PluginInteractiveRegistration — OpenClaw calls .trim() on it
-        // namespace: required identifier (previously mis-named as "id", which is not a valid field)
-        api.registerInteractiveHandler({
-            channel: "openclaw-weixin",
-            namespace: "aivan",
-            handler: async (ctx) => {
-                const msg = ctx?.message?.text ?? ctx?.text ?? "";
-                const channelId = ctx?.channel ?? ctx?.channelId ?? "openclaw-weixin";
-                const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
-                const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
-                const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
-                // Extract project_id and role_context from ctx — pass through for supplier-reply routing
-                const projectId = ctx?.metadata?.project_id ?? ctx?.projectId ?? ctx?.project_id ?? null;
-                const roleContext = ctx?.metadata?.role_context ?? ctx?.roleContext ?? ctx?.role_context ?? null;
-                const event = {
-                    source: "openclaw",
-                    channel: channelId,
-                    channel_account_id: accountId,
-                    conversation_id: convId,
-                    sender_id: senderId,
-                    sender_display_name: ctx?.peer?.name ?? "",
-                    message_text: msg,
-                    message_type: "text",
-                    attachments: [],
-                    timestamp: new Date().toISOString(),
-                    project_id: projectId,
-                    role_context: roleContext,
-                    mode: "auto",
-                };
-                const result = await forwardEvent(event);
-                if (result?.accepted && result?.reply_text) {
-                    return { text: result.reply_text };
-                }
-                return;
-            },
-        });
+    if (typeof api?.registerInteractiveHandler !== "function") {
+        logNonFatal("registerInteractiveHandler is not available; skipping interactive bridge registration");
+        return;
+    }
+    let registered = 0;
+    for (const channel of configuredInteractiveChannels()) {
+        try {
+            // channel: required by PluginInteractiveRegistration — OpenClaw calls .trim() on it.
+            // namespace: required identifier (previously mis-named as "id", which is not a valid field).
+            api.registerInteractiveHandler({
+                channel,
+                namespace: "aivan",
+                handler: createInteractiveHandler(channel),
+            });
+            registered += 1;
+        }
+        catch (err) {
+            logNonFatal(`failed to register interactive handler for channel=${channel}`, err);
+        }
+    }
+    if (registered === 0) {
+        logNonFatal("no interactive handler registered; Gateway startup will continue");
     }
 }
