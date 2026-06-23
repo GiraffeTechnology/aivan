@@ -11,6 +11,9 @@
  * AIVAN API, which enforces the human-approval policy.
  */
 
+import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
+import { Type } from "typebox";
+
 const DEFAULT_BASE_URL = "http://127.0.0.1:8765";
 
 function baseUrl(): string {
@@ -108,7 +111,7 @@ export async function forwardEvent(event: {
   attachments?: unknown[];
   timestamp?: string;
   project_id?: string;
-  role_context?: string;
+  role_context?: string | Record<string, unknown> | null;
   mode?: string;
 }): Promise<{ accepted: boolean; project_id?: string; action?: string; error?: string }> {
   const result = await safeFetch("/api/openclaw/events", {
@@ -159,7 +162,7 @@ export async function getPendingDrafts(projectId?: string): Promise<{
     return { drafts: [], error: "Failed to fetch drafts" };
   }
   const d = result.data as Record<string, unknown>;
-  return { drafts: (d["drafts"] as typeof drafts) ?? [] };
+  return { drafts: (d["drafts"] as drafts) ?? [] };
 }
 
 // TypeScript helper — mirrors the drafts array element type
@@ -217,4 +220,62 @@ export async function rejectDraft(
     };
   }
   return { rejected: true, draft_id: draftId };
+}
+
+// ─── Plugin metadata export for `openclaw plugins validate` ───────────────────
+// defineToolPlugin with zero tools satisfies the tool-plugin authoring validator.
+// The actual channel bridge runs via api.registerInteractiveHandler in register().
+export default defineToolPlugin({
+  id: "openclaw-aivan",
+  name: "AIVAN OpenClaw Bridge",
+  description: "OpenClaw bridge for forwarding IM/email/marketplace events to the local AIVAN service with human approval.",
+  configSchema: Type.Object(
+    { aivanBaseUrl: Type.Optional(Type.String({ default: "http://127.0.0.1:8765" })) },
+    { additionalProperties: false }
+  ),
+  tools: (_tool) => [],
+});
+
+// ─── OpenClaw Plugin Entry Point ──────────────────────────────────────────────
+export function register(api: any): void {
+  if (typeof api.registerInteractiveHandler === "function") {
+    // channel: required by PluginInteractiveRegistration — OpenClaw calls .trim() on it
+    // namespace: required identifier (previously mis-named as "id", which is not a valid field)
+    api.registerInteractiveHandler({
+      channel: "openclaw-weixin",
+      namespace: "aivan",
+      handler: async (ctx: any) => {
+        const msg = ctx?.message?.text ?? ctx?.text ?? "";
+        const channelId = ctx?.channel ?? ctx?.channelId ?? "openclaw-weixin";
+        const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
+        const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
+        const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
+        // Extract project_id and role_context from ctx — pass through for supplier-reply routing
+        const projectId =
+          ctx?.metadata?.project_id ?? ctx?.projectId ?? ctx?.project_id ?? null;
+        const roleContext =
+          ctx?.metadata?.role_context ?? ctx?.roleContext ?? ctx?.role_context ?? null;
+        const event: any = {
+          source: "openclaw",
+          channel: channelId,
+          channel_account_id: accountId,
+          conversation_id: convId,
+          sender_id: senderId,
+          sender_display_name: ctx?.peer?.name ?? "",
+          message_text: msg,
+          message_type: "text",
+          attachments: [],
+          timestamp: new Date().toISOString(),
+          project_id: projectId,
+          role_context: roleContext,
+          mode: "auto",
+        };
+        const result: any = await forwardEvent(event);
+        if (result?.accepted && result?.reply_text) {
+          return { text: result.reply_text };
+        }
+        return;
+      },
+    });
+  }
 }
