@@ -48,7 +48,7 @@ jobs:
         run: |
           python - << 'EOF'
           import os, re, sys
-          BIDI = re.compile(r'[​-‏‪-‮⁠-⁩﻿]')
+          BIDI = re.compile(u'[​-‏‪-‮⁠-⁩﻿]')
           bad = []
           for root, dirs, files in os.walk('.'):
               dirs[:] = [d for d in dirs if d not in ('.git', '.venv', '__pycache__', 'node_modules', 'dist')]
