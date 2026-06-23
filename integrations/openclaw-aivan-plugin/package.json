@@ -34,11 +34,17 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "openclaw": "^2026.6.9",
+    "typebox": "^1.3.0",
     "typescript": "^5.0.0"
   },
   "openclaw": {
-    "extensions": ["./dist/index.js"],
-    "runtimeExtensions": ["./dist/index.js"],
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
     "compat": {
       "pluginApi": "1.0"
     },

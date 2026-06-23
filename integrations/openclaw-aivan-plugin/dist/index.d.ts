@@ -85,4 +85,6 @@ export declare function rejectDraft(draftId: string, reason?: string): Promise<{
     draft_id: string;
     error?: string;
 }>;
+declare const _default: import("openclaw/plugin-sdk/tool-plugin").DefinedToolPluginEntry;
+export default _default;
 export declare function register(api: any): void;

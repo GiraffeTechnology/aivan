@@ -151,9 +151,16 @@ check("name field present", bool(manifest.get("name")))
 check("description field present", bool(manifest.get("description")))
 check("version field present", bool(manifest.get("version")))
 check("configSchema field present", "configSchema" in manifest)
+check("configSchema has aivanBaseUrl property",
+      isinstance(manifest.get("configSchema", {}).get("properties"), dict)
+      and "aivanBaseUrl" in manifest.get("configSchema", {}).get("properties", {}))
 activation = manifest.get("activation", {})
 check("activation.onStartup is true", activation.get("onStartup") is True,
       "Gateway startup activation required")
+contracts = manifest.get("contracts", {})
+check("contracts.tools is present (tool-plugin metadata synced)",
+      "tools" in contracts,
+      "run: openclaw plugins build --entry ./dist/index.js")
 
 # ── .gitignore must exclude node_modules but not dist ─────────────────────────
 section("gitignore — node_modules excluded, dist NOT excluded")

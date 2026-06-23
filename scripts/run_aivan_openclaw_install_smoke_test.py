@@ -200,12 +200,13 @@ else:
     if result.returncode == 0:
         print(f"    version: {(result.stdout + result.stderr).strip()}")
 
-    # NOTE: `openclaw plugins validate` is the tool-plugin authoring helper; it
-    # requires a `defineToolPlugin` export and does not apply to interactive-handler
-    # plugins.  This plugin uses `api.registerInteractiveHandler` — the correct API
-    # for channel event bridges — so the validate subcommand is intentionally skipped.
-    skip("openclaw plugins validate (tool-plugin authoring helper — not applicable to interactive-handler plugins)",
-         "plugin type is interactive-handler, not tool-plugin")
+    result = run(["openclaw", "plugins", "validate", "--entry", "./dist/index.js"])
+    check("openclaw plugins validate exits 0", result.returncode == 0,
+          (result.stdout + result.stderr).strip()[:400] if result.returncode != 0 else "")
+
+    result = run(["openclaw", "plugins", "build", "--entry", "./dist/index.js", "--check"])
+    check("openclaw plugins build --check exits 0", result.returncode == 0,
+          (result.stdout + result.stderr).strip()[:400] if result.returncode != 0 else "")
 
     result = run(
         ["openclaw", "plugins", "install", str(PLUGIN_DIR), "--force"],

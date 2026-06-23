@@ -8,12 +8,15 @@
   },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
     "properties": {
       "aivanBaseUrl": {
         "type": "string",
         "default": "http://127.0.0.1:8765"
       }
-    }
+    },
+    "additionalProperties": false
+  },
+  "contracts": {
+    "tools": []
   }
 }
