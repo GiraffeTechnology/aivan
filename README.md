@@ -21,7 +21,7 @@ AIVAN is designed for exactly this workflow. It runs locally on the salesperson'
 3. AIVAN never bypasses login, CAPTCHA, anti-bot systems, access controls, rate limits, or platform rules.
 4. A trusted platform does NOT mean every supplier on that platform is trusted. Risk screening is independent.
 5. AIVAN does not make final legal, credit, sanctions, or compliance decisions.
-6. AIVAN never hallucinate supplier facts. All supplier data is sourced or mock.
+6. AIVAN never hallucinates supplier facts. All supplier data is sourced or mock.
 7. Never log API keys or credentials.
 
 ---
@@ -68,7 +68,7 @@ AIVAN is designed for exactly this workflow. It runs locally on the salesperson'
   └──────────────────────────────────────────────────────────┘
 ```
 
-All state (projects, drafts, events, suppliers, accounts, platforms) is stored in a local SQLite database. No data leaves the machine unless the human explicitly approves an outbound message.
+All state (projects, drafts, events, suppliers, accounts, platforms) is stored in a local SQLite database. No outbound counterparty message is sent unless the human explicitly approves it.
 
 ---
 
@@ -276,7 +276,7 @@ Platform suggestions pending approval are available via the API at `GET /api/pla
 
 ## OpenClaw Integration
 
-OpenClaw is the connectivity layer that gives AIVAN access to the salesperson's IM accounts (WeChat, WhatsApp), email accounts, and marketplace accounts (Alibaba, 1688, AliExpress). AIVAN communicates with OpenClaw via a local HTTP API.
+OpenClaw is the connectivity layer that gives AIVAN access to the salesperson's IM accounts (WeChat, WhatsApp), email accounts, and marketplace accounts (Alibaba, 1688, AliExpress). AIVAN communicates with OpenClaw via a local HTTP API and through the native OpenClaw Gateway plugin.
 
 **What OpenClaw manages:**
 
@@ -296,6 +296,62 @@ To view connected accounts:
 ```bash
 curl http://127.0.0.1:8765/api/openclaw/accounts
 ```
+
+### Native OpenClaw Gateway Plugin
+
+AIVAN ships with a native OpenClaw Gateway plugin at:
+
+```text
+integrations/openclaw-aivan-plugin/
+```
+
+The plugin allows OpenClaw Gateway to discover, install, load, inspect, and call AIVAN directly.
+
+Final plugin ID:
+
+```text
+openclaw-aivan
+```
+
+Package name:
+
+```text
+@giraffetechnology/openclaw-aivan
+```
+
+Runtime entry:
+
+```text
+./dist/index.js
+```
+
+Types entry:
+
+```text
+./dist/index.d.ts
+```
+
+Manifest:
+
+```text
+openclaw.plugin.json
+```
+
+The plugin forwards inbound IM, email, and marketplace events to:
+
+```text
+POST /api/openclaw/events
+```
+
+AIVAN preserves OpenClaw context fields such as:
+
+- `project_id`
+- `role_context`
+- `conversation_id`
+- `sender_id`
+- `channel`
+
+This context preservation is required for supplier-side replies to be routed to the correct trade project instead of being misclassified as new buyer inquiries.
 
 ---
 
@@ -329,6 +385,20 @@ uv run pytest
 ```
 
 All tests run in mock mode. No live credentials, no external API calls, no OpenClaw connection required. Tests cover the full agent pipeline, risk screening, lead time calculation, platform whitelist logic, and approval gate enforcement.
+
+### OpenClaw Gateway plugin tests
+
+Run these tests before publishing or modifying the OpenClaw Gateway plugin:
+
+```bash
+python scripts/validate_clawhub_aivan_plugin.py
+python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
+python scripts/run_aivan_openclaw_install_smoke_test.py
+python scripts/run_aivan_openclaw_gateway_p0_test.py
+python scripts/run_aivan_openclaw_install_simulation.py
+```
+
+These tests verify the OpenClaw plugin package, local install lifecycle, Gateway inspection, ID alignment, and mock Gateway event routing.
 
 ---
 
@@ -424,48 +494,215 @@ When evaluating supplier options against a buyer's required delivery date, AIVAN
 
 ---
 
-## Disclaimer
+## OpenClaw Gateway Plugin
 
-AIVAN is a decision-support tool. It does not make final legal, credit, sanctions, trade compliance, or binding commercial decisions. Users are responsible for verifying supplier information and compliance with applicable laws and regulations.
+AIVAN includes a native OpenClaw Gateway plugin.
 
----
-
-## ClawHub / OpenClaw Plugin Publication
-
-AIVAN ships with a ready-to-publish ClawHub code plugin and an optional skill listing.
-
-### Prerequisites
+Plugin path:
 
 ```bash
-npm install -g clawhub
-clawhub login
-clawhub whoami
+integrations/openclaw-aivan-plugin/
 ```
 
-### Validate before publishing
+Final plugin ID:
+
+```text
+openclaw-aivan
+```
+
+Package name:
+
+```text
+@giraffetechnology/openclaw-aivan
+```
+
+Tested environment:
+
+```text
+OpenClaw 2026.6.9 (c645ec4)
+Node v22.22.2
+npm 10.9.7
+```
+
+Compatibility target:
+
+```text
+OpenClaw >=2026.3.22
+```
+
+### Install the plugin locally
+
+From the plugin directory:
 
 ```bash
-# Python validation (no npm required)
+cd integrations/openclaw-aivan-plugin
+npm install
+npm run build
+npm run typecheck
+npx tsc
+```
+
+Then install through OpenClaw:
+
+```bash
+openclaw plugins install . --force
+```
+
+Or install from an absolute path:
+
+```bash
+openclaw plugins install /opt/giraffe/aivan/integrations/openclaw-aivan-plugin --force
+```
+
+### Verify Gateway installation
+
+```bash
+openclaw plugins list --verbose
+openclaw plugins inspect openclaw-aivan --runtime --json
+```
+
+Expected result:
+
+```text
+AIVAN OpenClaw Bridge (openclaw-aivan) enabled
+status: loaded
+activated: true
+diagnostics: []
+```
+
+### Plugin package metadata
+
+| Field | Value |
+|---|---|
+| Package name | `@giraffetechnology/openclaw-aivan` |
+| Plugin ID | `openclaw-aivan` |
+| Runtime entry | `./dist/index.js` |
+| Types entry | `./dist/index.d.ts` |
+| Manifest | `openclaw.plugin.json` |
+| OpenClaw compatibility | `>=2026.3.22` |
+| Tested OpenClaw version | `2026.6.9` |
+| Install path | `/root/.openclaw/extensions/openclaw-aivan` |
+
+### Gateway event routing
+
+The plugin registers an OpenClaw interactive handler and forwards normalized events to AIVAN.
+
+Example supplier-side event:
+
+```json
+{
+  "source": "openclaw",
+  "channel": "wechat",
+  "conversation_id": "conv-project-001",
+  "sender_id": "supplier-weixin-001",
+  "sender_display_name": "Supplier Co.",
+  "message_text": "We can quote 10000 shirts, cotton poplin, lead time 21 days, MOQ 10000 pcs.",
+  "message_type": "text",
+  "project_id": "test-project-001",
+  "role_context": {
+    "side": "supplier",
+    "role": "seller"
+  },
+  "mode": "auto"
+}
+```
+
+`project_id` and `role_context` must be preserved. This allows AIVAN to classify the message as a supplier reply and attach it to the correct trade project.
+
+### P0 Gateway acceptance tests
+
+Run these tests before publishing or merging changes to the plugin:
+
+```bash
 python scripts/validate_clawhub_aivan_plugin.py
-
-# Smoke test against a running AIVAN mock server
-uv run aivan serve &
-python scripts/run_aivan_openclaw_plugin_smoke_test.py
-# Or: offline safe-failure checks only
 python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
+python scripts/run_aivan_openclaw_install_smoke_test.py
+python scripts/run_aivan_openclaw_gateway_p0_test.py
+python scripts/run_aivan_openclaw_install_simulation.py
 ```
 
-### Publish the code plugin
+From the plugin directory:
 
 ```bash
-# Dry run (validates without publishing)
-clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin --dry-run
+cd integrations/openclaw-aivan-plugin
 
-# Publish
+npm install
+npm run build
+npm run typecheck
+npx tsc
+
+openclaw plugins validate --entry ./dist/index.js
+openclaw plugins build --entry ./dist/index.js --check
+openclaw plugins install . --force
+openclaw plugins list --verbose
+openclaw plugins inspect openclaw-aivan --runtime --json
+```
+
+Required acceptance criteria:
+
+- `npm run build` passes.
+- `npm run typecheck` passes.
+- `npx tsc` passes.
+- `openclaw plugins validate --entry ./dist/index.js` passes.
+- `openclaw plugins build --entry ./dist/index.js --check` passes.
+- `openclaw plugins install . --force` passes.
+- `openclaw plugins inspect openclaw-aivan --runtime --json` returns `status: loaded`.
+- Gateway can call AIVAN.
+- Mock WeChat supplier event reaches AIVAN.
+- `project_id` is preserved.
+- `role_context` is preserved.
+- Supplier reply is not misclassified as a new buyer request.
+
+### P0 verification evidence
+
+PR #2 verified the following production-critical flow:
+
+```text
+Gateway discovers AIVAN: PASS
+Gateway installs AIVAN: PASS
+Gateway loads AIVAN: PASS
+Gateway inspects AIVAN: PASS
+Gateway calls AIVAN: PASS
+Mock WeChat supplier event reaches AIVAN: PASS
+project_id preserved: PASS
+role_context preserved: PASS
+supplier reply classified correctly: PASS
+```
+
+Original install failure fixed:
+
+```text
+TypeError: Cannot read properties of undefined (reading 'trim')
+```
+
+Root cause: `registerInteractiveHandler` was called with an invalid `id` field and no `channel` field. OpenClaw expected `channel` and `namespace`, and called `.trim()` on an undefined channel value.
+
+Final fix:
+
+- Use final plugin ID `openclaw-aivan` consistently.
+- Add required `channel` and `namespace` fields in `registerInteractiveHandler`.
+- Preserve `project_id` and `role_context` from OpenClaw context.
+- Use path-string `openclaw.extensions` and `runtimeExtensions`.
+- Point `main`, `types`, and `exports` to compiled `dist/` files.
+- Include `openclaw.plugin.json` with `id`, `configSchema`, and `activation.onStartup`.
+
+### ClawHub publication
+
+The plugin is ready for ClawHub publication only after all Gateway P0 tests pass.
+
+Dry run:
+
+```bash
+clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin --dry-run
+```
+
+Publish:
+
+```bash
 clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin
 ```
 
-### Publish the optional skill listing
+Optional skill listing:
 
 ```bash
 clawhub skill publish skills/aivan-trade-salesperson \
@@ -475,14 +712,13 @@ clawhub skill publish skills/aivan-trade-salesperson \
   --changelog "Initial AIVAN ClawHub skill listing"
 ```
 
-### Plugin package
+Important: passing TypeScript build is not enough. The plugin is considered valid only when OpenClaw Gateway can discover, install, load, inspect, and call AIVAN.
 
-| Field | Value |
-|---|---|
-| Package name | `@giraffetechnology/openclaw-aivan` |
-| Plugin API compat | `1.0` |
-| OpenClaw version | `>=1.0.0` |
-| Skill slug | `aivan-trade-salesperson` |
+---
+
+## Disclaimer
+
+AIVAN is a decision-support tool. It does not make final legal, credit, sanctions, trade compliance, or binding commercial decisions. Users are responsible for verifying supplier information and compliance with applicable laws and regulations.
 
 ---
 
