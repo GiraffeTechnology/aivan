@@ -113,7 +113,7 @@ export async function forwardEvent(event: {
   project_id?: string;
   role_context?: string | Record<string, unknown> | null;
   mode?: string;
-}): Promise<{ accepted: boolean; project_id?: string; action?: string; error?: string }> {
+}): Promise<{ accepted: boolean; project_id?: string; action?: string; reply_text?: string; error?: string }> {
   const result = await safeFetch("/api/openclaw/events", {
     method: "POST",
     body: JSON.stringify(event),
@@ -128,8 +128,10 @@ export async function forwardEvent(event: {
   const d = result.data as Record<string, unknown>;
   return {
     accepted: true,
-    project_id: String(d["project_id"] ?? ""),
-    action: String(d["action"] ?? ""),
+    project_id: d["project_id"] ? String(d["project_id"]) : undefined,
+    action: d["action"] ? String(d["action"]) : undefined,
+    // pass through reply_text when AIVAN returns a synchronous response
+    reply_text: d["reply_text"] ? String(d["reply_text"]) : undefined,
   };
 }
 
@@ -224,7 +226,7 @@ export async function rejectDraft(
 
 // ─── Plugin metadata export for `openclaw plugins validate` ───────────────────
 // defineToolPlugin with zero tools satisfies the tool-plugin authoring validator.
-// The actual channel bridge runs via api.registerInteractiveHandler in register().
+// The actual channel bridge runs via api.registerAgentHarness in register().
 export default defineToolPlugin({
   id: "openclaw-aivan",
   name: "AIVAN OpenClaw Bridge",
@@ -237,45 +239,69 @@ export default defineToolPlugin({
 });
 
 // ─── OpenClaw Plugin Entry Point ──────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function register(api: any): void {
-  if (typeof api.registerInteractiveHandler === "function") {
-    // channel: required by PluginInteractiveRegistration — OpenClaw calls .trim() on it
-    // namespace: required identifier (previously mis-named as "id", which is not a valid field)
-    api.registerInteractiveHandler({
-      channel: "openclaw-weixin",
-      namespace: "aivan",
-      handler: async (ctx: any) => {
-        const msg = ctx?.message?.text ?? ctx?.text ?? "";
-        const channelId = ctx?.channel ?? ctx?.channelId ?? "openclaw-weixin";
-        const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
-        const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
-        const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
-        // Extract project_id and role_context from ctx — pass through for supplier-reply routing
-        const projectId =
-          ctx?.metadata?.project_id ?? ctx?.projectId ?? ctx?.project_id ?? null;
-        const roleContext =
-          ctx?.metadata?.role_context ?? ctx?.roleContext ?? ctx?.role_context ?? null;
-        const event: any = {
-          source: "openclaw",
-          channel: channelId,
-          channel_account_id: accountId,
-          conversation_id: convId,
-          sender_id: senderId,
-          sender_display_name: ctx?.peer?.name ?? "",
-          message_text: msg,
-          message_type: "text",
-          attachments: [],
-          timestamp: new Date().toISOString(),
-          project_id: projectId,
-          role_context: roleContext,
-          mode: "auto",
-        };
-        const result: any = await forwardEvent(event);
-        if (result?.accepted && result?.reply_text) {
-          return { text: result.reply_text };
+  try {
+    if (typeof api.registerAgentHarness !== "function") {
+      process.stderr.write(
+        "[aivan] registerAgentHarness not available (api keys: " +
+          JSON.stringify(Object.keys(api ?? {})) +
+          ")\n"
+      );
+      return;
+    }
+
+    api.registerAgentHarness({
+      id: "openclaw-aivan",
+      supports: (_params: any) => true,
+      runAttempt: async (params: any) => {
+        try {
+          // Extract message text from various possible param shapes
+          const msg: string =
+            params?.userMessage?.text ??
+            params?.message?.text ??
+            params?.text ??
+            params?.session?.latestUserMessage?.text ??
+            "";
+
+          const sessionId: string =
+            params?.session?.id ?? params?.sessionId ?? "unknown";
+          const peerId: string =
+            params?.session?.peerId ?? params?.peerId ?? "unknown";
+
+          process.stderr.write(
+            "[aivan] runAttempt called, msg=" + msg.slice(0, 50) + "\n"
+          );
+
+          const result = await forwardEvent({
+            source: "openclaw",
+            channel: "openclaw-weixin",
+            conversation_id: sessionId,
+            sender_id: peerId,
+            message_text: msg,
+            message_type: "text",
+            attachments: [],
+            timestamp: new Date().toISOString(),
+            mode: "auto",
+          });
+
+          if (result.accepted && result.reply_text) {
+            return { text: result.reply_text };
+          }
+
+          if (!result.accepted) {
+            process.stderr.write("[aivan] forwardEvent error: " + String(result.error) + "\n");
+          }
+        } catch (e) {
+          process.stderr.write("[aivan] runAttempt error: " + String(e) + "\n");
         }
-        return;
+
+        return undefined; // fall through to default AI
       },
     });
+
+    process.stderr.write("[aivan] registerAgentHarness registered\n");
+  } catch (e) {
+    process.stderr.write("[aivan] register() error: " + String(e) + "\n");
   }
 }
