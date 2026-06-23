@@ -111,7 +111,7 @@ export async function forwardEvent(event: {
   attachments?: unknown[];
   timestamp?: string;
   project_id?: string;
-  role_context?: string;
+  role_context?: string | Record<string, unknown> | null;
   mode?: string;
 }): Promise<{ accepted: boolean; project_id?: string; action?: string; error?: string }> {
   const result = await safeFetch("/api/openclaw/events", {
