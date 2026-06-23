@@ -47,8 +47,17 @@ jobs:
       - name: Check for Unicode / line-ending issues
         run: |
           python - << 'EOF'
-          import os, re, sys
-          BIDI = re.compile('[​-‏‪-‮⁠-⁩﻿]')
+          import os, sys
+
+          def has_bidi(text):
+              return any(
+                  0x200b <= ord(c) <= 0x200f
+                  or 0x202a <= ord(c) <= 0x202e
+                  or 0x2060 <= ord(c) <= 0x2069
+                  or ord(c) == 0xfeff
+                  for c in text
+              )
+
           bad = []
           for root, dirs, files in os.walk('.'):
               dirs[:] = [d for d in dirs if d not in ('.git', '.venv', '__pycache__', 'node_modules', 'dist')]
@@ -62,7 +71,7 @@ jobs:
                       issues.append('CRLF')
                   if raw.startswith(b'\xef\xbb\xbf'):
                       issues.append('BOM')
-                  if BIDI.search(raw.decode('utf-8', errors='replace')):
+                  if has_bidi(raw.decode('utf-8', errors='replace')):
                       issues.append('BIDI')
                   if issues:
                       bad.append(f"{','.join(issues)}: {path}")
