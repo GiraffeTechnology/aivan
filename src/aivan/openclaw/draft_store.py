@@ -26,7 +26,7 @@ def create_draft_in_db(
         "message_text": message_text,
         "message_type": message_type,
         "attachments_json": attachments or [],
-        "status": "pending",
+        "status": "pending_approval",
         "created_by_agent": created_by_agent,
         "notes": notes,
     })
