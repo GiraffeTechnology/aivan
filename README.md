@@ -1,8 +1,48 @@
 # AIVAN — AI Trade Salesperson
 
-`Python 3.11+` | `Local-first` | `Multi-LLM` | `Human-in-the-loop`
+`Python 3.11+` | `Standalone Product` | `OpenClaw Gateway` | `Multi-LLM` | `Human-in-the-loop`
 
-AIVAN is a local-first AI trade salesperson assistant. It receives buyer inquiries, sources suppliers, screens risk, calculates lead times, and generates buyer options — with human approval for every outbound message.
+AIVAN is a standalone AI trade salesperson assistant extracted from the broader Giraffe Agent architecture. It receives buyer inquiries, sources suppliers, screens risk, calculates lead times, and generates buyer options — with human approval for every outbound message.
+
+---
+
+## Current Milestone — OpenClaw Gateway + WeChat Connectivity
+
+AIVAN has reached its first production-connectivity milestone.
+
+Validated environment:
+
+```text
+Cloud server: CTyun
+Database: PostgreSQL
+OpenClaw Gateway: v2026.6.10
+AIVAN: v0.1.0
+AIVAN runtime port: 8000
+Plugin: openclaw-aivan
+IM channel: WeChat bot via WeixinClawBot
+```
+
+Validated chain:
+
+```text
+WeChat message → WeixinClawBot response: PASS
+OpenClaw Gateway running: PASS
+openclaw-aivan plugin loaded: PASS
+AIVAN server running: PASS
+PostgreSQL available: PASS
+```
+
+This milestone proves that AIVAN can run as an independent product connected to a real OpenClaw Gateway and a live WeChat bot bridge. The next milestone is business-flow validation:
+
+```text
+WeChat procurement inquiry
+→ OpenClaw Gateway
+→ openclaw-aivan AgentHarness
+→ AIVAN /api/openclaw/events
+→ RFQ / project creation
+→ pending human-approved response draft
+→ approved reply sent through OpenClaw / WeChat
+```
 
 ---
 
@@ -10,7 +50,31 @@ AIVAN is a local-first AI trade salesperson assistant. It receives buyer inquiri
 
 Trading company salespeople handle a high volume of repetitive, time-sensitive tasks: parsing buyer inquiries, finding suitable suppliers, chasing quotations, comparing options, calculating feasibility, and drafting responses. Errors in any step — a missed risk flag, a misstated lead time, an unapproved message — can damage a business relationship or create legal exposure.
 
-AIVAN is designed for exactly this workflow. It runs locally on the salesperson's machine, connects to their existing IM, email, and marketplace accounts via OpenClaw, and provides a structured, auditable process from inquiry to quote. The salesperson remains in control at every decision point that touches a counterparty. AIVAN does the heavy lifting — research, screening, calculation, drafting — while the human retains final authority over what gets sent and to whom.
+AIVAN is designed for exactly this workflow. It connects to existing IM, email, and marketplace accounts through OpenClaw and provides a structured, auditable process from inquiry to quote. The salesperson remains in control at every decision point that touches a counterparty. AIVAN does the heavy lifting — research, screening, calculation, drafting — while the human retains final authority over what gets sent and to whom.
+
+AIVAN is developed first as a standalone product. Once stable, its capabilities can be forked, ported, or integrated into `abcdYi` and the broader `giraffe-agent` framework. AIVAN runtime and OpenClaw Gateway fixes belong in this repository first, not directly in `abcdYi` or `giraffe-agent`.
+
+---
+
+## Repository Boundary
+
+AIVAN owns:
+
+```text
+AIVAN runtime
+AIVAN product rules
+AIVAN OpenClaw Gateway plugin
+openclaw-aivan AgentHarness
+AIVAN ClawHub package
+AIVAN tests
+AIVAN deployment docs
+AIVAN CI
+AIVAN RFQ / supplier-routing / lead-time capability
+```
+
+`abcdYi` is expected to contain AIVAN's full capability set later, after AIVAN is independently completed and stable.
+
+`giraffe-agent` is the broader industrial procurement and execution framework. It may later absorb stable AIVAN capabilities, but it should not be the active development home for AIVAN runtime or OpenClaw Gateway fixes.
 
 ---
 
@@ -28,7 +92,7 @@ AIVAN is designed for exactly this workflow. It runs locally on the salesperson'
 
 ## Architecture Overview
 
-```
+```text
                         ┌─────────────────────────────────────────────────┐
                         │              Trade Salesperson Agent             │
                         │                                                  │
@@ -55,9 +119,10 @@ AIVAN is designed for exactly this workflow. It runs locally on the salesperson'
                                   │  OpenClaw Send  │
                                   └─────────────────┘
 
-  Local SQLite DB
+  Storage
   ┌──────────────────────────────────────────────────────────┐
-  │  projects │ drafts │ events │ suppliers │ accounts │     │
+  │  SQLite for local dev │ PostgreSQL for server deployment │
+  │  projects │ drafts │ events │ suppliers │ accounts      │
   │  platforms                                               │
   └──────────────────────────────────────────────────────────┘
 
@@ -68,7 +133,7 @@ AIVAN is designed for exactly this workflow. It runs locally on the salesperson'
   └──────────────────────────────────────────────────────────┘
 ```
 
-All state (projects, drafts, events, suppliers, accounts, platforms) is stored in a local SQLite database. No outbound counterparty message is sent unless the human explicitly approves it.
+All state (projects, drafts, events, suppliers, accounts, platforms) is stored in AIVAN's configured database. Local development defaults to SQLite; production/server deployments may use PostgreSQL. No outbound counterparty message is sent unless the human explicitly approves it.
 
 ---
 
@@ -98,6 +163,8 @@ uv run aivan serve                   # Start web UI at http://127.0.0.1:8765/app
 
 Open `http://127.0.0.1:8765/app` in your browser after running `serve`.
 
+For server deployment, set `AIVAN_HOST`, `AIVAN_PORT`, and `AIVAN_DB_URL` explicitly. The CTyun milestone deployment runs AIVAN v0.1.0 on port `8000` with PostgreSQL.
+
 ---
 
 ## Environment Variables
@@ -110,10 +177,16 @@ All variables are set in `.env`. Copy `.env.example` to get started. The default
 |---|---|---|
 | `AIVAN_ENV` | `local` | Runtime environment (`local`, `production`). |
 | `AIVAN_HOST` | `127.0.0.1` | Host address for the web server. |
-| `AIVAN_PORT` | `8765` | Port for the web server. |
-| `AIVAN_DB_URL` | `sqlite:///./data/aivan.db` | SQLite database URL. |
+| `AIVAN_PORT` | `8765` | Port for the web server. CTyun milestone deployment uses `8000`. |
+| `AIVAN_DB_URL` | `sqlite:///./data/aivan.db` | Database URL. SQLite is the local default; PostgreSQL is supported for server deployment. |
 | `AIVAN_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `AIVAN_REQUIRE_HUMAN_APPROVAL` | `true` | Enforce human approval gate for all outbound messages. |
+
+Example PostgreSQL deployment URL:
+
+```env
+AIVAN_DB_URL=postgresql://aivan:<password>@127.0.0.1:5432/aivan
+```
 
 ### OpenClaw
 
@@ -276,7 +349,7 @@ Platform suggestions pending approval are available via the API at `GET /api/pla
 
 ## OpenClaw Integration
 
-OpenClaw is the connectivity layer that gives AIVAN access to the salesperson's IM accounts (WeChat, WhatsApp), email accounts, and marketplace accounts (Alibaba, 1688, AliExpress). AIVAN communicates with OpenClaw via a local HTTP API and through the native OpenClaw Gateway plugin.
+OpenClaw is the connectivity layer that gives AIVAN access to the salesperson's IM accounts (WeChat, WhatsApp), email accounts, and marketplace accounts (Alibaba, 1688, AliExpress). AIVAN communicates with OpenClaw through the native OpenClaw Gateway plugin and the AIVAN event API.
 
 **What OpenClaw manages:**
 
@@ -337,7 +410,7 @@ Manifest:
 openclaw.plugin.json
 ```
 
-The plugin forwards inbound IM, email, and marketplace events to:
+The plugin registers an OpenClaw AgentHarness via `registerAgentHarness`, extracts the inbound prompt from OpenClaw runtime params, and forwards normalized events to:
 
 ```text
 POST /api/openclaw/events
@@ -371,7 +444,7 @@ The approval requirement is controlled by `AIVAN_REQUIRE_HUMAN_APPROVAL=true` in
 
 **API endpoints for approval:**
 
-```
+```text
 POST /api/openclaw/drafts/{id}/approve
 POST /api/openclaw/drafts/{id}/reject
 ```
@@ -399,6 +472,20 @@ python scripts/run_aivan_openclaw_install_simulation.py
 ```
 
 These tests verify the OpenClaw plugin package, local install lifecycle, Gateway inspection, ID alignment, and mock Gateway event routing.
+
+### AgentHarness simulation test
+
+From the plugin directory:
+
+```bash
+cd integrations/openclaw-aivan-plugin
+npm install
+npm run build
+npx tsc
+node test-gateway-harness.mjs
+```
+
+This test simulates the OpenClaw Gateway AgentHarness lifecycle and verifies that AIVAN receives a non-empty prompt and returns a valid `EmbeddedRunAttemptResult` shape.
 
 ---
 
@@ -436,7 +523,7 @@ Each script prints a step-by-step trace of the agent's actions, including all dr
 
 ## API Reference
 
-The AIVAN server exposes a REST API on `http://127.0.0.1:8765`. All endpoints return JSON.
+The AIVAN server exposes a REST API on `http://127.0.0.1:8765` by default. Server deployments may expose a different configured port, such as `8000`.
 
 ### Events
 
@@ -516,12 +603,15 @@ Package name:
 @giraffetechnology/openclaw-aivan
 ```
 
-Tested environment:
+Tested milestone environment:
 
 ```text
-OpenClaw 2026.6.9 (c645ec4)
-Node v22.22.2
-npm 10.9.7
+Cloud server: CTyun
+OpenClaw Gateway: v2026.6.10
+AIVAN: v0.1.0
+AIVAN runtime port: 8000
+Database: PostgreSQL
+WeChat bridge: WeixinClawBot
 ```
 
 Compatibility target:
@@ -580,12 +670,12 @@ diagnostics: []
 | Types entry | `./dist/index.d.ts` |
 | Manifest | `openclaw.plugin.json` |
 | OpenClaw compatibility | `>=2026.3.22` |
-| Tested OpenClaw version | `2026.6.9` |
+| Tested OpenClaw version | `2026.6.10` |
 | Install path | `/root/.openclaw/extensions/openclaw-aivan` |
 
 ### Gateway event routing
 
-The plugin registers an OpenClaw interactive handler and forwards normalized events to AIVAN.
+The plugin registers an OpenClaw AgentHarness and forwards normalized events to AIVAN.
 
 Example supplier-side event:
 
@@ -648,47 +738,76 @@ Required acceptance criteria:
 - `openclaw plugins install . --force` passes.
 - `openclaw plugins inspect openclaw-aivan --runtime --json` returns `status: loaded`.
 - Gateway can call AIVAN.
-- Mock WeChat supplier event reaches AIVAN.
-- `project_id` is preserved.
-- `role_context` is preserved.
+- WeChat / OpenClaw event reaches AIVAN.
+- `project_id` is preserved when present.
+- `role_context` is preserved when present.
 - Supplier reply is not misclassified as a new buyer request.
 
 ### P0 verification evidence
 
-PR #2 verified the following production-critical flow:
+PR #3 and the CTyun deployment verified the following production-critical flow:
 
 ```text
-Gateway discovers AIVAN: PASS
-Gateway installs AIVAN: PASS
-Gateway loads AIVAN: PASS
-Gateway inspects AIVAN: PASS
-Gateway calls AIVAN: PASS
-Mock WeChat supplier event reaches AIVAN: PASS
-project_id preserved: PASS
-role_context preserved: PASS
-supplier reply classified correctly: PASS
+CTyun server environment: PASS
+PostgreSQL database: PASS
+OpenClaw Gateway v2026.6.10 running: PASS
+AIVAN v0.1.0 running on port 8000: PASS
+openclaw-aivan plugin loaded: PASS
+WeChat bot connected: PASS
+WeChat message receive/send path: PASS
+WeChat message → WeixinClawBot response: PASS
 ```
 
-Original install failure fixed:
+Original Gateway registration failure fixed:
 
 ```text
 TypeError: Cannot read properties of undefined (reading 'trim')
 ```
 
-Root cause: `registerInteractiveHandler` was called with an invalid `id` field and no `channel` field. OpenClaw expected `channel` and `namespace`, and called `.trim()` on an undefined channel value.
+Final OpenClaw Gateway fix:
 
-Final fix:
-
-- Use final plugin ID `openclaw-aivan` consistently.
-- Add required `channel` and `namespace` fields in `registerInteractiveHandler`.
-- Preserve `project_id` and `role_context` from OpenClaw context.
-- Use path-string `openclaw.extensions` and `runtimeExtensions`.
+- Use `registerAgentHarness` instead of the incompatible `registerInteractiveHandler` path.
+- Return a valid AgentHarness support object from `supports()`.
+- Extract the inbound prompt from `params.prompt` first, with fallback fields for compatibility.
+- Return a valid `EmbeddedRunAttemptResult` / AgentHarness attempt result.
+- Preserve `project_id` and `role_context` from OpenClaw context when present.
+- Forward events to AIVAN through `POST /api/openclaw/events`.
+- Keep Gateway stable when AIVAN is offline or when the prompt is empty/malformed.
 - Point `main`, `types`, and `exports` to compiled `dist/` files.
-- Include `openclaw.plugin.json` with `id`, `configSchema`, and `activation.onStartup`.
+- Include `openclaw.plugin.json` with `id`, `configSchema`, and startup activation metadata.
+
+### Next milestone: business-flow acceptance
+
+The current milestone proves production connectivity. The next acceptance target is business execution:
+
+```text
+Real WeChat procurement inquiry
+→ OpenClaw Gateway
+→ openclaw-aivan AgentHarness
+→ AIVAN event API
+→ RFQ / project creation
+→ pending human-approved response draft
+→ approved reply sent through WeChat
+```
+
+Example test message:
+
+```text
+帮我询价 10000 件白色纯棉衬衣，45 天内交温哥华
+```
+
+Expected result:
+
+```text
+AIVAN creates an RFQ / project
+AIVAN stores the event and context
+AIVAN generates a pending draft response
+No outbound message is sent without human approval
+```
 
 ### ClawHub publication
 
-The plugin is ready for ClawHub publication only after all Gateway P0 tests pass.
+The plugin is ready for ClawHub publication only after Gateway P0 tests and business-flow acceptance both pass.
 
 Dry run:
 
