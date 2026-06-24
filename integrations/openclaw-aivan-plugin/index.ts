@@ -113,7 +113,13 @@ export async function forwardEvent(event: {
   project_id?: string;
   role_context?: string | Record<string, unknown> | null;
   mode?: string;
-}): Promise<{ accepted: boolean; project_id?: string; action?: string; error?: string }> {
+}): Promise<{
+  accepted: boolean;
+  project_id?: string;
+  action?: string;
+  reply_text?: string;
+  error?: string;
+}> {
   const result = await safeFetch("/api/openclaw/events", {
     method: "POST",
     body: JSON.stringify(event),
@@ -128,8 +134,9 @@ export async function forwardEvent(event: {
   const d = result.data as Record<string, unknown>;
   return {
     accepted: true,
-    project_id: String(d["project_id"] ?? ""),
-    action: String(d["action"] ?? ""),
+    project_id: d["project_id"] ? String(d["project_id"]) : undefined,
+    action: d["action"] ? String(d["action"]) : undefined,
+    reply_text: d["reply_text"] ? String(d["reply_text"]) : undefined,
   };
 }
 
@@ -162,18 +169,17 @@ export async function getPendingDrafts(projectId?: string): Promise<{
     return { drafts: [], error: "Failed to fetch drafts" };
   }
   const d = result.data as Record<string, unknown>;
-  return { drafts: (d["drafts"] as drafts) ?? [] };
+  return { drafts: (d["drafts"] as DraftItem[]) ?? [] };
 }
 
-// TypeScript helper — mirrors the drafts array element type
-type drafts = Array<{
+type DraftItem = {
   draft_id: string;
   project_id: string;
   channel: string;
   target_role: string;
   message_text: string;
   created_at: string;
-}>;
+};
 
 /**
  * aivan.approveDraft — Approve a pending draft for sending.
@@ -185,10 +191,13 @@ export async function approveDraft(draftId: string): Promise<{
   draft_id: string;
   error?: string;
 }> {
-  const result = await safeFetch(`/api/drafts/${encodeURIComponent(draftId)}/approve`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  const result = await safeFetch(
+    `/api/drafts/${encodeURIComponent(draftId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    }
+  );
   if (!result.ok) {
     const d = result.data as Record<string, unknown>;
     return {
@@ -207,10 +216,13 @@ export async function rejectDraft(
   draftId: string,
   reason?: string
 ): Promise<{ rejected: boolean; draft_id: string; error?: string }> {
-  const result = await safeFetch(`/api/drafts/${encodeURIComponent(draftId)}/reject`, {
-    method: "POST",
-    body: JSON.stringify({ reason: reason ?? "rejected by operator" }),
-  });
+  const result = await safeFetch(
+    `/api/drafts/${encodeURIComponent(draftId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? "rejected by operator" }),
+    }
+  );
   if (!result.ok) {
     const d = result.data as Record<string, unknown>;
     return {
@@ -223,59 +235,258 @@ export async function rejectDraft(
 }
 
 // ─── Plugin metadata export for `openclaw plugins validate` ───────────────────
-// defineToolPlugin with zero tools satisfies the tool-plugin authoring validator.
-// The actual channel bridge runs via api.registerInteractiveHandler in register().
 export default defineToolPlugin({
   id: "openclaw-aivan",
   name: "AIVAN OpenClaw Bridge",
-  description: "OpenClaw bridge for forwarding IM/email/marketplace events to the local AIVAN service with human approval.",
+  description:
+    "OpenClaw bridge for forwarding IM/email/marketplace events to the local AIVAN service with human approval.",
   configSchema: Type.Object(
-    { aivanBaseUrl: Type.Optional(Type.String({ default: "http://127.0.0.1:8765" })) },
+    {
+      aivanBaseUrl: Type.Optional(
+        Type.String({ default: "http://127.0.0.1:8765" })
+      ),
+    },
     { additionalProperties: false }
   ),
   tools: (_tool) => [],
 });
 
+// ─── AgentHarness helpers ─────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractPrompt(params: any): string {
+  const candidates: unknown[] = [
+    params?.prompt,
+    params?.input,
+    params?.message?.text,
+    params?.userMessage?.text,
+    params?.session?.latestUserMessage?.text,
+    params?.session?.prompt,
+  ];
+  return (
+    candidates.find((v) => typeof v === "string" && (v as string).trim().length > 0) as string | undefined
+  )?.trim() ?? "";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractSessionContext(params: any): {
+  conversation_id?: string;
+  sender_id?: string;
+  channel?: string;
+  project_id?: string;
+  role_context?: string;
+} {
+  const ctx: {
+    conversation_id?: string;
+    sender_id?: string;
+    channel?: string;
+    project_id?: string;
+    role_context?: string;
+  } = {};
+
+  const sessionId: unknown =
+    params?.sessionId ?? params?.session?.id ?? params?.sessionKey;
+  if (sessionId != null) ctx.conversation_id = String(sessionId);
+
+  const senderId: unknown =
+    params?.senderId ??
+    params?.sender?.id ??
+    params?.peerId ??
+    params?.session?.peerId;
+  if (senderId != null) ctx.sender_id = String(senderId);
+
+  const channel: unknown =
+    params?.messageChannel ??
+    params?.channelId ??
+    params?.channel ??
+    params?.messageProvider;
+  if (channel != null) ctx.channel = String(channel);
+
+  const projectId: unknown =
+    params?.metadata?.project_id ?? params?.project_id;
+  if (projectId != null) ctx.project_id = String(projectId);
+
+  const roleContext: unknown =
+    params?.metadata?.role_context ?? params?.role_context;
+  if (roleContext != null) ctx.role_context = String(roleContext);
+
+  return ctx;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildSuccessResult(params: any, replyText: string): any {
+  const sessionId: string = typeof params?.sessionId === "string" ? params.sessionId : "";
+  const now = Date.now();
+  const prompt = extractPrompt(params);
+
+  const assistantMsg = {
+    role: "assistant",
+    content: [{ type: "text", text: replyText }],
+    api: "aivan",
+    provider: "aivan",
+    model: "aivan",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: now,
+  };
+
+  const messagesSnapshot: unknown[] = [];
+  if (prompt) {
+    messagesSnapshot.push({ role: "user", content: prompt, timestamp: now - 1 });
+  }
+  messagesSnapshot.push(assistantMsg);
+
+  return {
+    aborted: false,
+    externalAbort: false,
+    timedOut: false,
+    idleTimedOut: false,
+    timedOutDuringCompaction: false,
+    promptError: null,
+    promptErrorSource: null,
+    sessionIdUsed: sessionId,
+    messagesSnapshot,
+    assistantTexts: [replyText],
+    toolMetas: [],
+    lastAssistant: assistantMsg,
+    didSendViaMessagingTool: false,
+    messagingToolSentTexts: [],
+    messagingToolSentMediaUrls: [],
+    messagingToolSentTargets: [],
+    cloudCodeAssistFormatError: false,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildPassThroughResult(params: any): any {
+  const sessionId: string = typeof params?.sessionId === "string" ? params.sessionId : "";
+  return {
+    aborted: false,
+    externalAbort: false,
+    timedOut: false,
+    idleTimedOut: false,
+    timedOutDuringCompaction: false,
+    promptError: null,
+    promptErrorSource: null,
+    sessionIdUsed: sessionId,
+    messagesSnapshot: [],
+    assistantTexts: [],
+    toolMetas: [],
+    lastAssistant: undefined,
+    didSendViaMessagingTool: false,
+    messagingToolSentTexts: [],
+    messagingToolSentMediaUrls: [],
+    messagingToolSentTargets: [],
+    cloudCodeAssistFormatError: false,
+  };
+}
+
 // ─── OpenClaw Plugin Entry Point ──────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function register(api: any): void {
-  if (typeof api.registerInteractiveHandler === "function") {
-    // channel: required by PluginInteractiveRegistration — OpenClaw calls .trim() on it
-    // namespace: required identifier (previously mis-named as "id", which is not a valid field)
-    api.registerInteractiveHandler({
-      channel: "openclaw-weixin",
-      namespace: "aivan",
-      handler: async (ctx: any) => {
-        const msg = ctx?.message?.text ?? ctx?.text ?? "";
-        const channelId = ctx?.channel ?? ctx?.channelId ?? "openclaw-weixin";
-        const senderId = ctx?.senderId ?? ctx?.peer?.id ?? "unknown";
-        const convId = ctx?.conversationId ?? ctx?.threadId ?? senderId;
-        const accountId = ctx?.accountId ?? ctx?.channelAccountId ?? "";
-        // Extract project_id and role_context from ctx — pass through for supplier-reply routing
-        const projectId =
-          ctx?.metadata?.project_id ?? ctx?.projectId ?? ctx?.project_id ?? null;
-        const roleContext =
-          ctx?.metadata?.role_context ?? ctx?.roleContext ?? ctx?.role_context ?? null;
-        const event: any = {
-          source: "openclaw",
-          channel: channelId,
-          channel_account_id: accountId,
-          conversation_id: convId,
-          sender_id: senderId,
-          sender_display_name: ctx?.peer?.name ?? "",
-          message_text: msg,
-          message_type: "text",
-          attachments: [],
-          timestamp: new Date().toISOString(),
-          project_id: projectId,
-          role_context: roleContext,
-          mode: "auto",
+  try {
+    if (typeof api?.registerAgentHarness !== "function") {
+      process.stderr.write(
+        "[aivan] registerAgentHarness not available (api keys: " +
+          JSON.stringify(Object.keys(api ?? {})) +
+          ")\n"
+      );
+      return;
+    }
+
+    api.registerAgentHarness({
+      id: "openclaw-aivan",
+      label: "AIVAN Agent Harness",
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      supports(_ctx: any): { supported: boolean; reason?: string } {
+        return {
+          supported: true,
+          reason:
+            "AIVAN handles trade inquiry / RFQ / supplier-routing messages",
         };
-        const result: any = await forwardEvent(event);
-        if (result?.accepted && result?.reply_text) {
-          return { text: result.reply_text };
+      },
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async runAttempt(params: any): Promise<any> {
+        try {
+          const prompt = extractPrompt(params);
+
+          if (!prompt) {
+            process.stderr.write(
+              "[aivan] runAttempt: no prompt found in params, returning pass-through\n"
+            );
+            return buildPassThroughResult(params);
+          }
+
+          const ctx = extractSessionContext(params);
+          const event: Parameters<typeof forwardEvent>[0] = {
+            source: "openclaw",
+            channel: ctx.channel ?? "openclaw-weixin",
+            conversation_id: ctx.conversation_id ?? "unknown",
+            sender_id: ctx.sender_id ?? "unknown",
+            message_text: prompt,
+            message_type: "text",
+            attachments: [],
+            timestamp: new Date().toISOString(),
+            mode: "auto",
+            ...(ctx.project_id != null ? { project_id: ctx.project_id } : {}),
+            ...(ctx.role_context != null
+              ? { role_context: ctx.role_context }
+              : {}),
+          };
+
+          process.stderr.write(
+            `[aivan] forwarding event: prompt_len=${prompt.length} session=${ctx.conversation_id ?? "?"}\n`
+          );
+
+          let result: Awaited<ReturnType<typeof forwardEvent>>;
+          try {
+            result = await forwardEvent(event);
+          } catch (fetchErr) {
+            process.stderr.write(
+              `[aivan] AIVAN fetch error: ${String(fetchErr)}\n`
+            );
+            return buildPassThroughResult(params);
+          }
+
+          if (!result.accepted) {
+            process.stderr.write(
+              `[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`
+            );
+            return buildPassThroughResult(params);
+          }
+
+          const replyText =
+            result.reply_text ??
+            (result.project_id
+              ? `已处理请求 (项目: ${result.project_id})`
+              : "已收到您的请求");
+
+          process.stderr.write(
+            `[aivan] AIVAN reply: ${replyText.slice(0, 80)}\n`
+          );
+          return buildSuccessResult(params, replyText);
+        } catch (err) {
+          process.stderr.write(
+            `[aivan] runAttempt unexpected error: ${String(err)}\n`
+          );
+          return buildPassThroughResult(params);
         }
-        return;
       },
     });
+
+    process.stderr.write(
+      "[aivan] registerAgentHarness registered successfully\n"
+    );
+  } catch (err) {
+    process.stderr.write(`[aivan] register() error: ${String(err)}\n`);
   }
 }
