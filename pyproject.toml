@@ -1,6 +1,6 @@
 [project]
 name = "aivan"
-version = "0.1.0"
+version = "0.2.0"
 description = "AIVAN - local-first AI trade salesperson assistant powered by OpenClaw and multi-LLM orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
