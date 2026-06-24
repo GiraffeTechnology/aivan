@@ -23,6 +23,11 @@ class DraftRepository:
             InquiryDraftRecord.status == "pending_approval",
         ).order_by(InquiryDraftRecord.created_at.asc()).all()
 
+    def list_for_project(self, project_id: str) -> list[InquiryDraftRecord]:
+        return self.db.query(InquiryDraftRecord).filter(
+            InquiryDraftRecord.project_id == project_id,
+        ).order_by(InquiryDraftRecord.created_at.asc()).all()
+
     def list_all_pending(self) -> list[InquiryDraftRecord]:
         return self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.status == "pending_approval"
