@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     _ensure_init()
     yield
 
-app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,7 +57,7 @@ except Exception:
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "product": "AIVAN", "version": "0.1.0"}
+    return {"status": "ok", "product": "AIVAN", "version": "0.2.0"}
 
 @app.get("/app", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
@@ -72,22 +72,32 @@ def openclaw_event(
 ):
     try:
         from aivan.openclaw.event_adapter import parse_openclaw_event
-        from aivan.agents.trade_salesperson_agent import handle_trade_salesperson_event
+        from aivan.execution.rfq_execution import create_rfq_from_event
         event = parse_openclaw_event(event_data)
-        result = handle_trade_salesperson_event(event, db)
-        return {
-            "project_id": result.project_id,
-            "action": result.action,
-            "message": result.message,
-            "drafts_created": result.drafts_created,
-            "errors": result.errors,
-        }
+        result = create_rfq_from_event(event, db)
+        return result.model_dump()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/skill/invoke")
 def skill_invoke(event_data: dict, db: Session = Depends(get_db)):
-    return openclaw_event(event_data, db)
+    from aivan.openclaw.event_adapter import parse_openclaw_event
+    from aivan.execution.rfq_execution import create_rfq_from_event
+    return create_rfq_from_event(parse_openclaw_event(event_data), db).model_dump()
+
+
+@app.post("/api/rfq/create-from-event")
+def create_rfq_from_event_api(
+    event_data: dict,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    try:
+        from aivan.openclaw.event_adapter import parse_openclaw_event
+        from aivan.execution.rfq_execution import create_rfq_from_event
+        return create_rfq_from_event(parse_openclaw_event(event_data), db).model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _do_approve_draft(draft_id: str, body: dict | None, db: Session) -> dict:
@@ -324,6 +334,127 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
         "created_at": str(project.created_at),
     }
 
+@app.get("/api/projects/{project_id}/drafts")
+def get_project_drafts(
+    project_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    project = ProjectRepository(db).get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    drafts = DraftRepository(db).list_for_project(project_id)
+    return {"project_id": project_id, "drafts": [_serialize_draft(d) for d in drafts]}
+
+
+@app.post("/api/projects/{project_id}/strategy")
+def update_project_strategy(
+    project_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    from aivan.schemas.rfq import RFQStrategy
+    project_repo = ProjectRepository(db)
+    project = project_repo.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        strategy = RFQStrategy(**body)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
+    requirement = dict(project.requirement_json or {})
+    requirement["strategy"] = strategy.model_dump()
+    project_repo.update_requirement(project_id, requirement)
+    from aivan.db.repositories.event_repo import ExecutionEventRepository
+    ExecutionEventRepository(db).append(
+        project_id,
+        "STRATEGY_UPDATED",
+        f"Strategy updated to priority={strategy.priority}, scope={strategy.supplier_scope}",
+        payload=strategy.model_dump(),
+        actor="api",
+    )
+    db.commit()
+    return {"project_id": project_id, "strategy": strategy.model_dump()}
+
+
+@app.post("/api/projects/{project_id}/run-gltg")
+def run_project_gltg(
+    project_id: str,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    from aivan.integrations.giraffe_db import GiraffeDBClient
+    from aivan.integrations.gltg import GLTGClient
+    from aivan.schemas.requirement import BuyerRequirement
+    from aivan.schemas.rfq import RFQStrategy
+    project_repo = ProjectRepository(db)
+    project = project_repo.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    payload = dict(project.requirement_json or {})
+    try:
+        requirement = BuyerRequirement(**{k: v for k, v in payload.items() if k in BuyerRequirement.model_fields})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Project requirement is not runnable by GLTG: {e}")
+    strategy_payload = (body or {}).get("strategy") or payload.get("strategy") or {}
+    try:
+        strategy = RFQStrategy(**strategy_payload)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
+    giraffe = GiraffeDBClient(db).build_context(requirement, customer_id=project.customer_id)
+    simulation = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    payload["strategy"] = strategy.model_dump()
+    payload["gltg_simulation"] = simulation.model_dump()
+    project_repo.update_requirement(project_id, payload)
+    from aivan.db.repositories.event_repo import ExecutionEventRepository
+    ExecutionEventRepository(db).append(
+        project_id,
+        "GLTG_SIMULATION_CREATED",
+        f"{strategy.lead_time_confidence} lead time={simulation.selected_confidence_days} days",
+        payload=simulation.model_dump(),
+        actor="gltg",
+    )
+    db.commit()
+    return {"project_id": project_id, "gltg_simulation": simulation.model_dump()}
+
+
+@app.post("/api/user-preferences/update")
+def update_user_preferences(
+    body: dict,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    from aivan.db.repositories.preference_repo import UserPreferenceRepository
+    user_id = body.get("user_id")
+    preference_type = body.get("preference_type")
+    value = body.get("value")
+    if not user_id or not preference_type or not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="user_id, preference_type, and object value are required")
+    record = UserPreferenceRepository(db).upsert(
+        user_id=user_id,
+        preference_type=preference_type,
+        value=value,
+        source=body.get("source", "api"),
+        confidence=float(body.get("confidence", 0.5)),
+    )
+    db.commit()
+    return {"preference": _serialize_preference(record)}
+
+
+@app.get("/api/user-preferences")
+def get_user_preferences(
+    user_id: str | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    from aivan.db.repositories.preference_repo import UserPreferenceRepository
+    repo = UserPreferenceRepository(db)
+    records = repo.list_for_user(user_id) if user_id else repo.list_all()
+    return {"preferences": [_serialize_preference(record) for record in records]}
+
+
 @app.get("/api/projects/{project_id}/events")
 def get_project_events(project_id: str, db: Session = Depends(get_db)):
     from aivan.db.repositories.event_repo import ExecutionEventRepository
@@ -382,3 +513,42 @@ def get_account_permissions(account_connection_id: str, db: Session = Depends(ge
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     return {"account_connection_id": account_connection_id, "permissions": account.permissions_json, "allowed_actions": account.allowed_actions_json}
+
+
+def _serialize_draft(d) -> dict:
+    draft_type = ""
+    for part in (d.notes or "").split():
+        if part.startswith("draft_type="):
+            draft_type = part.split("=", 1)[1]
+    return {
+        "draft_id": d.draft_id,
+        "project_id": d.project_id,
+        "conversation_id": d.conversation_id,
+        "channel": d.channel,
+        "target_peer_id": d.target_peer_id,
+        "target_role": d.target_role,
+        "message_text": d.message_text,
+        "message_type": d.message_type,
+        "attachments": d.attachments_json or [],
+        "status": d.status,
+        "created_by_agent": d.created_by_agent,
+        "draft_type": draft_type,
+        "approved_by": d.approved_by,
+        "notes": d.notes,
+        "created_at": str(d.created_at),
+        "approved_at": str(d.approved_at) if d.approved_at else None,
+        "sent_at": str(d.sent_at) if d.sent_at else None,
+    }
+
+
+def _serialize_preference(record) -> dict:
+    return {
+        "preference_id": record.preference_id,
+        "user_id": record.user_id,
+        "preference_type": record.preference_type,
+        "value": record.value_json,
+        "source": record.source,
+        "confidence": record.confidence,
+        "created_at": str(record.created_at),
+        "updated_at": str(record.updated_at),
+    }
