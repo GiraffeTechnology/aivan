@@ -13,7 +13,7 @@ AIVAN has reached its first production-connectivity milestone.
 Validated environment:
 
 ```text
-Cloud server: CTyun
+Cloud server
 Database: PostgreSQL
 OpenClaw Gateway: v2026.6.10
 AIVAN: v0.1.0
@@ -163,7 +163,7 @@ uv run aivan serve                   # Start web UI at http://127.0.0.1:8765/app
 
 Open `http://127.0.0.1:8765/app` in your browser after running `serve`.
 
-For server deployment, set `AIVAN_HOST`, `AIVAN_PORT`, and `AIVAN_DB_URL` explicitly. The CTyun milestone deployment runs AIVAN v0.1.0 on port `8000` with PostgreSQL.
+For server deployment, set `AIVAN_HOST`, `AIVAN_PORT`, and `AIVAN_DB_URL` explicitly. The cloud server milestone deployment runs AIVAN v0.1.0 on port `8000` with PostgreSQL.
 
 ---
 
@@ -177,7 +177,7 @@ All variables are set in `.env`. Copy `.env.example` to get started. The default
 |---|---|---|
 | `AIVAN_ENV` | `local` | Runtime environment (`local`, `production`). |
 | `AIVAN_HOST` | `127.0.0.1` | Host address for the web server. |
-| `AIVAN_PORT` | `8765` | Port for the web server. CTyun milestone deployment uses `8000`. |
+| `AIVAN_PORT` | `8765` | Port for the web server. Cloud server milestone deployment uses `8000`. |
 | `AIVAN_DB_URL` | `sqlite:///./data/aivan.db` | Database URL. SQLite is the local default; PostgreSQL is supported for server deployment. |
 | `AIVAN_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `AIVAN_REQUIRE_HUMAN_APPROVAL` | `true` | Enforce human approval gate for all outbound messages. |
@@ -606,7 +606,7 @@ Package name:
 Tested milestone environment:
 
 ```text
-Cloud server: CTyun
+Cloud server
 OpenClaw Gateway: v2026.6.10
 AIVAN: v0.1.0
 AIVAN runtime port: 8000
@@ -745,10 +745,10 @@ Required acceptance criteria:
 
 ### P0 verification evidence
 
-PR #3 and the CTyun deployment verified the following production-critical flow:
+PR #3 and the cloud server deployment verified the following production-critical flow:
 
 ```text
-CTyun server environment: PASS
+Cloud server environment: PASS
 PostgreSQL database: PASS
 OpenClaw Gateway v2026.6.10 running: PASS
 AIVAN v0.1.0 running on port 8000: PASS
