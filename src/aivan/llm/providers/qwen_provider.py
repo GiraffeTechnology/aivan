@@ -1,6 +1,7 @@
 import os
 import httpx
 from aivan.llm.base import LLMProvider
+from aivan.llm.config import get_llm_max_retries, get_llm_timeout
 from aivan.llm.json_utils import safe_json_loads
 
 class QwenProvider(LLMProvider):
@@ -9,8 +10,9 @@ class QwenProvider(LLMProvider):
     def __init__(self):
         self.api_key = os.environ.get("QWEN_API_KEY", "")
         self.base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        self.model = os.environ.get("QWEN_MODEL", "qwen-turbo")
-        self.timeout = int(os.environ.get("AIVAN_LLM_TIMEOUT_SECONDS", "30"))
+        self.model = os.environ.get("QWEN_MODEL", "qwen-plus")
+        self.timeout = get_llm_timeout()
+        self.max_retries = get_llm_max_retries()
 
     def complete_json(self, task: str, system_prompt: str, user_prompt: str, schema_hint: dict, temperature: float = 0.0) -> dict:
         if not self.api_key:
@@ -25,7 +27,13 @@ class QwenProvider(LLMProvider):
             "temperature": temperature,
             "response_format": {"type": "json_object"},
         }
-        response = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        return safe_json_loads(content, {})
+        last_error: Exception | None = None
+        for _ in range(self.max_retries + 1):
+            try:
+                response = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+                return safe_json_loads(content, {})
+            except Exception as exc:
+                last_error = exc
+        raise RuntimeError(f"Qwen request failed after retries: {last_error}")
