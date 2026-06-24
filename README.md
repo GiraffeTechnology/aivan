@@ -6,9 +6,9 @@ AIVAN is a standalone AI trade salesperson assistant extracted from the broader 
 
 ---
 
-## Current Milestone — OpenClaw Gateway + WeChat Connectivity
+## Current Milestone — Private-Domain RFQ Execution
 
-AIVAN has reached its first production-connectivity milestone.
+AIVAN has moved beyond connectivity validation into the private-domain RFQ execution milestone.
 
 Validated environment:
 
@@ -16,7 +16,7 @@ Validated environment:
 Cloud server
 Database: PostgreSQL
 OpenClaw Gateway: v2026.6.10
-AIVAN: v0.1.0
+AIVAN: v0.2.0
 AIVAN runtime port: 8000
 Plugin: openclaw-aivan
 IM channel: WeChat bot via WeixinClawBot
@@ -32,16 +32,20 @@ AIVAN server running: PASS
 PostgreSQL available: PASS
 ```
 
-This milestone proves that AIVAN can run as an independent product connected to a real OpenClaw Gateway and a live WeChat bot bridge. The next milestone is business-flow validation:
+This milestone proves that AIVAN can run as an independent product connected to a real OpenClaw Gateway and a live WeChat bot bridge, while creating auditable RFQ/project workflows:
 
 ```text
-WeChat procurement inquiry
+User IM command or customer email
 → OpenClaw Gateway
 → openclaw-aivan AgentHarness
 → AIVAN /api/openclaw/events
-→ RFQ / project creation
-→ pending human-approved response draft
-→ approved reply sent through OpenClaw / WeChat
+→ LLM strategy interpretation
+→ Giraffe DB private-domain lookup
+→ GLTG lead-time simulation
+→ RFQ/project creation
+→ pending supplier inquiry email drafts
+→ user IM summary / approval request
+→ approved email sent through OpenClaw email integration
 ```
 
 ---
@@ -53,6 +57,54 @@ Trading company salespeople handle a high volume of repetitive, time-sensitive t
 AIVAN is designed for exactly this workflow. It connects to existing IM, email, and marketplace accounts through OpenClaw and provides a structured, auditable process from inquiry to quote. The salesperson remains in control at every decision point that touches a counterparty. AIVAN does the heavy lifting — research, screening, calculation, drafting — while the human retains final authority over what gets sent and to whom.
 
 AIVAN is developed first as a standalone product. Once stable, its capabilities can be forked, ported, or integrated into `abcdYi` and the broader `giraffe-agent` framework. AIVAN runtime and OpenClaw Gateway fixes belong in this repository first, not directly in `abcdYi` or `giraffe-agent`.
+
+## AIVAN Product Boundary
+
+AIVAN is the private-domain RFQ execution system. It is not a generic LLM chatbot, and it is not a redundant wrapper around the OpenClaw Qwen Gateway.
+
+AIVAN owns RFQ/project workflow, trade event classification, private-domain context orchestration, Giraffe DB access, GLTG lead-time simulation calls, supplier-routing decisions, user preference memory usage, email draft creation, human approval, audit trails, and channel execution policy.
+
+AIVAN does not own IM account login, WeChat/LINE/WhatsApp credential storage, CAPTCHA bypass, platform anti-bot bypass, LLM general-knowledge trade decisions, unapproved outbound communication, or final legal, credit, sanctions, and compliance decisions.
+
+## Private-Domain Data and Giraffe DB
+
+Giraffe DB is AIVAN's private-domain source of truth. AIVAN queries it for customers, customer preferences, suppliers, supplier relationships, historical RFQs, historical quotations, historical lead-time records, product categories, user preferences, approval history, draft revision history, and risk flags.
+
+AIVAN must never ask an LLM to infer supplier facts, customer history, historical prices, historical lead times, or user preference memory from general knowledge. The LLM may reason over Giraffe DB context provided by AIVAN, but Giraffe DB remains the business fact source.
+
+## GLTG Lead-Time Simulation
+
+GLTG is the lead-time simulation model. AIVAN calls GLTG for P50/P80/P90 lead-time estimates, minimum feasible lead time, supplier-set feasibility, known-suppliers-first feasibility, public-bidding time cost, and fallback trigger recommendations.
+
+The LLM may explain GLTG outputs in user-friendly language, but it must not replace GLTG calculations or invent lead-time estimates.
+
+## LLM Strategy Intelligence
+
+LLMs are used deeply for intent understanding, user preference interpretation, strategy translation, contextual reasoning over AIVAN-provided Giraffe DB and GLTG context, email summarization, customer/supplier message classification, draft generation, reason explanation, post-action review, and preference extraction.
+
+Business decisions that affect workflow state use structured JSON outputs and deterministic fallbacks. AIVAN validates project attachment against database state and preserves the approval gate regardless of LLM output.
+
+## User-Control IM vs Counterparty Outbound Channels
+
+WeChat, LINE, WhatsApp, and similar IM channels are user-control channels. AIVAN uses them for user command input, notification, customer email summaries, approval requests, revision requests, status updates, and RFQ/project progress notifications.
+
+Current counterparty outbound execution uses email. AIVAN creates pending email drafts for customer and supplier commercial communication, and sends them only after human approval.
+
+AIVAN must not automatically send commercial messages to customers or suppliers through personal WeChat, LINE, WhatsApp, or similar personal IM channels. Future counterparty outbound channels must be official, API-permitted, auditable, authorized, and still subject to human approval.
+
+## Email-First Outbound Execution
+
+The current outbound execution chain is:
+
+```text
+AIVAN creates counterparty email draft
+→ draft remains pending_approval
+→ user approves or rejects
+→ approved email is sent via OpenClaw/email integration
+→ audit event and sent status are recorded
+```
+
+User-facing IM summaries may be sent as notifications through OpenClaw because they are user-control messages, not counterparty commercial messages.
 
 ---
 
@@ -87,6 +139,11 @@ AIVAN RFQ / supplier-routing / lead-time capability
 5. AIVAN does not make final legal, credit, sanctions, or compliance decisions.
 6. AIVAN never hallucinates supplier facts. All supplier data is sourced or mock.
 7. Never log API keys or credentials.
+8. Giraffe DB is the private-domain source of truth.
+9. GLTG is the lead-time simulation model.
+10. LLMs provide controlled strategy intelligence, not business facts.
+11. WeChat, LINE, WhatsApp, and similar IM channels are user-control channels.
+12. Current counterparty outbound execution uses email.
 
 ---
 
@@ -430,11 +487,11 @@ This context preservation is required for supplier-side replies to be routed to 
 
 ## Human Approval Gate
 
-Every outbound message drafted by AIVAN is saved to the local database with status `pending`. No message is sent until a human explicitly approves it.
+Every counterparty outbound message drafted by AIVAN is saved to the local database with status `pending_approval`. No counterparty message is sent until a human explicitly approves it.
 
 **Approval workflow:**
 
-1. AIVAN drafts a message (supplier inquiry, buyer quote, follow-up, etc.) and stores it as a pending draft.
+1. AIVAN drafts a message (supplier inquiry, buyer quote, follow-up, etc.) and stores it as a pending approval draft.
 2. The salesperson reviews the draft in the web UI at `http://127.0.0.1:8765/app` or via the API.
 3. The salesperson approves or rejects the draft.
 4. On approval, AIVAN calls OpenClaw's send endpoint to deliver the message.
@@ -495,6 +552,7 @@ The following scripts run complete end-to-end scenarios in mock mode and are use
 
 ```bash
 uv run python scripts/run_aivan_e2e.py
+uv run python scripts/run_aivan_private_domain_rfq_e2e.py
 uv run python scripts/run_aivan_marketplace_e2e.py
 uv run python scripts/run_aivan_unknown_supplier_risk_e2e.py
 uv run python scripts/run_aivan_platform_whitelist_e2e.py
@@ -530,13 +588,25 @@ The AIVAN server exposes a REST API on `http://127.0.0.1:8765` by default. Serve
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/openclaw/events` | Receive an inbound event from OpenClaw (message, marketplace reply, etc.). |
+| `POST` | `/api/rfq/create-from-event` | Create or update an RFQ/project from a normalized OpenClaw event. |
 
 ### Projects
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/projects` | List all trade projects. |
+| `GET` | `/api/projects/{id}` | Fetch a specific trade project. |
 | `GET` | `/api/projects/{id}/events` | List all events for a specific project. |
+| `GET` | `/api/projects/{id}/drafts` | List all drafts and user notifications for a project. |
+| `POST` | `/api/projects/{id}/strategy` | Update a project's structured RFQ strategy. |
+| `POST` | `/api/projects/{id}/run-gltg` | Run GLTG lead-time simulation for a project. |
+
+### User Preferences
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/user-preferences` | List learned user preferences, optionally filtered by `user_id`. |
+| `POST` | `/api/user-preferences/update` | Save or update a user preference record in private-domain memory. |
 
 ### Suppliers
 

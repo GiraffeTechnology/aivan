@@ -17,6 +17,11 @@ def send_if_approved(draft_id: str, db_session) -> OpenClawSendResponse:
         return OpenClawSendResponse(success=False, error=f"Draft {draft_id} not found")
     if draft.status != "approved":
         return OpenClawSendResponse(success=False, error=f"Draft {draft_id} not approved (status: {draft.status})")
+    try:
+        from aivan.execution.channel_policy import validate_draft_send_policy
+        validate_draft_send_policy(draft)
+    except ValueError as exc:
+        return OpenClawSendResponse(success=False, error=str(exc))
 
     client = get_openclaw_client()
     request = OpenClawSendRequest(
