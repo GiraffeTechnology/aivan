@@ -76,6 +76,21 @@ def _customer_email_event() -> dict:
     }
 
 
+def _customer_personal_im_event_missing_actor() -> dict:
+    return {
+        "source": "openclaw",
+        "channel": "wechat",
+        "channel_account_id": "sales-user-wechat",
+        "conversation_id": "customer_personal_im_thread_001",
+        "message_id": "customer_im_msg_001",
+        "sender_id": "customer_wechat_counterparty_001",
+        "sender_display_name": "Vancouver Buyer WeChat",
+        "message_text": "We need 10,000 white cotton shirts delivered to Vancouver within 45 days.",
+        "role_context": "customer",
+        "mode": "auto",
+    }
+
+
 def test_strategy_interpretation_urgent_known_supplier_command():
     strategy = interpret_strategy("这个客户很急，先找靠谱的老供应商，价格别太离谱。")
 
@@ -233,6 +248,63 @@ def test_customer_email_ingestion_creates_user_im_approval_notification(api_clie
     assert user_notifications[0]["status"] == "sent"
 
 
+def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_client):
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    supplier_event = {
+        "source": "openclaw",
+        "channel": "wechat",
+        "conversation_id": "supplier_reply_thread_001",
+        "message_id": "supplier_reply_msg_001",
+        "sender_id": "supplier_001",
+        "sender_display_name": "Guangzhou Trendy Garment",
+        "project_id": created["project_id"],
+        "message_text": "We can quote USD 4.50/pc, MOQ 5000 pcs, daily capacity 500 pcs, lead time 35 days, FOB Guangzhou.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }
+
+    response = api_client.post("/api/openclaw/events", json=supplier_event)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["event_type"] == "supplier_reply"
+    assert payload["action"] == "buyer_options_ready"
+    assert payload["drafts_created"]
+
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["requirement"]["supplier_replies"][0]["unit_price"] == 4.5
+    assert project["requirement"]["lead_time_estimates"][0]["expected_days"] > 0
+    assert project["requirement"]["buyer_options"]
+    assert project["selected_option"]["quote"]["buyer_unit_price"] > 0
+
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    customer_drafts = [d for d in drafts if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"]
+    assert customer_drafts
+    assert customer_drafts[0]["channel"] == "email"
+    assert customer_drafts[0]["status"] == "pending_approval"
+
+    events = api_client.get(f"/api/projects/{created['project_id']}/events").json()["events"]
+    assert any(event["event_type"] == "SUPPLIER_REPLY_PARSED" for event in events)
+    assert any(event["event_type"] == "BUYER_OPTIONS_GENERATED" for event in events)
+
+
+def test_customer_personal_im_without_actor_requires_owner_resolution(api_client):
+    event = _customer_personal_im_event_missing_actor()
+
+    response = api_client.post("/api/rfq/create-from-event", json=event)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
+    user_notifications = [d for d in drafts if d["target_role"] == "user"]
+    assert user_notifications
+    assert user_notifications[0]["channel"] == "internal"
+    assert user_notifications[0]["target_peer_id"] == "owner_resolution_required"
+    assert user_notifications[0]["target_peer_id"] != event["sender_id"]
+    assert user_notifications[0]["status"] == "pending_approval"
+    assert "owner_resolution_required" in user_notifications[0]["notes"]
+
+
 def test_invalid_llm_json_falls_back_to_deterministic_strategy(monkeypatch):
     import aivan.execution.rfq_execution as rfq_execution
 
@@ -242,6 +314,40 @@ def test_invalid_llm_json_falls_back_to_deterministic_strategy(monkeypatch):
 
     assert strategy.priority == "speed"
     assert strategy.supplier_scope == "known_suppliers_first"
+
+
+@pytest.mark.parametrize(
+    "raw_strategy",
+    [
+        {"priority": "speed", "supplier_scope": "known_supplier_first"},
+        {"priority": "speed", "public_bidding": "fallback"},
+        {"priority": "speed", "lead_time_confidence": "p80"},
+    ],
+)
+def test_invalid_llm_strategy_fields_fall_back_deterministically(monkeypatch, raw_strategy):
+    import aivan.execution.rfq_execution as rfq_execution
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", lambda *args, **kwargs: raw_strategy)
+
+    strategy = rfq_execution.interpret_strategy("这个客户很急，先找靠谱的老供应商，价格别太离谱。")
+
+    assert strategy.priority == "speed"
+    assert strategy.supplier_scope == "known_suppliers_first"
+    assert strategy.public_bidding == "fallback_only"
+    assert strategy.lead_time_confidence == "P80"
+
+
+def test_partial_llm_strategy_payload_uses_schema_defaults(monkeypatch):
+    import aivan.execution.rfq_execution as rfq_execution
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", lambda *args, **kwargs: {"priority": "speed"})
+
+    strategy = rfq_execution.interpret_strategy("urgent order")
+
+    assert strategy.priority == "speed"
+    assert strategy.supplier_scope == "known_suppliers_first"
+    assert strategy.public_bidding == "fallback_only"
+    assert strategy.lead_time_confidence == "P80"
 
 
 def test_missing_project_attachment_is_validated_against_db(api_client):
