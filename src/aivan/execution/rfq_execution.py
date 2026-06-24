@@ -3,12 +3,15 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
+from aivan.agents.supplier_response_agent import parse_supplier_reply
+from aivan.agents.buyer_option_agent import generate_buyer_options
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient
 from aivan.integrations.gltg import GLTGClient
+from aivan.leadtime.calculator import calculate_leadtime_for_requirement
 from aivan.llm.gateway import llm_complete_json
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.client import get_openclaw_client
@@ -85,14 +88,22 @@ def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> 
         raw = llm_complete_json("aivan_strategy_interpretation", STRATEGY_SYSTEM, user_prompt, schema_hint)
     except Exception:
         raw = {}
-    if not raw or raw.get("priority") not in {"speed", "price", "quality", "reliability", "balanced"}:
-        raw = _fallback_strategy(raw_text).model_dump()
-    return RFQStrategy(**raw)
+    if not isinstance(raw, dict):
+        raw = {}
+    strategy_keys = set(RFQStrategy.model_fields)
+    if not (set(raw) & strategy_keys):
+        return _fallback_strategy(raw_text)
+    try:
+        return RFQStrategy(**raw)
+    except Exception:
+        return _fallback_strategy(raw_text)
 
 
 def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
     classification = classify_event(event, db)
-    if classification.event_type in {"supplier_reply", "internal_status_request", "approval_response", "unknown"}:
+    if classification.event_type == "supplier_reply":
+        return _handle_supplier_reply_event(event, classification, db)
+    if classification.event_type in {"internal_status_request", "approval_response", "unknown"}:
         return _record_non_rfq_event(event, classification, db)
 
     project = _get_or_create_project(event, classification, db)
@@ -339,7 +350,7 @@ def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session)
 
 
 def _send_user_control_notification(project_id: str, event: OpenClawEvent, message_text: str, db: Session) -> dict:
-    channel, target_peer_id = _user_control_channel_and_target(event)
+    channel, target_peer_id, should_send, reason = _user_control_channel_and_target(event, db)
     repo = DraftRepository(db)
     draft = repo.create(
         project_id,
@@ -351,11 +362,18 @@ def _send_user_control_notification(project_id: str, event: OpenClawEvent, messa
             "message_text": message_text,
             "message_type": "text",
             "attachments_json": [],
-            "status": "approved",
+            "status": "approved" if should_send else "pending_approval",
             "created_by_agent": "aivan_user_control",
-            "notes": "draft_type=approval_request_im",
+            "notes": f"draft_type=approval_request_im {reason}",
         },
     )
+    if not should_send:
+        return {
+            "draft_id": draft.draft_id,
+            "sent": False,
+            "message_id": "",
+            "error": "owner resolution required before sending user-control notification",
+        }
     response = get_openclaw_client().send_message(
         OpenClawSendRequest(
             channel=channel,
@@ -376,14 +394,31 @@ def _send_user_control_notification(project_id: str, event: OpenClawEvent, messa
     }
 
 
-def _user_control_channel_and_target(event: OpenClawEvent) -> tuple[str, str]:
+def _user_control_channel_and_target(event: OpenClawEvent, db: Session) -> tuple[str, str, bool, str]:
     role = (event.role_context or "").lower()
     normalized_channel = normalize_channel(event.channel)
+    notification_channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
     if role in {"user", "owner", "operator", "sales", "salesperson"} or event.mode in {"user", "command"}:
-        return event.channel or "im", event.sender_id or event.actor_id or "user"
-    if normalized_channel in USER_CONTROL_CHANNELS:
-        return event.channel or "im", event.actor_id or event.sender_id or "user"
-    return "im", event.actor_id or "user"
+        target = event.actor_id or event.sender_id
+        if target:
+            return notification_channel or "im", target, True, "verified_user_sender"
+    if event.actor_id:
+        return notification_channel or "im", event.actor_id, True, "verified_actor_id"
+    owner_user_id = _owner_user_id_for_event(event, db)
+    if owner_user_id:
+        channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
+        return channel or "im", owner_user_id, True, "verified_account_owner"
+    return "internal", "owner_resolution_required", False, "owner_resolution_required"
+
+
+def _owner_user_id_for_event(event: OpenClawEvent, db: Session) -> str:
+    if not event.channel_account_id:
+        return ""
+    from aivan.db.models.account import OpenClawAccountRecord
+    account = db.query(OpenClawAccountRecord).filter(
+        OpenClawAccountRecord.channel_account_id == event.channel_account_id
+    ).first()
+    return account.owner_user_id if account and account.owner_user_id else ""
 
 
 def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, supplier: dict, gltg) -> str:
@@ -435,6 +470,134 @@ def _build_user_control_message(
         f"{gltg.selected_confidence_days} days, deadline risk={gltg.deadline_risk_level}. "
         f"{len(routing.selected_supplier_ids)} supplier email drafts are pending approval: {', '.join(drafts_created)}."
     )
+
+
+def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClassification, db: Session) -> RFQExecutionResult:
+    project = _get_or_create_project(event, classification, db)
+    project_repo = ProjectRepository(db)
+    event_repo = ExecutionEventRepository(db)
+    event_repo.append(
+        project.project_id,
+        "EVENT_CLASSIFIED",
+        "Inbound event classified as supplier_reply; invoking supplier quote workflow",
+        payload=classification.model_dump(),
+        actor="aivan_event_api",
+    )
+
+    reply = parse_supplier_reply(
+        raw_text=event.message_text,
+        project_id=project.project_id,
+        supplier_id=event.sender_id or "",
+        channel=event.channel,
+    )
+    event_repo.append(
+        project.project_id,
+        "SUPPLIER_REPLY_PARSED",
+        f"Supplier reply parsed: price={reply.unit_price}, lead_time={reply.lead_time_days}",
+        payload=reply.model_dump(),
+        actor="supplier_response_agent",
+    )
+
+    requirement = _load_requirement(project.requirement_json)
+    if not requirement:
+        db.commit()
+        empty_strategy = RFQStrategy()
+        gltg = GLTGClient().simulate(BuyerRequirement(project_id=project.project_id, quantity=1), empty_strategy, 0)
+        return RFQExecutionResult(
+            project_id=project.project_id,
+            event_type="supplier_reply",
+            action="supplier_reply_requires_requirement",
+            message="Supplier reply parsed, but no project requirement was available for buyer option generation.",
+            strategy=empty_strategy,
+            requirement={},
+            giraffe_context=GiraffeContext(),
+            gltg_simulation=gltg,
+            supplier_routing=SupplierRoutingDecision(selected_supplier_ids=[reply.supplier_id] if reply.supplier_id else []),
+        )
+
+    strategy_payload = (project.requirement_json or {}).get("strategy") or {}
+    try:
+        strategy = RFQStrategy(**strategy_payload)
+    except Exception:
+        strategy = RFQStrategy()
+
+    lead_time = calculate_leadtime_for_requirement(requirement, supplier_reply=reply)
+    event_repo.append(
+        project.project_id,
+        "LEADTIME_RECALCULATED",
+        f"Lead time recalculated from supplier reply: {lead_time.expected_days} days",
+        payload=lead_time.model_dump(),
+        actor="leadtime_calculator",
+    )
+
+    buyer_options = generate_buyer_options(requirement, [reply], [lead_time], project.project_id)
+    option_payloads = [option.model_dump() for option in buyer_options]
+    event_repo.append(
+        project.project_id,
+        "BUYER_OPTIONS_GENERATED",
+        f"Generated {len(buyer_options)} buyer options from supplier reply",
+        payload={"buyer_options": option_payloads},
+        actor="buyer_option_agent",
+    )
+
+    requirement_payload = dict(project.requirement_json or {})
+    requirement_payload.setdefault("supplier_replies", []).append(reply.model_dump())
+    requirement_payload.setdefault("lead_time_estimates", []).append(lead_time.model_dump())
+    requirement_payload["buyer_options"] = option_payloads
+    project_repo.update_requirement(project.project_id, requirement_payload)
+    if option_payloads:
+        project_repo.update_selected_option(project.project_id, option_payloads[0])
+
+    drafts_created = _create_customer_quote_email_draft(project, event, buyer_options, db) if buyer_options else []
+    gltg = GLTGClient().simulate(requirement, strategy, supplier_count=1)
+    db.commit()
+    return RFQExecutionResult(
+        project_id=project.project_id,
+        event_type="supplier_reply",
+        action="buyer_options_ready" if buyer_options else "supplier_reply_parsed",
+        message=f"Supplier reply parsed. {len(buyer_options)} buyer options generated. Customer email draft is pending approval.",
+        strategy=strategy,
+        requirement=requirement_payload,
+        giraffe_context=GiraffeContext(),
+        gltg_simulation=gltg,
+        supplier_routing=SupplierRoutingDecision(selected_supplier_ids=[reply.supplier_id] if reply.supplier_id else []),
+        drafts_created=drafts_created,
+    )
+
+
+def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_options: list, db: Session) -> list[str]:
+    option_summary = "\n".join(
+        f"{opt.option_label}: {opt.reasoning} | Lead time: "
+        f"{opt.lead_time_estimate.expected_days if opt.lead_time_estimate else 'N/A'} days | "
+        f"Price: {opt.quote.buyer_unit_price if opt.quote else 'N/A'} {opt.quote.currency if opt.quote else ''}"
+        for opt in buyer_options
+    )
+    draft = DraftRepository(db).create(
+        project.project_id,
+        {
+            "conversation_id": project.conversation_id or event.conversation_id,
+            "channel": "email",
+            "target_peer_id": project.customer_id or "",
+            "target_role": "customer",
+            "message_text": (
+                "We have received supplier quotes. Here are the current options:\n\n"
+                f"{option_summary}\n\nPlease let us know which option you prefer."
+            ),
+            "message_type": "text",
+            "attachments_json": [],
+            "status": "pending_approval",
+            "created_by_agent": "buyer_option_agent",
+            "notes": "draft_type=customer_quote_email generated_from=supplier_reply",
+        },
+    )
+    ExecutionEventRepository(db).append(
+        project.project_id,
+        "PENDING_EMAIL_DRAFT_CREATED",
+        "Customer quote email draft created from supplier reply",
+        payload={"draft_id": draft.draft_id, "draft_type": "customer_quote_email"},
+        actor="buyer_option_agent",
+    )
+    return [draft.draft_id]
 
 
 def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassification, db: Session) -> RFQExecutionResult:
