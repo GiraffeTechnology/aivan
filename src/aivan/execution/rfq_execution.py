@@ -12,6 +12,7 @@ from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient
 from aivan.integrations.gltg import GLTGClient
 from aivan.leadtime.calculator import calculate_leadtime_for_requirement
+from aivan.leadtime.models import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.client import get_openclaw_client
@@ -20,6 +21,7 @@ from aivan.openclaw.contracts import OpenClawSendRequest
 from aivan.execution.channel_policy import USER_CONTROL_CHANNELS, normalize_channel
 from aivan.openclaw.event_adapter import is_supplier_reply
 from aivan.schemas.requirement import BuyerRequirement
+from aivan.schemas.response import SupplierReply
 from aivan.schemas.rfq import (
     EventClassification,
     FallbackTrigger,
@@ -521,7 +523,10 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     except Exception:
         strategy = RFQStrategy()
 
-    lead_time = calculate_leadtime_for_requirement(requirement, supplier_reply=reply)
+    # P2: carry supplier_id so generate_buyer_options can match lead time to this reply
+    lead_time = calculate_leadtime_for_requirement(
+        requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None
+    )
     event_repo.append(
         project.project_id,
         "LEADTIME_RECALCULATED",
@@ -530,19 +535,35 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         actor="leadtime_calculator",
     )
 
-    buyer_options = generate_buyer_options(requirement, [reply], [lead_time], project.project_id)
+    # P1: accumulate all prior replies/lead_times then generate options from the full set
+    requirement_payload = dict(project.requirement_json or {})
+    requirement_payload.setdefault("supplier_replies", []).append(reply.model_dump())
+    requirement_payload.setdefault("lead_time_estimates", []).append(lead_time.model_dump())
+
+    all_replies: list[SupplierReply] = []
+    for raw in requirement_payload["supplier_replies"]:
+        try:
+            all_replies.append(SupplierReply(**raw))
+        except Exception:
+            pass
+
+    all_lead_times: list[LeadTimeEstimate] = []
+    for raw in requirement_payload["lead_time_estimates"]:
+        try:
+            all_lead_times.append(LeadTimeEstimate(**raw))
+        except Exception:
+            pass
+
+    buyer_options = generate_buyer_options(requirement, all_replies, all_lead_times, project.project_id)
     option_payloads = [option.model_dump() for option in buyer_options]
     event_repo.append(
         project.project_id,
         "BUYER_OPTIONS_GENERATED",
-        f"Generated {len(buyer_options)} buyer options from supplier reply",
+        f"Generated {len(buyer_options)} buyer options from {len(all_replies)} supplier replies",
         payload={"buyer_options": option_payloads},
         actor="buyer_option_agent",
     )
 
-    requirement_payload = dict(project.requirement_json or {})
-    requirement_payload.setdefault("supplier_replies", []).append(reply.model_dump())
-    requirement_payload.setdefault("lead_time_estimates", []).append(lead_time.model_dump())
     requirement_payload["buyer_options"] = option_payloads
     project_repo.update_requirement(project.project_id, requirement_payload)
     if option_payloads:

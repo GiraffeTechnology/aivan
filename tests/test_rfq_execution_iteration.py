@@ -305,6 +305,86 @@ def test_customer_personal_im_without_actor_requires_owner_resolution(api_client
     assert "owner_resolution_required" in user_notifications[0]["notes"]
 
 
+def test_second_supplier_reply_accumulates_both_replies_in_buyer_options(api_client):
+    """P1+P2: all prior replies are preserved; lead times are matched to suppliers."""
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    project_id = created["project_id"]
+
+    # First supplier: better price, moderate lead time
+    resp_a = api_client.post("/api/openclaw/events", json={
+        "source": "openclaw",
+        "channel": "email",
+        "conversation_id": "supplier_a_conv_001",
+        "message_id": "supplier_a_msg_001",
+        "sender_id": "supplier_a",
+        "sender_display_name": "Guangzhou Best Price Garment",
+        "project_id": project_id,
+        "message_text": "Quote: USD 3.80/pc, MOQ 5000, daily capacity 500 pcs, lead time 40 days, FOB Guangzhou.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }).json()
+    assert resp_a["action"] == "buyer_options_ready"
+
+    proj_after_a = api_client.get(f"/api/projects/{project_id}").json()
+    assert len(proj_after_a["requirement"]["supplier_replies"]) == 1
+    # P2: selected_option must carry a real lead time after first reply
+    selected_a = proj_after_a["selected_option"]
+    assert selected_a is not None
+    assert selected_a.get("lead_time_estimate") is not None, "lead_time_estimate must not be None (P2)"
+    assert selected_a["lead_time_estimate"]["expected_days"] > 0
+
+    # Second supplier: higher price, faster delivery
+    resp_b = api_client.post("/api/openclaw/events", json={
+        "source": "openclaw",
+        "channel": "email",
+        "conversation_id": "supplier_b_conv_001",
+        "message_id": "supplier_b_msg_001",
+        "sender_id": "supplier_b",
+        "sender_display_name": "Shenzhen Fast Garment",
+        "project_id": project_id,
+        "message_text": "Quote: USD 5.20/pc, MOQ 3000, daily capacity 1000 pcs, lead time 25 days, FOB Shenzhen.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }).json()
+    assert resp_b["action"] == "buyer_options_ready"
+
+    proj = api_client.get(f"/api/projects/{project_id}").json()
+
+    # P1: both replies must be accumulated, not just the latest
+    replies = proj["requirement"]["supplier_replies"]
+    assert len(replies) == 2, "Both supplier replies must be preserved"
+    reply_supplier_ids = {r["supplier_id"] for r in replies}
+    assert "supplier_a" in reply_supplier_ids
+    assert "supplier_b" in reply_supplier_ids
+
+    # P1: buyer_options must reflect both suppliers
+    buyer_options = proj["requirement"]["buyer_options"]
+    assert len(buyer_options) >= 2, "Buyer options must cover multiple suppliers"
+    option_supplier_ids = {opt.get("supplier_id") for opt in buyer_options}
+    assert "supplier_a" in option_supplier_ids, "Earlier cheaper supplier A must remain in buyer options"
+    assert "supplier_b" in option_supplier_ids, "Faster supplier B must appear in buyer options"
+
+    # P1: supplier A's lower price must not be displaced
+    buyer_prices = [opt["quote"]["buyer_unit_price"] for opt in buyer_options if opt.get("quote")]
+    assert any(p < 5.5 for p in buyer_prices), "Buyer options must include supplier A's lower-priced quote"
+
+    # P2: selected_option must still carry a valid lead time after second reply
+    selected = proj["selected_option"]
+    assert selected is not None
+    assert selected.get("lead_time_estimate") is not None, "selected_option lead_time_estimate must not be None (P2)"
+    assert selected["lead_time_estimate"]["expected_days"] > 0
+
+    # P2: customer email draft must show numeric lead times, not N/A
+    drafts = api_client.get(f"/api/projects/{project_id}/drafts").json()["drafts"]
+    customer_drafts = [
+        d for d in drafts
+        if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"
+    ]
+    assert customer_drafts
+    latest_text = customer_drafts[-1]["message_text"]
+    assert "N/A days" not in latest_text, "Customer email draft must not contain N/A lead times"
+
+
 def test_invalid_llm_json_falls_back_to_deterministic_strategy(monkeypatch):
     import aivan.execution.rfq_execution as rfq_execution
 
