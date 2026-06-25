@@ -488,3 +488,136 @@ def test_counterparty_personal_im_draft_cannot_be_sent(api_db):
     assert result.success is False
     assert "channel policy blocks" in (result.error or "")
     assert repo.get(draft.draft_id).status == "approved"
+
+
+# ── P2 acceptance tests ───────────────────────────────────────────────────────
+
+
+def test_stale_customer_quote_draft_superseded_after_new_supplier_reply(api_client):
+    """P2.1: older customer quote drafts must be superseded — not approvable — after a
+    newer supplier reply regenerates buyer options."""
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    project_id = created["project_id"]
+
+    _supplier_reply_event = lambda sid, price, lt: {
+        "source": "openclaw", "channel": "email",
+        "conversation_id": f"{sid}_conv", "message_id": f"{sid}_msg",
+        "sender_id": sid, "sender_display_name": sid,
+        "project_id": project_id,
+        "message_text": f"Quote: USD {price}/pc, MOQ 5000, lead time {lt} days.",
+        "role_context": "supplier", "mode": "auto",
+    }
+
+    # First supplier reply → creates first quote draft
+    api_client.post("/api/openclaw/events", json=_supplier_reply_event("sup_x", 4.50, 35))
+    drafts_after_first = api_client.get(f"/api/projects/{project_id}/drafts").json()["drafts"]
+    first_quote_drafts = [
+        d for d in drafts_after_first
+        if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"
+    ]
+    assert first_quote_drafts, "First supplier reply should create a customer quote draft"
+    first_draft_id = first_quote_drafts[0]["draft_id"]
+    assert first_quote_drafts[0]["status"] == "pending_approval"
+
+    # Second supplier reply → should supersede the first quote draft
+    api_client.post("/api/openclaw/events", json=_supplier_reply_event("sup_y", 3.90, 28))
+    drafts_after_second = api_client.get(f"/api/projects/{project_id}/drafts").json()["drafts"]
+
+    # The original draft must be superseded, not pending_approval any more
+    first_draft_current = next(d for d in drafts_after_second if d["draft_id"] == first_draft_id)
+    assert first_draft_current["status"] == "superseded", (
+        "First customer quote draft must be superseded after second supplier reply"
+    )
+
+    # Attempting to approve the stale draft via the API must fail or return non-pending
+    approve_resp = api_client.post(f"/api/projects/{project_id}/drafts/{first_draft_id}/approve")
+    if approve_resp.status_code == 200:
+        # API accepted, but status should not have transitioned to 'approved'
+        assert approve_resp.json().get("status") != "approved", (
+            "Superseded draft must not be approvable"
+        )
+
+    # A fresh pending quote draft must now exist
+    fresh_pending = [
+        d for d in drafts_after_second
+        if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"
+        and d["status"] == "pending_approval"
+    ]
+    assert fresh_pending, "A new pending customer quote draft must exist after the second supplier reply"
+
+
+def test_supplier_set_feasibility_not_thin_with_two_replies(api_client):
+    """P2.2: GLTG supplier_set_feasibility must not be 'thin' once ≥2 valid supplier replies
+    have been accumulated; supplier_count is passed as len(all_replies)."""
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    project_id = created["project_id"]
+
+    for sid, price, lt in [("sup_a", 4.50, 35), ("sup_b", 5.20, 25)]:
+        resp = api_client.post("/api/openclaw/events", json={
+            "source": "openclaw", "channel": "email",
+            "conversation_id": f"{sid}_feasibility_conv", "message_id": f"{sid}_feasibility_msg",
+            "sender_id": sid, "sender_display_name": sid,
+            "project_id": project_id,
+            "message_text": f"Quote: USD {price}/pc, MOQ 5000, lead time {lt} days.",
+            "role_context": "supplier", "mode": "auto",
+        }).json()
+        assert resp["action"] == "buyer_options_ready"
+
+    proj = api_client.get(f"/api/projects/{project_id}").json()
+    assert len(proj["requirement"]["supplier_replies"]) == 2
+
+    gltg = proj["requirement"].get("gltg_simulation") or proj.get("gltg_simulation")
+    # After two replies the supplier_count passed to GLTG must be 2 → not thin
+    if gltg:
+        assert gltg.get("supplier_set_feasibility") != "thin", (
+            "supplier_set_feasibility must not be 'thin' when 2 valid replies are present"
+        )
+
+
+def test_owner_resolution_ignores_revoked_account_prefers_active(api_client, api_db):
+    """P2.3: _owner_user_id_for_event must resolve only the active/connected account
+    and ignore a stale/revoked account that shares the same channel_account_id."""
+    from aivan.db.models.account import OpenClawAccountRecord
+
+    channel = "wechat"
+    shared_channel_account_id = "shared-wechat-account"
+
+    # Stale/revoked account — same channel_account_id but status != "connected"
+    revoked = OpenClawAccountRecord(
+        account_connection_id="revoked-acct-001",
+        platform="wechat",
+        channel=channel,
+        channel_account_id=shared_channel_account_id,
+        owner_user_id="revoked_owner",
+        status="revoked",
+    )
+    # Active account — same channel_account_id, status == "connected"
+    active = OpenClawAccountRecord(
+        account_connection_id="active-acct-001",
+        platform="wechat",
+        channel=channel,
+        channel_account_id=shared_channel_account_id,
+        owner_user_id="active_owner",
+        status="connected",
+    )
+    api_db.add(revoked)
+    api_db.add(active)
+    api_db.commit()
+
+    from aivan.openclaw.contracts import OpenClawEvent
+    from aivan.execution.rfq_execution import _owner_user_id_for_event
+
+    event = OpenClawEvent(
+        source="openclaw",
+        channel=channel,
+        channel_account_id=shared_channel_account_id,
+        conversation_id="conv_owner_test",
+        message_id="msg_owner_test",
+        sender_id="customer_xyz",
+        message_text="Need a quote.",
+    )
+    resolved = _owner_user_id_for_event(event, api_db)
+
+    assert resolved == "active_owner", (
+        f"Must resolve the connected account owner, not the revoked one; got {resolved!r}"
+    )

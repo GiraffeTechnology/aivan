@@ -417,8 +417,12 @@ def _owner_user_id_for_event(event: OpenClawEvent, db: Session) -> str:
     if not event.channel_account_id:
         return ""
     from aivan.db.models.account import OpenClawAccountRecord
+    # Filter by channel + channel_account_id and require active/connected status so
+    # revoked or stale accounts do not resolve as the owner.
     account = db.query(OpenClawAccountRecord).filter(
-        OpenClawAccountRecord.channel_account_id == event.channel_account_id
+        OpenClawAccountRecord.channel == event.channel,
+        OpenClawAccountRecord.channel_account_id == event.channel_account_id,
+        OpenClawAccountRecord.status == "connected",
     ).first()
     return account.owner_user_id if account and account.owner_user_id else ""
 
@@ -570,7 +574,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         project_repo.update_selected_option(project.project_id, option_payloads[0])
 
     drafts_created = _create_customer_quote_email_draft(project, event, buyer_options, db) if buyer_options else []
-    gltg = GLTGClient().simulate(requirement, strategy, supplier_count=1)
+    gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(all_replies))
     db.commit()
     return RFQExecutionResult(
         project_id=project.project_id,
@@ -587,6 +591,10 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
 
 
 def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_options: list, db: Session) -> list[str]:
+    # Supersede any pending approval drafts from earlier supplier replies so they
+    # cannot be approved or sent after buyer options have been regenerated.
+    DraftRepository(db).supersede_customer_quote_drafts(project.project_id)
+
     option_summary = "\n".join(
         f"{opt.option_label}: {opt.reasoning} | Lead time: "
         f"{opt.lead_time_estimate.expected_days if opt.lead_time_estimate else 'N/A'} days | "
