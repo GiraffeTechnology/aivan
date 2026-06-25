@@ -76,6 +76,21 @@ def _customer_email_event() -> dict:
     }
 
 
+def _customer_personal_im_event_missing_actor() -> dict:
+    return {
+        "source": "openclaw",
+        "channel": "wechat",
+        "channel_account_id": "sales-user-wechat",
+        "conversation_id": "customer_personal_im_thread_001",
+        "message_id": "customer_im_msg_001",
+        "sender_id": "customer_wechat_counterparty_001",
+        "sender_display_name": "Vancouver Buyer WeChat",
+        "message_text": "We need 10,000 white cotton shirts delivered to Vancouver within 45 days.",
+        "role_context": "customer",
+        "mode": "auto",
+    }
+
+
 def test_strategy_interpretation_urgent_known_supplier_command():
     strategy = interpret_strategy("这个客户很急，先找靠谱的老供应商，价格别太离谱。")
 
@@ -233,6 +248,143 @@ def test_customer_email_ingestion_creates_user_im_approval_notification(api_clie
     assert user_notifications[0]["status"] == "sent"
 
 
+def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_client):
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    supplier_event = {
+        "source": "openclaw",
+        "channel": "wechat",
+        "conversation_id": "supplier_reply_thread_001",
+        "message_id": "supplier_reply_msg_001",
+        "sender_id": "supplier_001",
+        "sender_display_name": "Guangzhou Trendy Garment",
+        "project_id": created["project_id"],
+        "message_text": "We can quote USD 4.50/pc, MOQ 5000 pcs, daily capacity 500 pcs, lead time 35 days, FOB Guangzhou.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }
+
+    response = api_client.post("/api/openclaw/events", json=supplier_event)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["event_type"] == "supplier_reply"
+    assert payload["action"] == "buyer_options_ready"
+    assert payload["drafts_created"]
+
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["requirement"]["supplier_replies"][0]["unit_price"] == 4.5
+    assert project["requirement"]["lead_time_estimates"][0]["expected_days"] > 0
+    assert project["requirement"]["buyer_options"]
+    assert project["selected_option"]["quote"]["buyer_unit_price"] > 0
+
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    customer_drafts = [d for d in drafts if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"]
+    assert customer_drafts
+    assert customer_drafts[0]["channel"] == "email"
+    assert customer_drafts[0]["status"] == "pending_approval"
+
+    events = api_client.get(f"/api/projects/{created['project_id']}/events").json()["events"]
+    assert any(event["event_type"] == "SUPPLIER_REPLY_PARSED" for event in events)
+    assert any(event["event_type"] == "BUYER_OPTIONS_GENERATED" for event in events)
+
+
+def test_customer_personal_im_without_actor_requires_owner_resolution(api_client):
+    event = _customer_personal_im_event_missing_actor()
+
+    response = api_client.post("/api/rfq/create-from-event", json=event)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
+    user_notifications = [d for d in drafts if d["target_role"] == "user"]
+    assert user_notifications
+    assert user_notifications[0]["channel"] == "internal"
+    assert user_notifications[0]["target_peer_id"] == "owner_resolution_required"
+    assert user_notifications[0]["target_peer_id"] != event["sender_id"]
+    assert user_notifications[0]["status"] == "pending_approval"
+    assert "owner_resolution_required" in user_notifications[0]["notes"]
+
+
+def test_second_supplier_reply_accumulates_both_replies_in_buyer_options(api_client):
+    """P1+P2: all prior replies are preserved; lead times are matched to suppliers."""
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    project_id = created["project_id"]
+
+    # First supplier: better price, moderate lead time
+    resp_a = api_client.post("/api/openclaw/events", json={
+        "source": "openclaw",
+        "channel": "email",
+        "conversation_id": "supplier_a_conv_001",
+        "message_id": "supplier_a_msg_001",
+        "sender_id": "supplier_a",
+        "sender_display_name": "Guangzhou Best Price Garment",
+        "project_id": project_id,
+        "message_text": "Quote: USD 3.80/pc, MOQ 5000, daily capacity 500 pcs, lead time 40 days, FOB Guangzhou.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }).json()
+    assert resp_a["action"] == "buyer_options_ready"
+
+    proj_after_a = api_client.get(f"/api/projects/{project_id}").json()
+    assert len(proj_after_a["requirement"]["supplier_replies"]) == 1
+    # P2: selected_option must carry a real lead time after first reply
+    selected_a = proj_after_a["selected_option"]
+    assert selected_a is not None
+    assert selected_a.get("lead_time_estimate") is not None, "lead_time_estimate must not be None (P2)"
+    assert selected_a["lead_time_estimate"]["expected_days"] > 0
+
+    # Second supplier: higher price, faster delivery
+    resp_b = api_client.post("/api/openclaw/events", json={
+        "source": "openclaw",
+        "channel": "email",
+        "conversation_id": "supplier_b_conv_001",
+        "message_id": "supplier_b_msg_001",
+        "sender_id": "supplier_b",
+        "sender_display_name": "Shenzhen Fast Garment",
+        "project_id": project_id,
+        "message_text": "Quote: USD 5.20/pc, MOQ 3000, daily capacity 1000 pcs, lead time 25 days, FOB Shenzhen.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }).json()
+    assert resp_b["action"] == "buyer_options_ready"
+
+    proj = api_client.get(f"/api/projects/{project_id}").json()
+
+    # P1: both replies must be accumulated, not just the latest
+    replies = proj["requirement"]["supplier_replies"]
+    assert len(replies) == 2, "Both supplier replies must be preserved"
+    reply_supplier_ids = {r["supplier_id"] for r in replies}
+    assert "supplier_a" in reply_supplier_ids
+    assert "supplier_b" in reply_supplier_ids
+
+    # P1: buyer_options must reflect both suppliers
+    buyer_options = proj["requirement"]["buyer_options"]
+    assert len(buyer_options) >= 2, "Buyer options must cover multiple suppliers"
+    option_supplier_ids = {opt.get("supplier_id") for opt in buyer_options}
+    assert "supplier_a" in option_supplier_ids, "Earlier cheaper supplier A must remain in buyer options"
+    assert "supplier_b" in option_supplier_ids, "Faster supplier B must appear in buyer options"
+
+    # P1: supplier A's lower price must not be displaced
+    buyer_prices = [opt["quote"]["buyer_unit_price"] for opt in buyer_options if opt.get("quote")]
+    assert any(p < 5.5 for p in buyer_prices), "Buyer options must include supplier A's lower-priced quote"
+
+    # P2: selected_option must still carry a valid lead time after second reply
+    selected = proj["selected_option"]
+    assert selected is not None
+    assert selected.get("lead_time_estimate") is not None, "selected_option lead_time_estimate must not be None (P2)"
+    assert selected["lead_time_estimate"]["expected_days"] > 0
+
+    # P2: customer email draft must show numeric lead times, not N/A
+    drafts = api_client.get(f"/api/projects/{project_id}/drafts").json()["drafts"]
+    customer_drafts = [
+        d for d in drafts
+        if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"
+    ]
+    assert customer_drafts
+    latest_text = customer_drafts[-1]["message_text"]
+    assert "N/A days" not in latest_text, "Customer email draft must not contain N/A lead times"
+
+
 def test_invalid_llm_json_falls_back_to_deterministic_strategy(monkeypatch):
     import aivan.execution.rfq_execution as rfq_execution
 
@@ -242,6 +394,40 @@ def test_invalid_llm_json_falls_back_to_deterministic_strategy(monkeypatch):
 
     assert strategy.priority == "speed"
     assert strategy.supplier_scope == "known_suppliers_first"
+
+
+@pytest.mark.parametrize(
+    "raw_strategy",
+    [
+        {"priority": "speed", "supplier_scope": "known_supplier_first"},
+        {"priority": "speed", "public_bidding": "fallback"},
+        {"priority": "speed", "lead_time_confidence": "p80"},
+    ],
+)
+def test_invalid_llm_strategy_fields_fall_back_deterministically(monkeypatch, raw_strategy):
+    import aivan.execution.rfq_execution as rfq_execution
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", lambda *args, **kwargs: raw_strategy)
+
+    strategy = rfq_execution.interpret_strategy("这个客户很急，先找靠谱的老供应商，价格别太离谱。")
+
+    assert strategy.priority == "speed"
+    assert strategy.supplier_scope == "known_suppliers_first"
+    assert strategy.public_bidding == "fallback_only"
+    assert strategy.lead_time_confidence == "P80"
+
+
+def test_partial_llm_strategy_payload_uses_schema_defaults(monkeypatch):
+    import aivan.execution.rfq_execution as rfq_execution
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", lambda *args, **kwargs: {"priority": "speed"})
+
+    strategy = rfq_execution.interpret_strategy("urgent order")
+
+    assert strategy.priority == "speed"
+    assert strategy.supplier_scope == "known_suppliers_first"
+    assert strategy.public_bidding == "fallback_only"
+    assert strategy.lead_time_confidence == "P80"
 
 
 def test_missing_project_attachment_is_validated_against_db(api_client):
@@ -302,3 +488,136 @@ def test_counterparty_personal_im_draft_cannot_be_sent(api_db):
     assert result.success is False
     assert "channel policy blocks" in (result.error or "")
     assert repo.get(draft.draft_id).status == "approved"
+
+
+# ── P2 acceptance tests ───────────────────────────────────────────────────────
+
+
+def test_stale_customer_quote_draft_superseded_after_new_supplier_reply(api_client):
+    """P2.1: older customer quote drafts must be superseded — not approvable — after a
+    newer supplier reply regenerates buyer options."""
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    project_id = created["project_id"]
+
+    _supplier_reply_event = lambda sid, price, lt: {
+        "source": "openclaw", "channel": "email",
+        "conversation_id": f"{sid}_conv", "message_id": f"{sid}_msg",
+        "sender_id": sid, "sender_display_name": sid,
+        "project_id": project_id,
+        "message_text": f"Quote: USD {price}/pc, MOQ 5000, lead time {lt} days.",
+        "role_context": "supplier", "mode": "auto",
+    }
+
+    # First supplier reply → creates first quote draft
+    api_client.post("/api/openclaw/events", json=_supplier_reply_event("sup_x", 4.50, 35))
+    drafts_after_first = api_client.get(f"/api/projects/{project_id}/drafts").json()["drafts"]
+    first_quote_drafts = [
+        d for d in drafts_after_first
+        if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"
+    ]
+    assert first_quote_drafts, "First supplier reply should create a customer quote draft"
+    first_draft_id = first_quote_drafts[0]["draft_id"]
+    assert first_quote_drafts[0]["status"] == "pending_approval"
+
+    # Second supplier reply → should supersede the first quote draft
+    api_client.post("/api/openclaw/events", json=_supplier_reply_event("sup_y", 3.90, 28))
+    drafts_after_second = api_client.get(f"/api/projects/{project_id}/drafts").json()["drafts"]
+
+    # The original draft must be superseded, not pending_approval any more
+    first_draft_current = next(d for d in drafts_after_second if d["draft_id"] == first_draft_id)
+    assert first_draft_current["status"] == "superseded", (
+        "First customer quote draft must be superseded after second supplier reply"
+    )
+
+    # Attempting to approve the stale draft via the API must fail or return non-pending
+    approve_resp = api_client.post(f"/api/projects/{project_id}/drafts/{first_draft_id}/approve")
+    if approve_resp.status_code == 200:
+        # API accepted, but status should not have transitioned to 'approved'
+        assert approve_resp.json().get("status") != "approved", (
+            "Superseded draft must not be approvable"
+        )
+
+    # A fresh pending quote draft must now exist
+    fresh_pending = [
+        d for d in drafts_after_second
+        if d["target_role"] == "customer" and d["draft_type"] == "customer_quote_email"
+        and d["status"] == "pending_approval"
+    ]
+    assert fresh_pending, "A new pending customer quote draft must exist after the second supplier reply"
+
+
+def test_supplier_set_feasibility_not_thin_with_two_replies(api_client):
+    """P2.2: GLTG supplier_set_feasibility must not be 'thin' once ≥2 valid supplier replies
+    have been accumulated; supplier_count is passed as len(all_replies)."""
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    project_id = created["project_id"]
+
+    for sid, price, lt in [("sup_a", 4.50, 35), ("sup_b", 5.20, 25)]:
+        resp = api_client.post("/api/openclaw/events", json={
+            "source": "openclaw", "channel": "email",
+            "conversation_id": f"{sid}_feasibility_conv", "message_id": f"{sid}_feasibility_msg",
+            "sender_id": sid, "sender_display_name": sid,
+            "project_id": project_id,
+            "message_text": f"Quote: USD {price}/pc, MOQ 5000, lead time {lt} days.",
+            "role_context": "supplier", "mode": "auto",
+        }).json()
+        assert resp["action"] == "buyer_options_ready"
+
+    proj = api_client.get(f"/api/projects/{project_id}").json()
+    assert len(proj["requirement"]["supplier_replies"]) == 2
+
+    gltg = proj["requirement"].get("gltg_simulation") or proj.get("gltg_simulation")
+    # After two replies the supplier_count passed to GLTG must be 2 → not thin
+    if gltg:
+        assert gltg.get("supplier_set_feasibility") != "thin", (
+            "supplier_set_feasibility must not be 'thin' when 2 valid replies are present"
+        )
+
+
+def test_owner_resolution_ignores_revoked_account_prefers_active(api_client, api_db):
+    """P2.3: _owner_user_id_for_event must resolve only the active/connected account
+    and ignore a stale/revoked account that shares the same channel_account_id."""
+    from aivan.db.models.account import OpenClawAccountRecord
+
+    channel = "wechat"
+    shared_channel_account_id = "shared-wechat-account"
+
+    # Stale/revoked account — same channel_account_id but status != "connected"
+    revoked = OpenClawAccountRecord(
+        account_connection_id="revoked-acct-001",
+        platform="wechat",
+        channel=channel,
+        channel_account_id=shared_channel_account_id,
+        owner_user_id="revoked_owner",
+        status="revoked",
+    )
+    # Active account — same channel_account_id, status == "connected"
+    active = OpenClawAccountRecord(
+        account_connection_id="active-acct-001",
+        platform="wechat",
+        channel=channel,
+        channel_account_id=shared_channel_account_id,
+        owner_user_id="active_owner",
+        status="connected",
+    )
+    api_db.add(revoked)
+    api_db.add(active)
+    api_db.commit()
+
+    from aivan.openclaw.contracts import OpenClawEvent
+    from aivan.execution.rfq_execution import _owner_user_id_for_event
+
+    event = OpenClawEvent(
+        source="openclaw",
+        channel=channel,
+        channel_account_id=shared_channel_account_id,
+        conversation_id="conv_owner_test",
+        message_id="msg_owner_test",
+        sender_id="customer_xyz",
+        message_text="Need a quote.",
+    )
+    resolved = _owner_user_id_for_event(event, api_db)
+
+    assert resolved == "active_owner", (
+        f"Must resolve the connected account owner, not the revoked one; got {resolved!r}"
+    )

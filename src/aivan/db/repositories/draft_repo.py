@@ -68,3 +68,23 @@ class DraftRepository:
             d.sent_at = datetime.now(timezone.utc)
             self.db.flush()
         return d
+
+    def supersede_customer_quote_drafts(self, project_id: str) -> list[str]:
+        """Mark all pending_approval customer_quote_email drafts for the project as superseded.
+
+        Called before creating a new customer quote draft so that stale drafts cannot
+        be approved or sent after a newer supplier reply regenerates buyer options.
+        Returns the list of draft_ids that were superseded.
+        """
+        stale = self.db.query(InquiryDraftRecord).filter(
+            InquiryDraftRecord.project_id == project_id,
+            InquiryDraftRecord.status == "pending_approval",
+            InquiryDraftRecord.notes.contains("draft_type=customer_quote_email"),
+        ).all()
+        superseded_ids = []
+        for d in stale:
+            d.status = "superseded"
+            superseded_ids.append(d.draft_id)
+        if superseded_ids:
+            self.db.flush()
+        return superseded_ids
