@@ -117,7 +117,6 @@ async def approve_packet(packet_id: str, body: ApprovalRequest) -> dict:
         )
 
     updated = _packet_store.update_status(packet_id, "approved", body.operator_id, body.notes)
-    _packet_store.write_audit(packet_id, body.operator_id, "approved", body.notes)
 
     assert updated is not None and updated.get("dispatched") is False, (
         "dispatched must remain False after approval"
@@ -140,7 +139,6 @@ async def reject_packet(packet_id: str, body: ApprovalRequest) -> dict:
         )
 
     updated = _packet_store.update_status(packet_id, "rejected", body.operator_id, body.notes)
-    _packet_store.write_audit(packet_id, body.operator_id, "rejected", body.notes)
 
     assert updated is not None and updated.get("dispatched") is False, (
         "dispatched must remain False after rejection"
