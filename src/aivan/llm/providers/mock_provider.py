@@ -87,6 +87,14 @@ MOCK_RESPONSES = {
         "recommended_action": "contact_but_verify",
         "notes": "New supplier with limited history. Request business license and factory video before placing order.",
     },
+    "gpm_quote_analysis": {
+        "human_approval_required": True,
+        "recommendation": "human_review_required",
+        "quote_position": "within_mid_range",
+        "confidence": "medium",
+        "reasoning": "Mock GPM analysis — review supplier quote manually.",
+        "runtime_status": "mock",
+    },
     "default": {"result": "ok", "confidence": 0.8, "message_text": "Mock response generated."},
 }
 
