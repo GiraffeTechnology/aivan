@@ -236,21 +236,19 @@ def test_e2e_fails_when_api_key_in_packet():
 # Issue 3 — runtime import failure behaviour
 # ---------------------------------------------------------------------------
 
+_RUNTIME_MODULE = "aivan.gpm.llm_runtime"
+
 
 def test_gpm_runtime_fails_without_allow_skip(monkeypatch):
-    """When the runtime class cannot be imported and ALLOW_GPM_RUNTIME_SKIP
+    """When aivan.gpm.llm_runtime cannot be imported and ALLOW_GPM_RUNTIME_SKIP
     is not set, test_gpm_llm_runtime() must return False."""
     monkeypatch.delenv("ALLOW_GPM_RUNTIME_SKIP", raising=False)
 
-    with mock.patch.dict("sys.modules", {
-        "aivan.gpm.runtime": None,
-        "aivan.gpm.operator_llm_api_runtime": None,
-    }):
-        # Force both imports to raise ImportError
+    with mock.patch.dict("sys.modules", {_RUNTIME_MODULE: None}):
         original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
         def _fake_import(name, *args, **kwargs):
-            if name in ("aivan.gpm.runtime", "aivan.gpm.operator_llm_api_runtime"):
+            if name == _RUNTIME_MODULE:
                 raise ImportError(f"fake: {name}")
             return original_import(name, *args, **kwargs)
 
@@ -261,13 +259,13 @@ def test_gpm_runtime_fails_without_allow_skip(monkeypatch):
 
 
 def test_gpm_runtime_skips_with_allow_skip(monkeypatch):
-    """When ALLOW_GPM_RUNTIME_SKIP=true, a missing runtime class returns True."""
+    """When ALLOW_GPM_RUNTIME_SKIP=true, a missing aivan.gpm.llm_runtime returns True."""
     monkeypatch.setenv("ALLOW_GPM_RUNTIME_SKIP", "true")
 
     original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
     def _fake_import(name, *args, **kwargs):
-        if name in ("aivan.gpm.runtime", "aivan.gpm.operator_llm_api_runtime"):
+        if name == _RUNTIME_MODULE:
             raise ImportError(f"fake: {name}")
         return original_import(name, *args, **kwargs)
 
@@ -275,3 +273,92 @@ def test_gpm_runtime_skips_with_allow_skip(monkeypatch):
         result = smoke.test_gpm_llm_runtime(_FAKE_KEY)
 
     assert result is True, "Should skip (return True) when ALLOW_GPM_RUNTIME_SKIP=true"
+
+
+# ---------------------------------------------------------------------------
+# Issue 3 (continued) — runtime returns unavailable response
+# ---------------------------------------------------------------------------
+
+
+def test_gpm_runtime_fails_when_analyze_quote_returns_unavailable(monkeypatch):
+    """If analyze_quote returns runtime_status=unavailable, test must return False."""
+    monkeypatch.delenv("ALLOW_GPM_RUNTIME_SKIP", raising=False)
+
+    unavailable = {
+        "runtime_status": "unavailable",
+        "reason": "invalid_token",
+        "operator_action_required": True,
+        "safe_message": "LLM runtime unavailable (reason=invalid_token).",
+    }
+
+    fake_module = types.ModuleType(_RUNTIME_MODULE)
+    fake_module.analyze_quote = mock.MagicMock(return_value=unavailable)
+
+    with mock.patch.dict("sys.modules", {_RUNTIME_MODULE: fake_module}):
+        result = smoke.test_gpm_llm_runtime(_FAKE_KEY)
+
+    assert result is False, "Should fail when analyze_quote returns runtime_status=unavailable"
+
+
+def test_gpm_runtime_passes_with_valid_analyze_quote_result(monkeypatch):
+    """If analyze_quote returns a fully valid result, test must return True."""
+    monkeypatch.delenv("ALLOW_GPM_RUNTIME_SKIP", raising=False)
+
+    valid_result = {
+        "human_approval_required": True,
+        "quote_position": "within_mid_range",
+        "recommendation": "negotiate",
+        "confidence": "medium",
+        "reasoning": "CI smoke test mock",
+    }
+
+    fake_module = types.ModuleType(_RUNTIME_MODULE)
+    fake_module.analyze_quote = mock.MagicMock(return_value=valid_result)
+
+    with mock.patch.dict("sys.modules", {_RUNTIME_MODULE: fake_module}):
+        result = smoke.test_gpm_llm_runtime(_FAKE_KEY)
+
+    assert result is True, "Should pass with a fully valid analyze_quote result"
+
+
+def test_gpm_runtime_fails_when_human_approval_false(monkeypatch):
+    """analyze_quote result with human_approval_required=False must fail."""
+    monkeypatch.delenv("ALLOW_GPM_RUNTIME_SKIP", raising=False)
+
+    bad_result = {
+        "human_approval_required": False,
+        "quote_position": "within_mid_range",
+        "recommendation": "negotiate",
+        "confidence": "medium",
+        "reasoning": "bad",
+    }
+
+    fake_module = types.ModuleType(_RUNTIME_MODULE)
+    fake_module.analyze_quote = mock.MagicMock(return_value=bad_result)
+
+    with mock.patch.dict("sys.modules", {_RUNTIME_MODULE: fake_module}):
+        result = smoke.test_gpm_llm_runtime(_FAKE_KEY)
+
+    assert result is False
+
+
+def test_gpm_runtime_fails_when_key_in_result(monkeypatch):
+    """analyze_quote result that contains the API key fragment must fail."""
+    monkeypatch.delenv("ALLOW_GPM_RUNTIME_SKIP", raising=False)
+    key = "sk-ws-LEAKTEST1234567890abc"
+
+    leaky_result = {
+        "human_approval_required": True,
+        "quote_position": "within_mid_range",
+        "recommendation": "negotiate",
+        "confidence": "medium",
+        "reasoning": key,  # key leaks into output
+    }
+
+    fake_module = types.ModuleType(_RUNTIME_MODULE)
+    fake_module.analyze_quote = mock.MagicMock(return_value=leaky_result)
+
+    with mock.patch.dict("sys.modules", {_RUNTIME_MODULE: fake_module}):
+        result = smoke.test_gpm_llm_runtime(key)
+
+    assert result is False, "Should fail when API key fragment appears in analyze_quote output"

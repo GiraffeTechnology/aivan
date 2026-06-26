@@ -75,37 +75,32 @@ def test_qwen_connectivity(key: str) -> bool:
 
 
 def test_gpm_llm_runtime(key: str) -> bool:
-    """通过 GPM LLM runtime 层测试（验证 aiven 集成）。"""
+    """通过 GPM LLM runtime 层测试（验证 aivan 集成）。"""
     try:
-        from aivan.gpm.runtime import GPMLLMRuntime  # 按实际路径调整
+        from aivan.gpm.llm_runtime import analyze_quote
     except ImportError:
-        try:
-            from aivan.gpm.operator_llm_api_runtime import OperatorLLMApiRuntime as GPMLLMRuntime
-        except ImportError:
-            if os.environ.get("ALLOW_GPM_RUNTIME_SKIP") == "true":
-                log.warning("GPM LLM runtime class not found — skipping because ALLOW_GPM_RUNTIME_SKIP=true")
-                return True
-            log.error("GPM LLM runtime class not found — set ALLOW_GPM_RUNTIME_SKIP=true to skip")
-            return False
+        if os.environ.get("ALLOW_GPM_RUNTIME_SKIP") == "true":
+            log.warning("aivan.gpm.llm_runtime not found — skipping because ALLOW_GPM_RUNTIME_SKIP=true")
+            return True
+        log.error("aivan.gpm.llm_runtime not found — set ALLOW_GPM_RUNTIME_SKIP=true to skip")
+        return False
 
     try:
-        runtime = GPMLLMRuntime()
-        result = runtime.generate_json({
-            "sku": "CI-SMOKE-SKU-001",
-            "supplier_quote": 3.75,
-            "context": "CI smoke test — 20 evidence samples, P50=3.58, P75=3.79",
-            "prompt": (
-                "Analyze this supplier quote for procurement decision. "
-                "Return JSON with human_approval_required, recommendation, "
-                "quote_position, confidence, reasoning."
-            ),
-        })
+        result = analyze_quote(
+            sku="CI-SMOKE-SKU-001",
+            supplier_quote=3.75,
+            currency="USD",
+            quantity=500,
+        )
 
-        # 验证必填字段
-        required = {"human_approval_required", "recommendation", "quote_position", "confidence"}
-        missing = required - result.keys()
-        if missing:
-            log.error("GPM runtime FAIL: missing keys %s", missing)
+        # 验证 runtime 未降级为 unavailable（live Qwen 必须在线）
+        if result.get("runtime_status") == "unavailable":
+            reason = result.get("reason", "unknown")
+            log.error(
+                "GPM runtime FAIL: LLM unavailable (reason=%s) — "
+                "live Qwen must be reachable for this test to pass",
+                reason,
+            )
             return False
 
         # 验证 human_approval_required = True
@@ -113,11 +108,24 @@ def test_gpm_llm_runtime(key: str) -> bool:
             log.error("GPM runtime FAIL: human_approval_required != True")
             return False
 
-        # 验证 recommendation 值合法
+        # 验证 quote_position 合法
+        valid_positions = {
+            "below_market", "within_low_range", "within_mid_range",
+            "within_high_range", "above_market", "insufficient_data",
+        }
+        if result.get("quote_position") not in valid_positions:
+            log.error("GPM runtime FAIL: invalid quote_position %r", result.get("quote_position"))
+            return False
+
+        # 验证 recommendation 合法
         valid_recs = {"accept", "negotiate", "reject", "request_more_info", "human_review_required"}
-        rec = result.get("recommendation", "")
-        if rec not in valid_recs:
-            log.error("GPM runtime FAIL: invalid recommendation %r", rec)
+        if result.get("recommendation") not in valid_recs:
+            log.error("GPM runtime FAIL: invalid recommendation %r", result.get("recommendation"))
+            return False
+
+        # 验证 confidence 合法
+        if result.get("confidence") not in {"high", "medium", "low"}:
+            log.error("GPM runtime FAIL: invalid confidence %r", result.get("confidence"))
             return False
 
         # 验证 key 未出现在输出中
