@@ -82,8 +82,11 @@ def test_gpm_llm_runtime(key: str) -> bool:
         try:
             from aivan.gpm.operator_llm_api_runtime import OperatorLLMApiRuntime as GPMLLMRuntime
         except ImportError:
-            log.warning("GPM LLM runtime class not found — skipping runtime layer test")
-            return True  # 不因 import 路径错误 fail CI
+            if os.environ.get("ALLOW_GPM_RUNTIME_SKIP") == "true":
+                log.warning("GPM LLM runtime class not found — skipping because ALLOW_GPM_RUNTIME_SKIP=true")
+                return True
+            log.error("GPM LLM runtime class not found — set ALLOW_GPM_RUNTIME_SKIP=true to skip")
+            return False
 
     try:
         runtime = GPMLLMRuntime()
@@ -151,6 +154,15 @@ def test_gpm_api_service(key: str) -> bool:
 
     env = {
         **os.environ,
+        # actual provider variables consumed by the service
+        "AIVAN_LLM_PROVIDER": "qwen",
+        "QWEN_API_KEY": key,
+        "QWEN_MODEL": os.environ.get("QWEN_MODEL", "qwen-turbo"),
+        "QWEN_BASE_URL": os.environ.get(
+            "QWEN_BASE_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        # GPM-layer variables
         "GPM_CONTEXT_RETRIEVER": "mock",
         "GPM_LLM_RUNTIME_MODE": "llm_api",
         "GPM_ENABLE_LLM_API": "true",
@@ -159,7 +171,7 @@ def test_gpm_api_service(key: str) -> bool:
         "GPM_LLM_API_KEY": key,
         "GIRAFFE_DB_BASE_URL": "",
         "AIVAN_TENANT_ID": "ci-smoke",
-        # 确保子进程能找到 aiven 包（src/ layout）
+        # 确保子进程能找到 aivan 包（src/ layout）
         "PYTHONPATH": src_dir + (
             os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else ""
         ),
@@ -223,11 +235,45 @@ def test_gpm_api_service(key: str) -> bool:
         assert key[:20] not in packet_str, \
             "SECURITY FAIL: API key in packet response"
 
+        # 验证 runtime 未降级为 unavailable
+        packet_str_lower = packet_str.lower()
+        assert '"runtime_status": "unavailable"' not in packet_str_lower, \
+            "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
+        assert "runtime unavailable" not in packet_str_lower, \
+            "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
+
+        # 验证真实 LLM 分析字段存在且值合法
+        valid_positions = {
+            "below_market",
+            "within_low_range",
+            "within_mid_range",
+            "within_high_range",
+            "above_market",
+            "insufficient_data",
+        }
+        valid_recommendations = {
+            "accept",
+            "negotiate",
+            "reject",
+            "request_more_info",
+            "human_review_required",
+        }
+        valid_confidences = {"high", "medium", "low"}
+
+        assert packet.get("quote_position") in valid_positions, \
+            f"Missing or invalid quote_position: {packet.get('quote_position')!r}"
+        assert packet.get("recommendation") in valid_recommendations, \
+            f"Missing or invalid recommendation: {packet.get('recommendation')!r}"
+        assert packet.get("confidence") in valid_confidences, \
+            f"Missing or invalid confidence: {packet.get('confidence')!r}"
+
         log.info(
-            "GPM E2E OK — packet_id=%s dispatched=%s position=%s",
+            "GPM E2E OK — packet_id=%s dispatched=%s position=%s recommendation=%s confidence=%s",
             packet.get("packet_id"),
             packet.get("dispatched"),
             packet.get("quote_position"),
+            packet.get("recommendation"),
+            packet.get("confidence"),
         )
         return True
 
