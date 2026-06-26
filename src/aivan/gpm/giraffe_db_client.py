@@ -40,6 +40,21 @@ class GiraffeDBClient:
         except Exception as exc:
             raise GiraffeDBClientError(f"check_schema_version failed: {exc}") from exc
 
+    def get_tenant(self, tenant_id: str) -> dict | None:
+        """GET /api/data/tenants/{tenant_id} — None if 404."""
+        url = f"{self.base_url}/api/data/tenants/{tenant_id}"
+        try:
+            resp = self._session.get(url, timeout=self.timeout)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise GiraffeDBClientError(
+                f"get_tenant failed: {exc.response.status_code}",
+                status_code=exc.response.status_code,
+            ) from exc
+
     # ── Packet CRUD ────────────────────────────────────────────────────────
 
     def create_packet(self, packet: dict) -> dict:
