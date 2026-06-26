@@ -11,16 +11,17 @@ import argparse
 import uvicorn
 from fastapi import FastAPI
 
-from aivan.gpm.router import _init_store, router
+from aivan.gpm.router import _init_store, get_db_client, router
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="AIVAN GPM", version="0.2.0")
+    app = FastAPI(title="AIVAN GPM", version="0.3.0")
     app.include_router(router, prefix="/api/gpm")
 
     @app.on_event("startup")
     def _on_startup() -> None:
         _init_store()
+        app.state.giraffe_db_client = get_db_client()
 
     return app
 
