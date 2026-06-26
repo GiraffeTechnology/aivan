@@ -14,6 +14,7 @@ from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
+from aivan.gpm.router import router as _gpm_router
 
 
 def _require_api_key(request: Request) -> None:
@@ -32,6 +33,8 @@ async def lifespan(app: FastAPI):
     init_db()
     from aivan.platforms.platform_registry import _ensure_init
     _ensure_init()
+    from aivan.gpm.router import _init_store as _gpm_init_store
+    _gpm_init_store()
     yield
 
 app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.2.0", lifespan=lifespan)
@@ -43,6 +46,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 
 _templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
 _static_dir = os.path.join(os.path.dirname(__file__), "..", "app", "static")
