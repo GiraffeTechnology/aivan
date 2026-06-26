@@ -20,6 +20,34 @@ logging.basicConfig(
 log = logging.getLogger("gpm-smoke")
 
 
+def _contains_unavailable_runtime(value) -> bool:
+    """Recursively check whether a packet value signals an unavailable LLM runtime.
+
+    Handles nested dicts/lists and JSON-encoded strings (e.g. llm_reasoning
+    that contains serialised JSON) so an escaped runtime_status field cannot
+    slip past a flat substring scan.
+    """
+    if isinstance(value, dict):
+        if str(value.get("runtime_status", "")).lower() == "unavailable":
+            return True
+        return any(_contains_unavailable_runtime(v) for v in value.values())
+
+    if isinstance(value, list):
+        return any(_contains_unavailable_runtime(v) for v in value)
+
+    if isinstance(value, str):
+        lowered = value.lower()
+        if "runtime unavailable" in lowered:
+            return True
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return "runtime_status" in lowered and "unavailable" in lowered
+        return _contains_unavailable_runtime(decoded)
+
+    return False
+
+
 def check_env() -> str:
     key = os.environ.get("GPM_LLM_API_KEY") or os.environ.get("QWEN_API_KEY", "")
     if not key:
@@ -243,11 +271,8 @@ def test_gpm_api_service(key: str) -> bool:
         assert key[:20] not in packet_str, \
             "SECURITY FAIL: API key in packet response"
 
-        # 验证 runtime 未降级为 unavailable
-        packet_str_lower = packet_str.lower()
-        assert '"runtime_status": "unavailable"' not in packet_str_lower, \
-            "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
-        assert "runtime unavailable" not in packet_str_lower, \
+        # 验证 runtime 未降级为 unavailable（包括 llm_reasoning 中嵌套的 JSON）
+        assert not _contains_unavailable_runtime(packet), \
             "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
 
         # 验证真实 LLM 分析字段存在且值合法

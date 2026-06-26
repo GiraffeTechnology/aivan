@@ -53,10 +53,7 @@ def _assert_packet(packet: dict, key: str) -> None:
     assert key[:20] not in packet_str, \
         "SECURITY FAIL: API key in packet response"
 
-    packet_str_lower = packet_str.lower()
-    assert '"runtime_status": "unavailable"' not in packet_str_lower, \
-        "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
-    assert "runtime unavailable" not in packet_str_lower, \
+    assert not smoke._contains_unavailable_runtime(packet), \
         "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
 
     valid_positions = {
@@ -179,6 +176,67 @@ def test_e2e_fails_when_runtime_unavailable_text_in_body():
     }
     with pytest.raises(AssertionError, match="LLM runtime unavailable"):
         _assert_packet(packet, _FAKE_KEY)
+
+
+# ---------------------------------------------------------------------------
+# _contains_unavailable_runtime — unit tests for the recursive helper
+# ---------------------------------------------------------------------------
+
+
+def test_contains_unavailable_runtime_flat_dict():
+    assert smoke._contains_unavailable_runtime({"runtime_status": "unavailable"})
+
+
+def test_contains_unavailable_runtime_nested_dict():
+    assert smoke._contains_unavailable_runtime({
+        "llm_reasoning": {"runtime_status": "unavailable"},
+    })
+
+
+def test_contains_unavailable_runtime_json_encoded_string():
+    """llm_reasoning stored as a JSON string must be decoded and checked."""
+    encoded = json.dumps({"runtime_status": "unavailable"})
+    assert smoke._contains_unavailable_runtime({"llm_reasoning": encoded})
+
+
+def test_contains_unavailable_runtime_plain_text_in_string():
+    assert smoke._contains_unavailable_runtime({"error": "runtime unavailable — falling back"})
+
+
+def test_contains_unavailable_runtime_list_of_dicts():
+    assert smoke._contains_unavailable_runtime([
+        {"quote_position": "within_low_range"},
+        {"runtime_status": "unavailable"},
+    ])
+
+
+def test_contains_unavailable_runtime_false_for_valid_packet():
+    assert not smoke._contains_unavailable_runtime({
+        "dispatched": False,
+        "human_approval_required": True,
+        "quote_position": "within_mid_range",
+        "recommendation": "negotiate",
+        "confidence": "medium",
+    })
+
+
+def test_contains_unavailable_runtime_false_for_available_status():
+    assert not smoke._contains_unavailable_runtime({"runtime_status": "ok"})
+
+
+def test_contains_unavailable_runtime_json_string_non_unavailable():
+    encoded = json.dumps({"runtime_status": "ok", "recommendation": "negotiate"})
+    assert not smoke._contains_unavailable_runtime({"llm_reasoning": encoded})
+
+
+def test_contains_unavailable_runtime_case_insensitive():
+    assert smoke._contains_unavailable_runtime({"runtime_status": "UNAVAILABLE"})
+
+
+def test_contains_unavailable_runtime_plain_value_types():
+    assert not smoke._contains_unavailable_runtime(42)
+    assert not smoke._contains_unavailable_runtime(None)
+    assert not smoke._contains_unavailable_runtime(True)
 
 
 # ---------------------------------------------------------------------------
