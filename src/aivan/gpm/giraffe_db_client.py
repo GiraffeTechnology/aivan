@@ -2,7 +2,12 @@
 
 Connects to the giraffe-db service at GIRAFFE_DB_BASE_URL. All methods raise
 GiraffeDBClientError on non-2xx responses (except get_packet which returns None
-on 404).
+on 404). Transport errors (timeouts, connection failures) are also wrapped as
+GiraffeDBClientError so callers can treat all failure modes uniformly.
+
+Packet-scoped endpoints send X-Service-Tenant-ID header so giraffe-db can
+enforce tenant ownership. The header carries the tenant identity already
+verified by AIVAN's HMAC auth layer.
 """
 from __future__ import annotations
 
@@ -54,6 +59,10 @@ class GiraffeDBClient:
                 f"get_tenant failed: {exc.response.status_code}",
                 status_code=exc.response.status_code,
             ) from exc
+        except Exception as exc:
+            # Covers httpx.RequestError (ConnectError, TimeoutException, etc.)
+            # and any other transport failure; lets auth fall back to HMAC-only.
+            raise GiraffeDBClientError(f"get_tenant failed: {exc}") from exc
 
     # ── Packet CRUD ────────────────────────────────────────────────────────
 
@@ -70,11 +79,16 @@ class GiraffeDBClient:
                 status_code=exc.response.status_code,
             ) from exc
 
-    def get_packet(self, packet_id: str) -> dict | None:
-        """GET /api/data/gpm/packets/{packet_id} — None if 404."""
+    def get_packet(self, packet_id: str, tenant_id: str | None = None) -> dict | None:
+        """GET /api/data/gpm/packets/{packet_id} — None if 404.
+
+        Passes X-Service-Tenant-ID header when tenant_id is provided so
+        giraffe-db enforces ownership rather than fetching then checking.
+        """
         url = f"{self.base_url}/api/data/gpm/packets/{packet_id}"
+        headers = {"X-Service-Tenant-ID": tenant_id} if tenant_id else {}
         try:
-            resp = self._session.get(url, timeout=self.timeout)
+            resp = self._session.get(url, headers=headers, timeout=self.timeout)
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -91,12 +105,14 @@ class GiraffeDBClient:
         approval_status: str,
         operator_id: str,
         notes: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict:
         """PATCH /api/data/gpm/packets/{packet_id}"""
         url = f"{self.base_url}/api/data/gpm/packets/{packet_id}"
         body = {"approval_status": approval_status, "operator_id": operator_id, "notes": notes}
+        headers = {"X-Service-Tenant-ID": tenant_id} if tenant_id else {}
         try:
-            resp = self._session.patch(url, json=body, timeout=self.timeout)
+            resp = self._session.patch(url, json=body, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as exc:
@@ -114,11 +130,12 @@ class GiraffeDBClient:
     ) -> list[dict]:
         """GET /api/data/gpm/packets"""
         url = f"{self.base_url}/api/data/gpm/packets"
-        params: dict = {"tenant_id": tenant_id, "limit": limit, "offset": offset}
+        params: dict = {"limit": limit, "offset": offset}
         if status:
             params["status"] = status
+        headers = {"X-Service-Tenant-ID": tenant_id}
         try:
-            resp = self._session.get(url, params=params, timeout=self.timeout)
+            resp = self._session.get(url, params=params, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             return resp.json().get("packets", [])
         except httpx.HTTPStatusError as exc:
@@ -133,18 +150,14 @@ class GiraffeDBClient:
         operator_id: str,
         action: str,
         notes: str | None = None,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
     ) -> dict:
         """POST /api/data/gpm/packets/{packet_id}/audit"""
         url = f"{self.base_url}/api/data/gpm/packets/{packet_id}/audit"
-        body = {
-            "operator_id": operator_id,
-            "action": action,
-            "notes": notes,
-            "tenant_id": tenant_id,
-        }
+        body = {"operator_id": operator_id, "action": action, "notes": notes}
+        headers = {"X-Service-Tenant-ID": tenant_id} if tenant_id else {}
         try:
-            resp = self._session.post(url, json=body, timeout=self.timeout)
+            resp = self._session.post(url, json=body, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as exc:

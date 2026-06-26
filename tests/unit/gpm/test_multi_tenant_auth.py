@@ -127,3 +127,36 @@ def test_invalid_signature_raises_401(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         _run(auth(_make_request({"Authorization": "Bearer tenant-x:baadsignature000"})))
     assert exc_info.value.status_code == 401
+
+
+# ── Transport error wrapping ─────────────────────────────────────────────────
+
+def test_get_tenant_wraps_transport_errors():
+    """httpx.RequestError must be wrapped in GiraffeDBClientError for degraded fallback."""
+    import httpx
+    from aivan.gpm.giraffe_db_client import GiraffeDBClient
+
+    db_client = GiraffeDBClient("http://localhost:1")
+    db_client._session = MagicMock()
+    db_client._session.get.side_effect = httpx.ConnectError("connection refused")
+
+    with pytest.raises(GiraffeDBClientError):
+        db_client.get_tenant("any-tenant")
+
+
+def test_transport_error_in_get_tenant_triggers_auth_degradation(monkeypatch):
+    """When get_tenant raises GiraffeDBClientError (from transport error),
+    make_require_auth must fall back to HMAC-only — no 500."""
+    import httpx
+    from aivan.gpm.giraffe_db_client import GiraffeDBClient
+
+    monkeypatch.setenv("AIVAN_AUTH_SECRET", "test-secret")
+    db_client = GiraffeDBClient("http://localhost:1")
+    db_client._session = MagicMock()
+    db_client._session.get.side_effect = httpx.ConnectError("refused")
+
+    auth = make_require_auth(db_client=db_client)
+    token = generate_token("t-transport", "test-secret")
+    result = _run(auth(_make_request({"Authorization": f"Bearer {token}"}))
+    )
+    assert result == "t-transport"

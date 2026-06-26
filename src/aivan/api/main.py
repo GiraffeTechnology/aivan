@@ -33,8 +33,9 @@ async def lifespan(app: FastAPI):
     init_db()
     from aivan.platforms.platform_registry import _ensure_init
     _ensure_init()
-    from aivan.gpm.router import _init_store as _gpm_init_store
+    from aivan.gpm.router import _init_store as _gpm_init_store, get_db_client
     _gpm_init_store()
+    app.state.giraffe_db_client = get_db_client()
     yield
 
 app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.2.0", lifespan=lifespan)

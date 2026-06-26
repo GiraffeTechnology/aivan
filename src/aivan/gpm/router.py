@@ -109,7 +109,7 @@ async def get_quote_guidance(
     packet_id: str,
     tenant_id: str = Depends(require_auth),
 ) -> dict:
-    packet = _packet_store.get(packet_id)
+    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
     if packet.get("tenant_id") != tenant_id:
@@ -126,7 +126,7 @@ async def approve_packet(
     body: ApprovalRequest,
     tenant_id: str = Depends(require_auth),
 ) -> dict:
-    packet = _packet_store.get(packet_id)
+    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
     if packet.get("tenant_id") != tenant_id:
@@ -143,7 +143,9 @@ async def approve_packet(
             },
         )
 
-    updated = _packet_store.update_status(packet_id, "approved", body.operator_id, body.notes)
+    updated = _packet_store.update_status(
+        packet_id, "approved", body.operator_id, body.notes, tenant_id=tenant_id
+    )
 
     assert updated is not None and updated.get("dispatched") is False, (
         "dispatched must remain False after approval"
@@ -157,7 +159,7 @@ async def reject_packet(
     body: ApprovalRequest,
     tenant_id: str = Depends(require_auth),
 ) -> dict:
-    packet = _packet_store.get(packet_id)
+    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
     if packet.get("tenant_id") != tenant_id:
@@ -174,7 +176,9 @@ async def reject_packet(
             },
         )
 
-    updated = _packet_store.update_status(packet_id, "rejected", body.operator_id, body.notes)
+    updated = _packet_store.update_status(
+        packet_id, "rejected", body.operator_id, body.notes, tenant_id=tenant_id
+    )
 
     assert updated is not None and updated.get("dispatched") is False, (
         "dispatched must remain False after rejection"

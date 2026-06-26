@@ -2,25 +2,22 @@
 
 Behaviour:
 - save(): write giraffe-db first, then memory; on DB failure memory-only + warning
-- get(): memory hit → return; miss → fetch giraffe-db → backfill memory
+- get(): memory hit (tenant-filtered) -> return; miss -> fetch giraffe-db -> backfill memory
 - update_status(): write giraffe-db + sync memory; on DB failure memory-only
-- write_audit(): giraffe-db only (no cache); failure → False, no raise
-- list_by_tenant(): giraffe-db preferred; on failure memory fallback
+- write_audit(): giraffe-db only (no cache); failure -> False, no raise
+- list_by_tenant(): giraffe-db preferred; on failure memory fallback (tenant-filtered)
 
-Session G: AIVAN_TENANT_ID single-tenant (env var, default "default").
-Session H: multi-tenant Bearer token auth.
+Tenant isolation applies in all paths: in-memory fallback never leaks
+another tenant's packets.
 """
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
 from aivan.gpm.giraffe_db_client import GiraffeDBClient, GiraffeDBClientError
 
 logger = logging.getLogger(__name__)
-
-AIVAN_TENANT_ID = os.environ.get("AIVAN_TENANT_ID", "default")
 
 
 class GPMPacketStore:
@@ -62,12 +59,16 @@ class GPMPacketStore:
         self._mem[pid] = packet
         return packet
 
-    def get(self, packet_id: str) -> Optional[dict]:
-        if packet_id in self._mem:
-            return self._mem[packet_id]
+    def get(self, packet_id: str, tenant_id: str | None = None) -> Optional[dict]:
+        cached = self._mem.get(packet_id)
+        if cached is not None:
+            # Enforce tenant isolation in memory — never return another tenant's packet.
+            if tenant_id is not None and cached.get("tenant_id") != tenant_id:
+                return None
+            return cached
         if self._durable:
             try:
-                row = self._db.get_packet(packet_id)
+                row = self._db.get_packet(packet_id, tenant_id=tenant_id)
                 if row:
                     self._mem[packet_id] = row
                 return row
@@ -81,11 +82,12 @@ class GPMPacketStore:
         approval_status: str,
         operator_id: str,
         notes: Optional[str] = None,
+        tenant_id: str | None = None,
     ) -> Optional[dict]:
         if self._durable:
             try:
                 updated = self._db.update_packet_status(
-                    packet_id, approval_status, operator_id, notes
+                    packet_id, approval_status, operator_id, notes, tenant_id=tenant_id
                 )
                 self._mem[packet_id] = updated
                 return updated
@@ -95,10 +97,13 @@ class GPMPacketStore:
                 )
 
         if packet_id in self._mem:
+            packet = self._mem[packet_id]
+            if tenant_id is not None and packet.get("tenant_id") != tenant_id:
+                return None
             self._mem[packet_id].update({
                 "approval_status": approval_status,
                 "operator_id": operator_id,
-                **({"notes": notes} if notes else {}),
+                **(({"notes": notes}) if notes else {}),
             })
             return self._mem[packet_id]
         return None
@@ -109,7 +114,7 @@ class GPMPacketStore:
         operator_id: str,
         action: str,
         notes: Optional[str] = None,
-        tenant_id: str = AIVAN_TENANT_ID,
+        tenant_id: str = "default",
     ) -> bool:
         """Write audit record to giraffe-db only. Returns False on failure without raising."""
         if self._durable:
@@ -122,7 +127,7 @@ class GPMPacketStore:
 
     def list_by_tenant(
         self,
-        tenant_id: str = AIVAN_TENANT_ID,
+        tenant_id: str = "default",
         status: Optional[str] = None,
     ) -> list[dict]:
         if self._durable:
@@ -134,7 +139,8 @@ class GPMPacketStore:
                 )
         return [
             p for p in self._mem.values()
-            if (status is None or p.get("approval_status") == status)
+            if p.get("tenant_id") == tenant_id
+            and (status is None or p.get("approval_status") == status)
         ]
 
     @property
