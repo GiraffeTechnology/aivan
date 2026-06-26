@@ -49,7 +49,7 @@ class GPMPacketStore:
         pid = packet["packet_id"]
         if self._durable:
             try:
-                saved = self._db.create_packet(packet)
+                saved = self._db.create_packet(packet, tenant_id=packet.get("tenant_id"))
                 self._mem[pid] = saved
                 return saved
             except GiraffeDBClientError as exc:
