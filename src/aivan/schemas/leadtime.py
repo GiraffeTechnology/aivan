@@ -2,8 +2,7 @@
 
 These are data containers only -- no calculation lives here. All lead-time
 computation is owned by the standalone GLTG service and reached via
-``aivan.integrations.gltg``. (Previously these models lived in the now-removed
-``aivan.leadtime`` calculation package.)
+``aivan.integrations.gltg``. (Previously these models lived in the now-removed local calculation package.)
 """
 
 from __future__ import annotations
