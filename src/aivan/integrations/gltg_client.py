@@ -24,6 +24,16 @@ import httpx
 DEFAULT_BASE_URL = "http://localhost:8090"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
+# Process-wide transport override. Tests install an httpx.MockTransport here so
+# the whole app talks to a faithful in-memory GLTG without a live server.
+_DEFAULT_TRANSPORT: "httpx.BaseTransport | None" = None
+
+
+def set_default_transport(transport: "httpx.BaseTransport | None") -> None:
+    """Install (or clear) a process-wide default transport for the GLTG client."""
+    global _DEFAULT_TRANSPORT
+    _DEFAULT_TRANSPORT = transport
+
 
 @dataclass
 class GLTGClientResult:
@@ -50,7 +60,8 @@ class GLTGClient:
         else:
             self.timeout = float(os.environ.get("GLTG_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
         # Injectable transport keeps unit tests off the network (httpx.MockTransport).
-        self._transport = transport
+        # Falls back to the process-wide default installed via set_default_transport.
+        self._transport = transport if transport is not None else _DEFAULT_TRANSPORT
 
     # ------------------------------------------------------------------ #
     # transport

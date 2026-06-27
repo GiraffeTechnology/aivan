@@ -9,6 +9,26 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from aivan.db.models import Base
 
+from aivan.integrations import gltg_client as _gltg_client
+from tests.gltg_fake import mock_transport as _gltg_mock_transport
+
+
+@pytest.fixture(autouse=True)
+def _gltg_api_mock():
+    """Route all GLTG HTTP calls to an in-memory fake (no live server in unit tests).
+
+    Disabled when RUN_GLTG_INTEGRATION_TESTS=1 so the live integration test hits
+    a real GLTG server.
+    """
+    if os.environ.get("RUN_GLTG_INTEGRATION_TESTS") == "1":
+        yield
+        return
+    _gltg_client.set_default_transport(_gltg_mock_transport())
+    try:
+        yield
+    finally:
+        _gltg_client.set_default_transport(None)
+
 
 @pytest.fixture
 def db_session():
