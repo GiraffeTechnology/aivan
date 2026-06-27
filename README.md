@@ -74,7 +74,21 @@ AIVAN must never ask an LLM to infer supplier facts, customer history, historica
 
 ## GLTG Lead-Time Simulation
 
-GLTG is the lead-time simulation model. AIVAN calls GLTG for P50/P80/P90 lead-time estimates, minimum feasible lead time, supplier-set feasibility, known-suppliers-first feasibility, public-bidding time cost, and fallback trigger recommendations.
+> **GLTG is now a standalone external service:** https://github.com/GiraffeTechnology/GLTG
+>
+> AIVAN calls GLTG over HTTP during RFQ / lead-time evaluation through
+> `src/aivan/integrations/gltg_client.py`. Configure the connection with:
+>
+> ```bash
+> GLTG_API_BASE_URL=http://localhost:8090
+> GLTG_API_TIMEOUT_SECONDS=30
+> ```
+>
+> The client returns a structured `GLTGClientResult(ok, data, error, status_code)`
+> and never falls back to a local calculation or lets the LLM invent missing GLTG
+> outputs.
+
+GLTG is the lead-time simulation model. AIVAN calls GLTG for lead-time estimates, minimum feasible lead time, supplier-set feasibility, known-suppliers-first feasibility, public-bidding time cost, and fallback trigger recommendations.
 
 The LLM may explain GLTG outputs in user-friendly language, but it must not replace GLTG calculations or invent lead-time estimates.
 

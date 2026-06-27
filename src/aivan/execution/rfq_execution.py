@@ -11,8 +11,8 @@ from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient
 from aivan.integrations.gltg import GLTGClient
-from aivan.leadtime.calculator import calculate_leadtime_for_requirement
-from aivan.leadtime.models import LeadTimeEstimate
+from aivan.integrations.gltg import calculate_leadtime_for_requirement
+from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.client import get_openclaw_client

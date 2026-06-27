@@ -440,17 +440,23 @@ def test_missing_project_attachment_is_validated_against_db(api_client):
     assert response.json()["project_id"] != "proj_does_not_exist"
 
 
-def test_gltg_timeout_fallback(monkeypatch):
-    monkeypatch.setenv("AIVAN_GLTG_FORCE_TIMEOUT", "true")
-    simulation = GLTGClient().simulate(
-        BuyerRequirement(category="apparel", product_type="shirt", quantity=10000, destination="Vancouver", delivery_days=45),
-        RFQStrategy(lead_time_confidence="P80"),
-        supplier_count=2,
-    )
+def test_gltg_unavailable_raises_no_silent_fallback():
+    """When GLTG is unreachable, AIVAN must surface the error, never fabricate one."""
+    import httpx
 
-    assert simulation.known_suppliers_first_feasibility == "unknown_due_to_timeout"
-    assert simulation.deadline_risk_level == "high"
-    assert "timed out" in simulation.explanation
+    from aivan.integrations.gltg import GLTGClient as GLTGFacade, GLTGUnavailableError
+    from aivan.integrations.gltg_client import GLTGClient as GLTGHttp
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    facade = GLTGFacade(http=GLTGHttp(base_url="http://gltg.test", transport=httpx.MockTransport(boom)))
+    with pytest.raises(GLTGUnavailableError):
+        facade.simulate(
+            BuyerRequirement(category="apparel", product_type="shirt", quantity=10000, destination="Vancouver", delivery_days=45),
+            RFQStrategy(lead_time_confidence="P80"),
+            supplier_count=2,
+        )
 
 
 def test_qwen_provider_does_not_leak_api_key_in_errors(monkeypatch):

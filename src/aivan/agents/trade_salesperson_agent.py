@@ -16,7 +16,7 @@ from aivan.sourcing.marketplaces.alibaba_connector import search_alibaba
 from aivan.platforms.platform_registry import is_platform_trusted
 from aivan.risk.supplier_risk_agent import run_risk_screening
 from aivan.risk.risk_report import should_block_supplier
-from aivan.leadtime.calculator import calculate_leadtime_for_requirement
+from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.execution.event_log import append_event
 from aivan.utils.ids import new_project_id
 from aivan.utils.time_utils import utcnow_iso

@@ -10,7 +10,23 @@ from aivan.agents.buyer_option_agent import generate_buyer_options
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
 from aivan.schemas.leadtime import LeadTimeEstimate
-from aivan.leadtime.calculator import calculate_apparel_leadtime
+from aivan.integrations.gltg import GLTGClient as _GLTGFacade
+
+
+def _gltg_lead_time(supplier_id: str, capacity: int) -> LeadTimeEstimate:
+    """Build a LeadTimeEstimate via the standalone GLTG facade (mocked in tests)."""
+    req = _make_requirement()
+    reply = SupplierReply(
+        project_id="proj_test",
+        supplier_id=supplier_id,
+        raw_text="capacity",
+        unit_price=4.5,
+        currency="USD",
+        moq=5000,
+        lead_time_days=35,
+        capacity_per_day=capacity,
+    )
+    return _GLTGFacade().estimate_for_requirement(req, supplier_reply=reply, supplier_id=supplier_id)
 
 
 def _make_requirement() -> BuyerRequirement:
@@ -39,15 +55,7 @@ def _make_reply(supplier_id: str = "sup_001", unit_price: float = 4.50) -> Suppl
 
 
 def _make_lead_time(supplier_id: str = "sup_001") -> LeadTimeEstimate:
-    return calculate_apparel_leadtime(
-        quantity=10000,
-        daily_capacity=500,
-        destination="Vancouver",
-        logistics_preference="sea",
-        supplier_id=supplier_id,
-        project_id="proj_test",
-        deadline_days=60,
-    )
+    return _gltg_lead_time(supplier_id, capacity=500)
 
 
 def test_generate_buyer_options_returns_list():
@@ -115,9 +123,9 @@ def test_multiple_replies_can_produce_multiple_options():
         _make_reply("sup_003", 4.80),
     ]
     lts = [
-        calculate_apparel_leadtime(10000, 500, "Vancouver", "sea", supplier_id="sup_001", project_id="proj_test", deadline_days=60),
-        calculate_apparel_leadtime(10000, 300, "Vancouver", "sea", supplier_id="sup_002", project_id="proj_test", deadline_days=60),
-        calculate_apparel_leadtime(10000, 700, "Vancouver", "sea", supplier_id="sup_003", project_id="proj_test", deadline_days=60),
+        _gltg_lead_time("sup_001", 500),
+        _gltg_lead_time("sup_002", 300),
+        _gltg_lead_time("sup_003", 700),
     ]
     options = generate_buyer_options(req, replies, lts, "proj_test")
     assert len(options) >= 1
