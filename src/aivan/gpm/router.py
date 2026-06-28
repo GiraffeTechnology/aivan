@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from aivan.gpm.auth import require_auth
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
+from aivan.gpm.record_id import validation_error as record_id_validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,13 @@ async def create_quote_guidance(
     tenant_id: str = Depends(require_auth),
 ) -> dict:
     """Analyse a supplier quote and persist the resulting decision packet."""
+    # A supplier_id that is a retired giraffe-db legacy id is rejected, never
+    # remapped. AIVAN's own (non-giraffe-db) supplier ids pass through.
+    if body.supplier_id is not None:
+        id_error = record_id_validation_error(body.supplier_id)
+        if id_error is not None:
+            raise HTTPException(status_code=422, detail=id_error)
+
     runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
     if runtime_mode == "mock":
         analysis = mock_quote_analysis(body.sku, body.supplier_quote)
