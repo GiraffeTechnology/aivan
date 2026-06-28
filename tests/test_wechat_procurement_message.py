@@ -52,6 +52,41 @@ def test_wechat_invoke_returns_meaningful_reply():
         assert token in body["output"]
 
 
+def test_invoke_preserves_project_and_role_context(monkeypatch):
+    # OpenClaw supplies project_id / role_context under context; the constructed
+    # event must carry them so supplier replies attach to the existing project.
+    import aivan.api.invoke as invoke_mod
+
+    captured = {}
+
+    def _capture(event, _db):
+        captured["project_id"] = event.project_id
+        captured["role_context"] = event.role_context
+
+        class _Result:
+            project_id = "proj-existing"
+            user_control_message = "ok"
+            message = "ok"
+            drafts_created: list[str] = []
+
+        return _Result()
+
+    monkeypatch.setattr(
+        "aivan.execution.rfq_execution.create_rfq_from_event", _capture
+    )
+
+    result: dict = {}
+    invoke_mod._run_pipeline(
+        "供应商回复：可以做",
+        {"channel": "wechat", "project_id": "proj-existing", "role_context": "supplier"},
+        "conv-1",
+        result,
+    )
+    assert result.get("ok") is True
+    assert captured["project_id"] == "proj-existing"
+    assert captured["role_context"] == "supplier"
+
+
 def test_wechat_events_bridge_never_500s(monkeypatch):
     # Force the heavy RFQ pipeline to blow up (as a down dependency would) and
     # assert the bridge still returns HTTP 200 with a structured reply_text.

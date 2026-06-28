@@ -200,17 +200,26 @@ def _run_pipeline(text: str, context: dict, session_id: str, result: dict) -> No
         session_factory = get_session_factory()
         db = session_factory()
         try:
-            event = parse_openclaw_event(
-                {
-                    "source": "openclaw",
-                    "channel": _first_str(context.get("channel")) or "wechat",
-                    "conversation_id": session_id or "invoke",
-                    "sender_id": _first_str(context.get("sender_id")) or "wechat-user",
-                    "message_text": text,
-                    "message_type": "text",
-                    "mode": _first_str(context.get("mode")) or "auto",
-                }
-            )
+            # Carry through project_id / role_context when OpenClaw supplies them:
+            # classify_event uses them to attach a reply to its existing project, and
+            # is_supplier_reply uses role_context to route supplier replies. Dropping
+            # them would misclassify a supplier reply as a brand-new RFQ.
+            event_payload = {
+                "source": "openclaw",
+                "channel": _first_str(context.get("channel")) or "wechat",
+                "conversation_id": session_id or "invoke",
+                "sender_id": _first_str(context.get("sender_id")) or "wechat-user",
+                "message_text": text,
+                "message_type": "text",
+                "mode": _first_str(context.get("mode")) or "auto",
+            }
+            project_id = _first_str(context.get("project_id"))
+            if project_id:
+                event_payload["project_id"] = project_id
+            role_context = _first_str(context.get("role_context"))
+            if role_context:
+                event_payload["role_context"] = role_context
+            event = parse_openclaw_event(event_payload)
             rfq = create_rfq_from_event(event, db)
             result["ok"] = True
             result["project_id"] = rfq.project_id

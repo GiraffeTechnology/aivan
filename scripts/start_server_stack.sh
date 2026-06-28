@@ -7,12 +7,25 @@
 set -euo pipefail
 
 # ── Configuration (override via environment) ──────────────────────────────────
+# These export the exact names AIVAN's runtime reads, so a stack launched only
+# through this script actually picks up the configured DB / model (not the mock
+# provider or the default local SQLite file).
 export AIVAN_HOST="${AIVAN_HOST:-127.0.0.1}"
 export AIVAN_PORT="${AIVAN_PORT:-8765}"
-export AIVAN_MODEL_PROVIDER="${AIVAN_MODEL_PROVIDER:-ollama}"
-export AIVAN_MODEL_NAME="${AIVAN_MODEL_NAME:-qwen3.5:0.8b}"
-export AIVAN_MODEL_BASE_URL="${AIVAN_MODEL_BASE_URL:-http://127.0.0.1:11434/v1}"
-export GIRAFFE_DB_URL="${GIRAFFE_DB_URL:-sqlite:////opt/giraffe/giraffe-db/snapshots/sqlite/aivan_synthetic_private_v1.sqlite}"
+
+# DB: aivan.db.session._get_db_url reads AIVAN_DB_URL only. Accept GIRAFFE_DB_URL
+# as a convenience alias for the snapshot path.
+export AIVAN_DB_URL="${AIVAN_DB_URL:-${GIRAFFE_DB_URL:-sqlite:////opt/giraffe/giraffe-db/snapshots/sqlite/aivan_synthetic_private_v1.sqlite}}"
+
+# LLM: aivan.llm.config reads AIVAN_LLM_PROVIDER; the OpenAI-compatible provider
+# reads OPENAI_* (there is no dedicated "ollama" provider — local Ollama exposes
+# an OpenAI-compatible API on :11434/v1). Old AIVAN_MODEL_* names are accepted as
+# aliases so existing invocations keep working.
+export AIVAN_LLM_PROVIDER="${AIVAN_LLM_PROVIDER:-openai_compatible}"
+export OPENAI_BASE_URL="${OPENAI_BASE_URL:-${AIVAN_MODEL_BASE_URL:-http://127.0.0.1:11434/v1}}"
+export OPENAI_MODEL="${OPENAI_MODEL:-${AIVAN_MODEL_NAME:-qwen3.5:0.8b}}"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-ollama}"  # non-empty placeholder; Ollama ignores it
+
 export GLTG_BASE_URL="${GLTG_BASE_URL:-http://127.0.0.1:8766}"
 export GLTG_API_BASE_URL="${GLTG_API_BASE_URL:-$GLTG_BASE_URL}"
 
@@ -37,8 +50,8 @@ probe() { # $1 = label, $2 = url
 
 echo "== AIVAN stack =="
 echo "AIVAN     -> ${AIVAN_HOST}:${AIVAN_PORT}"
-echo "Provider  -> ${AIVAN_MODEL_PROVIDER} ${AIVAN_MODEL_NAME} (${AIVAN_MODEL_BASE_URL})"
-echo "DB        -> ${GIRAFFE_DB_URL}"
+echo "Provider  -> ${AIVAN_LLM_PROVIDER} ${OPENAI_MODEL} (${OPENAI_BASE_URL})"
+echo "DB        -> ${AIVAN_DB_URL}"
 echo "GLTG      -> ${GLTG_BASE_URL} (start=${START_GLTG})"
 echo
 

@@ -33,17 +33,29 @@ caused WeChat to show "Agent couldn't generate a response."
 
 ## Environment
 
+Use the variable names AIVAN's runtime actually reads:
+
 ```bash
 export AIVAN_HOST=127.0.0.1
 export AIVAN_PORT=8765
-export AIVAN_MODEL_PROVIDER=ollama
-export AIVAN_MODEL_NAME=qwen3.5:0.8b
-export AIVAN_MODEL_BASE_URL=http://127.0.0.1:11434/v1
-export GIRAFFE_DB_URL=sqlite:////opt/giraffe/giraffe-db/snapshots/sqlite/aivan_synthetic_private_v1.sqlite
-export GLTG_BASE_URL=http://127.0.0.1:8766
+
+# DB (aivan.db.session reads AIVAN_DB_URL):
+export AIVAN_DB_URL=sqlite:////opt/giraffe/giraffe-db/snapshots/sqlite/aivan_synthetic_private_v1.sqlite
+
+# LLM (aivan.llm.config reads AIVAN_LLM_PROVIDER; the openai_compatible provider
+# reads OPENAI_*). Local Ollama exposes an OpenAI-compatible API on :11434/v1:
+export AIVAN_LLM_PROVIDER=openai_compatible
+export OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+export OPENAI_MODEL=qwen3.5:0.8b
+export OPENAI_API_KEY=ollama   # non-empty placeholder; Ollama ignores it
+
+export GLTG_API_BASE_URL=http://127.0.0.1:8766
 # Optional: bound the per-invocation pipeline (seconds). Default 12.
 export AIVAN_INVOKE_TIMEOUT_SECONDS=12
 ```
+
+`scripts/start_server_stack.sh` also accepts the older `AIVAN_MODEL_*` /
+`GIRAFFE_DB_URL` names as aliases and maps them onto the above.
 
 The AIVAN host/port are **unified** through `AIVAN_HOST`/`AIVAN_PORT`; both the
 CLI (`aivan serve`) and the plugin default (`AIVAN_BASE_URL`,
