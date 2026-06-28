@@ -32,9 +32,27 @@ def _baseline_total(quantity: int, supplier: dict) -> float:
     return float(17 + production + 6 + 30)  # material + production + qc + logistics
 
 
+def _response_penalty(override: dict) -> float:
+    """Mirror GLTG: speed + completeness each up to 0.15 (max 0.30)."""
+    speed = (1.0 - float(override.get("response_speed_score", 1.0))) * 0.15
+    completeness = (1.0 - float(override.get("completeness_score", 1.0))) * 0.15
+    return round(speed + completeness, 6)
+
+
+def _effective_supplier(supplier: dict, override: dict | None) -> dict:
+    """Apply available_capacity_per_day override to the supplier's capacity."""
+    if not override:
+        return supplier
+    cap = override.get("available_capacity_per_day")
+    if cap:
+        supplier = {**supplier, "capacity_per_day": cap}
+    return supplier
+
+
 def _estimate(payload: dict) -> dict:
     order = payload.get("order", {})
     suppliers = payload.get("suppliers", []) or []
+    overrides = payload.get("supplier_state_overrides") or {}
     quantity = order.get("quantity", 0) or 0
     deadline = order.get("deadline_days")
     n = len(suppliers)
@@ -57,12 +75,17 @@ def _estimate(payload: dict) -> dict:
         }
     traces = []
     totals = []
-    for s in suppliers:
-        total = _baseline_total(quantity, s)
+    for raw_s in suppliers:
+        sid = raw_s.get("supplier_id", "?")
+        override = overrides.get(sid)
+        s = _effective_supplier(raw_s, override)
+        # load_factor stretches the non-production portion of the lead time.
+        load_factor = float(override.get("load_factor", 1.0)) if override else 1.0
+        total = _baseline_total(quantity, s) * load_factor
         totals.append((total, s))
         traces.append(
             {
-                "supplier_id": s.get("supplier_id", "?"),
+                "supplier_id": sid,
                 "material_ready_days": s.get("material_ready_days") or 17,
                 "production_days": s.get("production_days") or 0,
                 "capacity_adjusted_production_days": s.get("production_days")
@@ -72,6 +95,12 @@ def _estimate(payload: dict) -> dict:
                 "total_lead_time_days": total,
                 "confidence": s.get("confidence", 0.5),
                 "feasible": deadline is None or total <= deadline,
+                "response_penalty": _response_penalty(override) if override else 0.0,
+                "supplier_risk_flags": (
+                    {sid: list(override.get("risk_flags", []))}
+                    if override and override.get("risk_flags")
+                    else {}
+                ),
             }
         )
     totals.sort(key=lambda t: t[0])
@@ -139,8 +168,20 @@ def handler(request: httpx.Request) -> httpx.Response:
         )
     if path == "/v1/paths/enumerate":
         est = _estimate(payload)
+        # committable lead time is primary; response penalty breaks ties so a
+        # slow/no-response supplier ranks below an equal-date peer (mirrors GLTG).
+        ordered = sorted(
+            est["calculation_trace"],
+            key=lambda t: (
+                0 if t["feasible"] else 1,
+                t["total_lead_time_days"],
+                t.get("response_penalty", 0.0),
+                -t.get("confidence", 0.5),
+                t["supplier_id"],
+            ),
+        )
         paths = []
-        for i, t in enumerate(est["calculation_trace"], start=1):
+        for i, t in enumerate(ordered, start=1):
             paths.append(
                 {
                     "path_id": f"single:{t['supplier_id']}",
@@ -151,7 +192,8 @@ def handler(request: httpx.Request) -> httpx.Response:
                     "earliest_delivery_date": None,
                     "feasible": t["feasible"],
                     "confidence": t["confidence"],
-                    "score": 1.0,
+                    "score": round(max(0.0, 1.0 - t.get("response_penalty", 0.0)), 4),
+                    "supplier_risk_flags": t.get("supplier_risk_flags", {}),
                     "warnings": [],
                 }
             )

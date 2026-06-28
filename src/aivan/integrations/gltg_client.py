@@ -99,10 +99,13 @@ class GLTGClient:
         order: dict[str, Any],
         suppliers: list[dict[str, Any]],
         constraints: dict[str, Any] | None = None,
+        supplier_state_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> GLTGClientResult:
         if not isinstance(order, dict) or "quantity" not in order:
             return GLTGClientResult(False, None, "invalid order payload: 'quantity' required", None)
         payload = {"order": order, "suppliers": suppliers or [], "constraints": constraints or {}}
+        if supplier_state_overrides:
+            payload["supplier_state_overrides"] = supplier_state_overrides
         return self._request("POST", "/v1/lead-time/estimate", json=payload)
 
     def enumerate_paths(
@@ -110,10 +113,13 @@ class GLTGClient:
         order: dict[str, Any],
         suppliers: list[dict[str, Any]],
         constraints: dict[str, Any] | None = None,
+        supplier_state_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> GLTGClientResult:
         if not isinstance(order, dict) or "quantity" not in order:
             return GLTGClientResult(False, None, "invalid order payload: 'quantity' required", None)
         payload = {"order": order, "suppliers": suppliers or [], "constraints": constraints or {}}
+        if supplier_state_overrides:
+            payload["supplier_state_overrides"] = supplier_state_overrides
         return self._request("POST", "/v1/paths/enumerate", json=payload)
 
     def reforecast(
