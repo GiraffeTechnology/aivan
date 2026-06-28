@@ -1,0 +1,29 @@
+{
+  "name": "aivan",
+  "display_name": "AIVAN - AI Trade Salesperson",
+  "description": "Private-domain AI procurement assistant. Accepts a buyer message (e.g. an RFQ) and returns a structured supplier-quotation acknowledgement. Human approval gates all outbound actions.",
+  "version": "0.2.0",
+  "method": "POST",
+  "endpoint": "/invoke",
+  "auth": "none",
+  "health": "/health",
+  "request_schema": {
+    "type": "object",
+    "properties": {
+      "session_id": { "type": "string" },
+      "user_input": { "type": "string" },
+      "context": { "type": "object" }
+    },
+    "required": ["user_input"]
+  },
+  "response_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["ok", "error"] },
+      "output": { "type": "string" },
+      "artifacts": { "type": "array" },
+      "trace_id": { "type": "string" }
+    },
+    "required": ["status", "output", "artifacts"]
+  }
+}

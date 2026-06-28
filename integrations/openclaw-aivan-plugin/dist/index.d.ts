@@ -47,6 +47,20 @@ export declare function forwardEvent(event: {
     error?: string;
 }>;
 /**
+ * aivan.invoke — Send one conversational turn to AIVAN's robust /invoke endpoint.
+ */
+export declare function invoke(payload: {
+    session_id: string;
+    user_input: string;
+    context?: Record<string, unknown>;
+}): Promise<{
+    status?: string;
+    output?: string;
+    project_id?: string;
+    artifacts?: unknown[];
+    error?: string;
+}>;
+/**
  * aivan.openDashboard — Return the local dashboard URL.
  * Callers should open this URL in a browser; the plugin does not open
  * browser windows itself.

@@ -141,6 +141,45 @@ export async function forwardEvent(event: {
 }
 
 /**
+ * aivan.invoke — Send one conversational turn to AIVAN's robust /invoke endpoint.
+ * AIVAN always replies with the OpenClaw skill contract { status, output,
+ * artifacts, trace_id } and never raises, so the WeChat path always gets text.
+ */
+export async function invoke(payload: {
+  session_id: string;
+  user_input: string;
+  context?: Record<string, unknown>;
+}): Promise<{
+  status?: string;
+  output?: string;
+  project_id?: string;
+  artifacts?: unknown[];
+  error?: string;
+}> {
+  const result = await safeFetch("/invoke", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const d =
+    typeof result.data === "object" && result.data !== null
+      ? (result.data as Record<string, unknown>)
+      : {};
+  const output =
+    typeof d["output"] === "string" ? (d["output"] as string) : undefined;
+  if (!result.ok) {
+    // /invoke still returns structured JSON via the global error handler; surface
+    // its output if present rather than dropping the turn.
+    return { error: String(d["detail"] ?? d["error"] ?? "invoke failed"), output };
+  }
+  return {
+    status: typeof d["status"] === "string" ? (d["status"] as string) : undefined,
+    output,
+    project_id: d["project_id"] ? String(d["project_id"]) : undefined,
+    artifacts: Array.isArray(d["artifacts"]) ? (d["artifacts"] as unknown[]) : [],
+  };
+}
+
+/**
  * aivan.openDashboard — Return the local dashboard URL.
  * Callers should open this URL in a browser; the plugin does not open
  * browser windows itself.
@@ -427,45 +466,42 @@ export function register(api: any): void {
           }
 
           const ctx = extractSessionContext(params);
-          const event: Parameters<typeof forwardEvent>[0] = {
-            source: "openclaw",
-            channel: ctx.channel ?? "openclaw-weixin",
-            conversation_id: ctx.conversation_id ?? "unknown",
-            sender_id: ctx.sender_id ?? "unknown",
-            message_text: prompt,
-            message_type: "text",
-            attachments: [],
-            timestamp: new Date().toISOString(),
-            mode: "auto",
-            ...(ctx.project_id != null ? { project_id: ctx.project_id } : {}),
-            ...(ctx.role_context != null
-              ? { role_context: ctx.role_context }
-              : {}),
-          };
+          const context: Record<string, unknown> = { channel: ctx.channel ?? "wechat" };
+          if (ctx.sender_id != null) context["sender_id"] = ctx.sender_id;
+          if (ctx.project_id != null) context["project_id"] = ctx.project_id;
+          if (ctx.role_context != null) context["role_context"] = ctx.role_context;
 
           process.stderr.write(
-            `[aivan] forwarding event: prompt_len=${prompt.length} session=${ctx.conversation_id ?? "?"}\n`
+            `[aivan] invoking AIVAN: prompt_len=${prompt.length} session=${ctx.conversation_id ?? "?"}\n`
           );
 
-          let result: Awaited<ReturnType<typeof forwardEvent>>;
+          let result: Awaited<ReturnType<typeof invoke>>;
           try {
-            result = await forwardEvent(event);
+            result = await invoke({
+              session_id: ctx.conversation_id ?? "openclaw",
+              user_input: prompt,
+              context,
+            });
           } catch (fetchErr) {
-            process.stderr.write(
-              `[aivan] AIVAN fetch error: ${String(fetchErr)}\n`
+            // Do not swallow: surface a visible diagnostic to the user instead of
+            // the generic "Agent couldn't generate a response" pass-through.
+            process.stderr.write(`[aivan] AIVAN fetch error: ${String(fetchErr)}\n`);
+            return buildSuccessResult(
+              params,
+              `AIVAN 暂时无法连接（${String(fetchErr)}）。请稍后再试或检查 AIVAN 服务状态。`
             );
-            return buildPassThroughResult(params);
           }
 
-          if (!result.accepted) {
-            process.stderr.write(
-              `[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`
+          if (result.error && !result.output) {
+            process.stderr.write(`[aivan] AIVAN error: ${result.error}\n`);
+            return buildSuccessResult(
+              params,
+              `AIVAN 处理请求时出错：${result.error}`
             );
-            return buildPassThroughResult(params);
           }
 
           const replyText =
-            result.reply_text ??
+            (result.output && result.output.trim()) ||
             (result.project_id
               ? `已处理请求 (项目: ${result.project_id})`
               : "已收到您的请求");

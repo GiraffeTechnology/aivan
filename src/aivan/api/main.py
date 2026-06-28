@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -60,15 +60,76 @@ try:
 except Exception:
     pass
 
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Never surface a plaintext traceback or HTML 500 to OpenClaw/WeChat.
+
+    OpenClaw treats a non-JSON error body as a broken skill. The /invoke handler
+    already fails soft, but this guards every other route against leaking a raw
+    stack trace as a connection-failure-looking response.
+    """
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "output": f"Internal error: {type(exc).__name__}", "artifacts": []},
+    )
+
+
 @app.get("/health")
 @app.get("/api/health")
 def health():
     return {"status": "ok", "product": "AIVAN", "version": "0.2.0"}
 
+
+@app.post("/invoke")
+def invoke(body: dict):
+    """OpenClaw / WeChat skill invocation endpoint.
+
+    Accepts any common payload shape, always returns the OpenClaw skill contract
+    ``{status, output, artifacts, trace_id}``, and never raises. Unauthenticated
+    so OpenClaw's registration probe and the WeChat path can reach it.
+    """
+    from aivan.api.invoke import run_invocation
+
+    return run_invocation(body if isinstance(body, dict) else {})
+
 @app.get("/app", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def serve_app(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "title": "AIVAN"})
+
+def _handle_openclaw_event(event_data: dict, db: Session) -> dict:
+    """Run the RFQ pipeline for an inbound OpenClaw event, fail-soft.
+
+    The OpenClaw agent harness forwards WeChat turns here and reads ``reply_text``.
+    A dependency failure (e.g. GLTGUnavailableError, giraffe-db down) must not
+    become a 500: OpenClaw renders a non-JSON 500 as the generic
+    "Agent couldn't generate a response." Instead we always return HTTP 200 with a
+    structured, human-readable ``reply_text`` so WeChat shows a meaningful message.
+    """
+    from aivan.openclaw.event_adapter import parse_openclaw_event
+    from aivan.execution.rfq_execution import create_rfq_from_event
+    from aivan.api.invoke import extract_rfq_intent, degraded_reply_text
+
+    text = event_data.get("message_text", "") if isinstance(event_data, dict) else ""
+    try:
+        result = create_rfq_from_event(parse_openclaw_event(event_data), db).model_dump()
+        result["status"] = "ok"
+        result["reply_text"] = (
+            result.get("user_control_message") or result.get("message") or "已收到您的请求。"
+        )
+        return result
+    except Exception as e:  # noqa: BLE001 - never 500 the WeChat invocation path
+        db.rollback()
+        intent = extract_rfq_intent(text)
+        return {
+            "status": "error",
+            "action": "dependency_unavailable",
+            "error": f"{type(e).__name__}: {e}",
+            "intent": intent,
+            "reply_text": degraded_reply_text(intent),
+            "message": "AIVAN received the request but a backend dependency was unavailable.",
+        }
+
 
 @app.post("/api/openclaw/events")
 def openclaw_event(
@@ -76,20 +137,11 @@ def openclaw_event(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    try:
-        from aivan.openclaw.event_adapter import parse_openclaw_event
-        from aivan.execution.rfq_execution import create_rfq_from_event
-        event = parse_openclaw_event(event_data)
-        result = create_rfq_from_event(event, db)
-        return result.model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return _handle_openclaw_event(event_data, db)
 
 @app.post("/api/skill/invoke")
 def skill_invoke(event_data: dict, db: Session = Depends(get_db)):
-    from aivan.openclaw.event_adapter import parse_openclaw_event
-    from aivan.execution.rfq_execution import create_rfq_from_event
-    return create_rfq_from_event(parse_openclaw_event(event_data), db).model_dump()
+    return _handle_openclaw_event(event_data, db)
 
 
 @app.post("/api/rfq/create-from-event")

@@ -100,6 +100,30 @@ export async function forwardEvent(event) {
     };
 }
 /**
+ * aivan.invoke — Send one conversational turn to AIVAN's robust /invoke endpoint.
+ * AIVAN always replies with the OpenClaw skill contract { status, output,
+ * artifacts, trace_id } and never raises, so the WeChat path always gets text.
+ */
+export async function invoke(payload) {
+    const result = await safeFetch("/invoke", {
+        method: "POST",
+        body: JSON.stringify(payload),
+    });
+    const d = typeof result.data === "object" && result.data !== null
+        ? result.data
+        : {};
+    const output = typeof d["output"] === "string" ? d["output"] : undefined;
+    if (!result.ok) {
+        return { error: String(d["detail"] ?? d["error"] ?? "invoke failed"), output };
+    }
+    return {
+        status: typeof d["status"] === "string" ? d["status"] : undefined,
+        output,
+        project_id: d["project_id"] ? String(d["project_id"]) : undefined,
+        artifacts: Array.isArray(d["artifacts"]) ? d["artifacts"] : [],
+    };
+}
+/**
  * aivan.openDashboard — Return the local dashboard URL.
  * Callers should open this URL in a browser; the plugin does not open
  * browser windows itself.
@@ -305,35 +329,31 @@ export function register(api) {
                         return buildPassThroughResult(params);
                     }
                     const ctx = extractSessionContext(params);
-                    const event = {
-                        source: "openclaw",
-                        channel: ctx.channel ?? "openclaw-weixin",
-                        conversation_id: ctx.conversation_id ?? "unknown",
-                        sender_id: ctx.sender_id ?? "unknown",
-                        message_text: prompt,
-                        message_type: "text",
-                        attachments: [],
-                        timestamp: new Date().toISOString(),
-                        mode: "auto",
-                        ...(ctx.project_id != null ? { project_id: ctx.project_id } : {}),
-                        ...(ctx.role_context != null
-                            ? { role_context: ctx.role_context }
-                            : {}),
-                    };
-                    process.stderr.write(`[aivan] forwarding event: prompt_len=${prompt.length} session=${ctx.conversation_id ?? "?"}\n`);
+                    const context = { channel: ctx.channel ?? "wechat" };
+                    if (ctx.sender_id != null)
+                        context["sender_id"] = ctx.sender_id;
+                    if (ctx.project_id != null)
+                        context["project_id"] = ctx.project_id;
+                    if (ctx.role_context != null)
+                        context["role_context"] = ctx.role_context;
+                    process.stderr.write(`[aivan] invoking AIVAN: prompt_len=${prompt.length} session=${ctx.conversation_id ?? "?"}\n`);
                     let result;
                     try {
-                        result = await forwardEvent(event);
+                        result = await invoke({
+                            session_id: ctx.conversation_id ?? "openclaw",
+                            user_input: prompt,
+                            context,
+                        });
                     }
                     catch (fetchErr) {
                         process.stderr.write(`[aivan] AIVAN fetch error: ${String(fetchErr)}\n`);
-                        return buildPassThroughResult(params);
+                        return buildSuccessResult(params, `AIVAN 暂时无法连接（${String(fetchErr)}）。请稍后再试或检查 AIVAN 服务状态。`);
                     }
-                    if (!result.accepted) {
-                        process.stderr.write(`[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`);
-                        return buildPassThroughResult(params);
+                    if (result.error && !result.output) {
+                        process.stderr.write(`[aivan] AIVAN error: ${result.error}\n`);
+                        return buildSuccessResult(params, `AIVAN 处理请求时出错：${result.error}`);
                     }
-                    const replyText = result.reply_text ??
+                    const replyText = (result.output && result.output.trim()) ||
                         (result.project_id
                             ? `已处理请求 (项目: ${result.project_id})`
                             : "已收到您的请求");

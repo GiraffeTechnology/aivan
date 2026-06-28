@@ -33,24 +33,29 @@ const mockServer = createServer((req, res) => {
       return;
     }
 
-    if (req.url === "/api/openclaw/events" && req.method === "POST") {
+    if (req.url === "/invoke" && req.method === "POST") {
       try {
         lastReceivedEvent = JSON.parse(body);
       } catch {
         lastReceivedEvent = null;
       }
       if (mockServerMode === "error") {
-        res.writeHead(422, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ detail: "mock error: project not found" }));
+        // AIVAN's global handler still returns structured JSON on failure.
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({ status: "error", output: "Internal error: RuntimeError", artifacts: [] })
+        );
         return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
-          project_id: "proj-mock-001",
-          action: "rfq_created",
-          reply_text:
+          status: "ok",
+          output:
             "感谢您的询价！我们将为您寻找白色纯棉衬衣的供应商，45天内交货至温哥华。请稍候。",
+          artifacts: [],
+          trace_id: "mock-trace-001",
+          project_id: "proj-mock-001",
         })
       );
       return;
@@ -165,24 +170,25 @@ assert("lastAssistant.usage has cost", typeof successResult.lastAssistant?.usage
 assert("lastAssistant has stopReason", typeof successResult.lastAssistant?.stopReason === "string");
 assert("lastAssistant has timestamp", typeof successResult.lastAssistant?.timestamp === "number");
 assert("sessionIdUsed matches", successResult.sessionIdUsed === TEST_PARAMS.sessionId);
-assert("event forwarded to AIVAN", lastReceivedEvent !== null);
-assert("event.message_text = prompt", lastReceivedEvent?.message_text === TEST_PARAMS.prompt);
-assert("event.channel = weixin", lastReceivedEvent?.channel === "weixin");
-assert("event.conversation_id = sessionId", lastReceivedEvent?.conversation_id === TEST_PARAMS.sessionId);
-assert("event.sender_id = senderId", lastReceivedEvent?.sender_id === TEST_PARAMS.senderId);
-assert("event.source = openclaw", lastReceivedEvent?.source === "openclaw");
-assert("event.mode = auto", lastReceivedEvent?.mode === "auto");
+assert("invoke called on AIVAN", lastReceivedEvent !== null);
+assert("payload.user_input = prompt", lastReceivedEvent?.user_input === TEST_PARAMS.prompt);
+assert("payload.context.channel = weixin", lastReceivedEvent?.context?.channel === "weixin");
+assert("payload.session_id = sessionId", lastReceivedEvent?.session_id === TEST_PARAMS.sessionId);
+assert("payload.context.sender_id = senderId", lastReceivedEvent?.context?.sender_id === TEST_PARAMS.senderId);
 
 console.log("  reply:", successResult.assistantTexts[0]);
 
 // ── Test 4: runAttempt() — AIVAN error ────────────────────────────────────────
-console.log("\n── Test 4: runAttempt() — AIVAN returns 422 (pass-through, no throw)");
+console.log("\n── Test 4: runAttempt() — AIVAN returns 500 (visible diagnostic, no throw)");
 mockServerMode = "error";
 
 const errorResult = await registeredHarness.runAttempt(TEST_PARAMS);
 assert("returns object (no throw)", typeof errorResult === "object" && errorResult !== null);
 assertShape("error result has required keys", errorResult, ["aborted", "messagesSnapshot", "assistantTexts", "lastAssistant"]);
-assert("assistantTexts is empty", Array.isArray(errorResult.assistantTexts) && errorResult.assistantTexts.length === 0);
+// P0-3: bridge must NOT swallow the error into an empty pass-through; it surfaces
+// AIVAN's structured output as a visible diagnostic so WeChat shows something.
+assert("assistantTexts is non-empty (visible diagnostic)", Array.isArray(errorResult.assistantTexts) && errorResult.assistantTexts.length > 0);
+assert("diagnostic mentions internal error", /Internal error|出错/.test(errorResult.assistantTexts[0] ?? ""));
 
 // ── Test 5: empty prompt ──────────────────────────────────────────────────────
 console.log("\n── Test 5: runAttempt() — empty prompt (no crash)");
