@@ -1,11 +1,13 @@
 from __future__ import annotations
+import logging
 import os
 import secrets
+import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -15,6 +17,8 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
+
+logger = logging.getLogger("aivan.api")
 
 
 def _require_api_key(request: Request) -> None:
@@ -50,6 +54,77 @@ app.add_middleware(
 
 app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 
+
+# OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
+SKILL_INVOKE_PATHS = frozenset(
+    {"/api/openclaw/events", "/api/skill/invoke", "/api/rfq/create-from-event"}
+)
+
+# WeChat-visible degraded reply when the backend pipeline fails. Must be
+# human-readable and must never leak a traceback or raw exception text.
+ERROR_REPLY_TEXT = "AIVAN 处理请求时遇到后端依赖错误，请稍后再试。"
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Fail soft for OpenClaw skill routes; keep normal HTTP semantics elsewhere.
+
+    OpenClaw treats an HTTP 500 from a skill as "skill broken" and disables it,
+    whereas an HTTP 200 carrying {"status": "error"} is a recoverable
+    "skill returned error" the WeChat user can see and retry. So an uncaught
+    exception on a skill-invocation route is logged and converted to a 200 error
+    envelope carrying both `output` and `reply_text` (the plugin sends
+    `reply_text` to WeChat). Non-skill routes (dashboard/CRUD) keep standard 500
+    semantics. Explicit HTTPException (401/403/404/409/...) is handled by
+    FastAPI's own handler and keeps its status code.
+    """
+    logger.error(
+        "Unhandled exception on %s %s: %s: %s\n%s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        exc,
+        traceback.format_exc(),
+    )
+    if request.url.path not in SKILL_INVOKE_PATHS:
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "error",
+            "output": ERROR_REPLY_TEXT,
+            "reply_text": ERROR_REPLY_TEXT,
+        },
+    )
+
+
+def _first_non_empty(*values: object) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _skill_response(result) -> dict:
+    """Wrap an RFQ execution result in the OpenClaw skill envelope.
+
+    The OpenClaw bridge plugin sends `reply_text` (not `output`) back to WeChat
+    (integrations/openclaw-aivan-plugin/index.ts), so both fields must be present
+    and non-empty or the user only ever sees the plugin's "已收到您的请求"
+    fallback. `user_control_message` is the human-facing RFQ summary and is
+    preferred over the terser internal `message`. Every existing top-level field
+    (project_id, action, strategy, ...) is preserved so the plugin and existing
+    callers keep working.
+    """
+    data = result.model_dump()
+    reply_text = _first_non_empty(
+        data.get("reply_text"),
+        data.get("user_control_message"),
+        data.get("message"),
+        "已收到您的请求。",
+    )
+    return {**data, "status": "ok", "output": reply_text, "reply_text": reply_text}
+
 _templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
 _static_dir = os.path.join(os.path.dirname(__file__), "..", "app", "static")
 
@@ -76,20 +151,16 @@ def openclaw_event(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    try:
-        from aivan.openclaw.event_adapter import parse_openclaw_event
-        from aivan.execution.rfq_execution import create_rfq_from_event
-        event = parse_openclaw_event(event_data)
-        result = create_rfq_from_event(event, db)
-        return result.model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    from aivan.openclaw.event_adapter import parse_openclaw_event
+    from aivan.execution.rfq_execution import create_rfq_from_event
+    event = parse_openclaw_event(event_data)
+    return _skill_response(create_rfq_from_event(event, db))
 
 @app.post("/api/skill/invoke")
 def skill_invoke(event_data: dict, db: Session = Depends(get_db)):
     from aivan.openclaw.event_adapter import parse_openclaw_event
     from aivan.execution.rfq_execution import create_rfq_from_event
-    return create_rfq_from_event(parse_openclaw_event(event_data), db).model_dump()
+    return _skill_response(create_rfq_from_event(parse_openclaw_event(event_data), db))
 
 
 @app.post("/api/rfq/create-from-event")
@@ -98,12 +169,9 @@ def create_rfq_from_event_api(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    try:
-        from aivan.openclaw.event_adapter import parse_openclaw_event
-        from aivan.execution.rfq_execution import create_rfq_from_event
-        return create_rfq_from_event(parse_openclaw_event(event_data), db).model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    from aivan.openclaw.event_adapter import parse_openclaw_event
+    from aivan.execution.rfq_execution import create_rfq_from_event
+    return _skill_response(create_rfq_from_event(parse_openclaw_event(event_data), db))
 
 
 def _do_approve_draft(draft_id: str, body: dict | None, db: Session) -> dict:
