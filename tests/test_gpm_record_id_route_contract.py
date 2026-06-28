@@ -57,7 +57,7 @@ def test_legacy_supplier_id_returns_top_level_envelope(client, supplier_id):
 
 @pytest.mark.parametrize(
     "supplier_id",
-    ["GDB_SYN_V1_SUP_000001", "sup_001", "supplier_001", None],
+    ["GDB_SYN_V1_SUP_000001", "sup_001", "supplier_001", "marketplace_supplier_001", None],
 )
 def test_accepted_supplier_ids_not_rejected_by_contract(client, supplier_id):
     response = _post(client, supplier_id)

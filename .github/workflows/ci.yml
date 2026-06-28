@@ -32,8 +32,24 @@ jobs:
           AIVAN_DB_URL: "sqlite:///:memory:"
           AIVAN_REQUIRE_HUMAN_APPROVAL: "true"
 
-      - name: Unified giraffe-db data-ID contract scan
-        run: uv run python scripts/check_unified_data_ids.py --repo .
+      # The DB-contract scanner is owned by giraffe-db (the single source of
+      # truth for record-ID conventions). AIVAN does not vendor a copy; it
+      # checks out giraffe-db's scanner and runs it against this repo. Only the
+      # scanner file is fetched (sparse, non-cone) and it self-skips by name, so
+      # nothing from the giraffe-db checkout is itself scanned.
+      # Requires a token with read access to the private giraffe-db repo; the
+      # repo-scoped default GITHUB_TOKEN cannot read another repository.
+      - name: Check out giraffe-db DB-contract scanner (source of truth)
+        uses: actions/checkout@v4
+        with:
+          repository: GiraffeTechnology/giraffe-db
+          path: giraffe-db-contract
+          sparse-checkout: scripts/check_unified_data_ids.py
+          sparse-checkout-cone-mode: false
+          token: ${{ secrets.GIRAFFE_DB_CONTRACT_TOKEN }}
+
+      - name: Unified giraffe-db data-ID contract scan (giraffe-db-owned)
+        run: python giraffe-db-contract/scripts/check_unified_data_ids.py --repo .
 
       - name: Validate ClawHub plugin metadata
         run: uv run python scripts/validate_clawhub_aivan_plugin.py

@@ -1,15 +1,23 @@
 """giraffe-db record-id contract (consumer side).
 
-giraffe-db owns the canonical id namespace ``GDB_SYN_V1_<ENTITY>_<NNNNNN>`` and
-publishes it in ``generators/id_convention.py``. AIVAN mirrors the *consumer*
-half of that contract: when a value is meant to be a giraffe-db DB-backed record
-id, it must be canonical, and a retired ``<ENTITY>_SYN_<digits>`` legacy id is
-rejected -- never silently remapped.
+Ownership:
 
-This deliberately does **not** constrain AIVAN's own supplier/quote identifiers
-(``sup_001``, marketplace ids, conversation-derived ids). Those live in a
-separate namespace and are passed through untouched. Only the unambiguous
-retired giraffe-db legacy shape is treated as invalid input.
+* giraffe-db owns the canonical DB record-ID contract. The authoritative
+  definition (entity codes, canonical/legacy regexes, generator, scanner,
+  reusable tests) lives in ``GiraffeTechnology/giraffe-db``
+  (``generators/id_convention.py`` + ``scripts/check_unified_data_ids.py``).
+* AIVAN does **not** define the canonical DB contract and does not vendor the
+  cross-repo scanner. CI consumes the giraffe-db-owned scanner instead.
+* This module performs only *consumer-side request-boundary validation*: when a
+  value entering an AIVAN route is meant to be a giraffe-db DB-backed record id,
+  a retired ``<ENTITY>_SYN_<digits>`` legacy id is rejected -- never silently
+  remapped. The entity codes / patterns below are a minimal local mirror of the
+  giraffe-db contract, kept narrow on purpose; they are not a second source of
+  truth.
+* AIVAN's own identifier namespace is separate and stays valid. ``sup_001``,
+  ``supplier_001``, marketplace ids, conversation-derived ids, OpenClaw sender
+  ids, ``gpm_pkt_*`` and ``tenant_id`` are passed through untouched. Only the
+  unambiguous retired giraffe-db legacy shape is treated as invalid input.
 """
 
 from __future__ import annotations

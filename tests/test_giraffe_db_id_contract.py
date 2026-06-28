@@ -17,7 +17,8 @@ LEGACY_INPUTS = [
 CANONICAL_INPUTS = ["GDB_SYN_V1_SUP_000001", "GDB_SYN_V1_QUOTE_030000", "GDB_SYN_V1_RFQ_000012"]
 # AIVAN's own (non-giraffe-db) identifiers: a separate namespace, never rejected.
 OWN_NAMESPACE = [
-    "sup_001", "supplier_001", "supplier_a", "M1", "1688_supplier_001", "gpm_pkt_abc123",
+    "sup_001", "supplier_001", "supplier_a", "M1", "1688_supplier_001",
+    "marketplace_supplier_001", "conversation_supplier_abc", "gpm_pkt_abc123",
 ]
 
 
