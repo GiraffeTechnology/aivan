@@ -32,6 +32,9 @@ jobs:
           AIVAN_DB_URL: "sqlite:///:memory:"
           AIVAN_REQUIRE_HUMAN_APPROVAL: "true"
 
+      - name: Unified giraffe-db data-ID contract scan
+        run: uv run python scripts/check_unified_data_ids.py --repo .
+
       - name: Validate ClawHub plugin metadata
         run: uv run python scripts/validate_clawhub_aivan_plugin.py
 
