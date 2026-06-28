@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
-from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from aivan.gpm import router as gpm_router
 from aivan.gpm.router import QuoteGuidanceRequest, create_quote_guidance
@@ -23,12 +24,18 @@ def _call(supplier_id):
     return asyncio.run(create_quote_guidance(body, tenant_id="tenant-1"))
 
 
-def test_legacy_supplier_id_rejected_with_envelope():
-    with pytest.raises(HTTPException) as exc:
-        _call("SUP" "_SYN_000001")  # legacy-id-ok
-    assert exc.value.status_code == 422
-    assert exc.value.detail["error"] == "invalid_record_id"
-    assert exc.value.detail["expected_format"] == "GDB_SYN_V1_<ENTITY>_<000001>"
+@pytest.mark.parametrize("supplier_id", ["SUP" "_SYN_1", "RFQ" "_SYN_12", "SUP" "_SYN_000001"])  # legacy-id-ok
+def test_legacy_supplier_id_rejected_with_envelope(supplier_id):
+    # The handler returns the envelope at the top level (JSONResponse), not a
+    # raised HTTPException whose body would nest under ``detail``.
+    result = _call(supplier_id)
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 422
+    assert json.loads(result.body) == {
+        "error": "invalid_record_id",
+        "expected_format": "GDB_SYN_V1_<ENTITY>_<000001>",
+        "received": supplier_id,
+    }
 
 
 def test_canonical_supplier_id_accepted():

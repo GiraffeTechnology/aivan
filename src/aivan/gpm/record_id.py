@@ -23,7 +23,9 @@ ENTITY_CODES = (
 )
 
 CANONICAL_RE = re.compile(r"^GDB_SYN_V1_(?:" + "|".join(ENTITY_CODES) + r")_[0-9]{6}$")
-LEGACY_DB_ID_RE = re.compile(r"^(?:" + "|".join(ENTITY_CODES) + r")_SYN_[0-9]{3,}$")
+# Retired legacy ids are rejected regardless of digit count: an unpadded
+# single-digit suffix is just as retired as a zero-padded six-digit one.
+LEGACY_DB_ID_RE = re.compile(r"^(?:" + "|".join(ENTITY_CODES) + r")_SYN_[0-9]+$")
 
 EXPECTED_ID_FORMAT = "GDB_SYN_V1_<ENTITY>_<000001>"
 

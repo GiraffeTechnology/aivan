@@ -36,7 +36,8 @@ ENTITY_PREFIXES = (
     "SUP", "PROD", "CAP", "CUST", "PREF", "RFQ", "QUOTE", "OBS", "RISK",
     "LINEAGE", "IMPORT",
 )
-LEGACY_DB_ID_RE = re.compile(r"\b(" + "|".join(ENTITY_PREFIXES) + r")_SYN_[0-9]{3,}\b")
+# Match any digit count: short retired ids (``SUP_SYN_1``) are legacy too.
+LEGACY_DB_ID_RE = re.compile(r"\b(" + "|".join(ENTITY_PREFIXES) + r")_SYN_[0-9]+\b")
 
 # Ambiguous ad-hoc placeholders -> warning severity.
 ADHOC_RE = re.compile(

@@ -9,10 +9,16 @@ from aivan.gpm.record_id import (
 )
 
 # Retired giraffe-db legacy ids used only as invalid input. legacy-id-ok
-LEGACY_INPUTS = ["SUP" "_SYN_000001", "QUOTE" "_SYN_030000", "RISK" "_SYN_000005"]
-CANONICAL_INPUTS = ["GDB_SYN_V1_SUP_000001", "GDB_SYN_V1_QUOTE_030000"]
+# Short ids (any digit count) are just as retired as zero-padded ones. legacy-id-ok
+LEGACY_INPUTS = [
+    "SUP" "_SYN_1", "SUP" "_SYN_01", "SUP" "_SYN_001", "SUP" "_SYN_000001",
+    "RFQ" "_SYN_12", "QUOTE" "_SYN_9", "QUOTE" "_SYN_030000", "RISK" "_SYN_000005",
+]
+CANONICAL_INPUTS = ["GDB_SYN_V1_SUP_000001", "GDB_SYN_V1_QUOTE_030000", "GDB_SYN_V1_RFQ_000012"]
 # AIVAN's own (non-giraffe-db) identifiers: a separate namespace, never rejected.
-OWN_NAMESPACE = ["sup_001", "supplier_a", "M1", "1688_supplier_001", "gpm_pkt_abc123"]
+OWN_NAMESPACE = [
+    "sup_001", "supplier_001", "supplier_a", "M1", "1688_supplier_001", "gpm_pkt_abc123",
+]
 
 
 def test_accepts_canonical():
