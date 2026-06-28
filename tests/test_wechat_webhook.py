@@ -62,13 +62,20 @@ def _wechat_event() -> dict:
     }
 
 
-@pytest.mark.parametrize("path", ["/api/skill/invoke", "/api/openclaw/events"])
+@pytest.mark.parametrize(
+    "path",
+    ["/api/skill/invoke", "/api/openclaw/events", "/api/rfq/create-from-event"],
+)
 def test_wechat_event_returns_skill_envelope(client, path):
     resp = client.post(path, json=_wechat_event())
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] in ("ok", "error")
-    assert "output" in body
+    # The OpenClaw plugin sends `reply_text` (not `output`) to WeChat, so both
+    # must be present and non-empty, and they are kept identical.
+    assert isinstance(body.get("output"), str) and body["output"].strip()
+    assert isinstance(body.get("reply_text"), str) and body["reply_text"].strip()
+    assert body["reply_text"] == body["output"]
 
 
 def test_minimal_payload_does_not_500(client):
@@ -77,16 +84,17 @@ def test_minimal_payload_does_not_500(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] in ("ok", "error")
-    assert "output" in body
+    assert body["output"].strip()
+    assert body["reply_text"].strip()
 
 
 def test_unhandled_exception_returns_200_error_envelope(client, monkeypatch):
-    """Any uncaught exception in the handler chain becomes a 200 error envelope,
-    never an HTTP 500 (which OpenClaw treats as 'skill broken')."""
+    """Any uncaught exception on a skill route becomes a 200 error envelope with a
+    WeChat-visible reply_text, never an HTTP 500 ('skill broken') or a traceback."""
     import aivan.api.main as main
 
     def _boom(*_args, **_kwargs):
-        raise RuntimeError("simulated downstream failure")
+        raise RuntimeError("simulated downstream failure\nTraceback (most recent call last)")
 
     monkeypatch.setattr(main, "_skill_response", _boom)
 
@@ -94,7 +102,25 @@ def test_unhandled_exception_returns_200_error_envelope(client, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "error"
-    assert "output" in body
+    assert body["output"].strip()
+    assert body["reply_text"].strip()
+    assert "traceback" not in body["output"].lower()
+    assert "traceback" not in body["reply_text"].lower()
+
+
+def test_non_skill_route_keeps_500_on_unhandled_exception(client, monkeypatch):
+    """Fail-soft is scoped to skill routes; other routes keep standard 500
+    semantics rather than the OpenClaw envelope."""
+    import aivan.platforms.platform_registry as registry
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated registry failure")
+
+    monkeypatch.setattr(registry, "list_suggestions", _boom)
+
+    resp = client.get("/api/platforms/suggestions")
+    assert resp.status_code == 500
+    assert "status" not in resp.json()
 
 
 def test_auth_error_keeps_its_status_code(client):
