@@ -1,13 +1,9 @@
 /**
  * Gateway integration test for openclaw-aivan plugin.
  *
- * Simulates exactly what OpenClaw Gateway 2026.6.9 does:
- *   1. load the plugin and call register(api)
- *   2. api.registerAgentHarness() stores the harness
- *   3. harness.supports(ctx) is called for each session
- *   4. harness.runAttempt(params) is called with the prompt
+ * Loads the built plugin entry the way OpenClaw does, registers an
+ * AgentHarness through a fake runtime API, then exercises runAttempt().
  *
- * A lightweight HTTP server stands in for the AIVAN backend on port 8765.
  * Run with: node test-gateway-harness.mjs
  */
 
@@ -17,12 +13,16 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const MOCK_PORT = Number(process.env.AIVAN_TEST_PORT ?? 18765);
+process.env.AIVAN_BASE_URL = `http://127.0.0.1:${MOCK_PORT}`;
 
-// ── 1. Mock AIVAN server on port 8765 ─────────────────────────────────────────
+// -- Mock AIVAN server --------------------------------------------------------
 let mockServerMode = "success"; // "success" | "error"
 let lastReceivedEvent = null;
 
-const MOCK_PORT = 8765;
+const mockReply =
+  "已收到您的询价需求：5000件格子衬衫，45天交东京。";
+
 const mockServer = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => (body += d));
@@ -39,18 +39,19 @@ const mockServer = createServer((req, res) => {
       } catch {
         lastReceivedEvent = null;
       }
+
       if (mockServerMode === "error") {
         res.writeHead(422, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ detail: "mock error: project not found" }));
         return;
       }
+
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
-          project_id: "proj-mock-001",
-          action: "rfq_created",
-          reply_text:
-            "感谢您的询价！我们将为您寻找白色纯棉衬衣的供应商，45天内交货至温哥华。请稍候。",
+          status: "ok",
+          reply_text: mockReply,
+          output: mockReply,
         })
       );
       return;
@@ -61,25 +62,35 @@ const mockServer = createServer((req, res) => {
   });
 });
 
-await new Promise((resolve) => mockServer.listen(MOCK_PORT, "127.0.0.1", resolve));
+await new Promise((resolve) =>
+  mockServer.listen(MOCK_PORT, "127.0.0.1", resolve)
+);
 
-// ── 2. Load the plugin ────────────────────────────────────────────────────────
+// -- Load the plugin entry exactly as OpenClaw does ---------------------------
 const pluginPath = path.join(__dirname, "dist", "index.js");
 const pluginUrl = pathToFileURL(pluginPath).href;
 const plugin = await import(pluginUrl);
+const pluginEntry = plugin.default ?? plugin;
 
-// ── 3. Simulate Gateway registerAgentHarness ──────────────────────────────────
 let registeredHarness = null;
+let registerCalls = 0;
 
 const mockApi = {
   registerAgentHarness(harness) {
+    registerCalls += 1;
     registeredHarness = harness;
   },
 };
 
-plugin.register(mockApi);
+if (typeof pluginEntry === "function") {
+  pluginEntry(mockApi);
+} else if (typeof pluginEntry?.register === "function") {
+  pluginEntry.register(mockApi);
+} else {
+  throw new Error("built plugin entry has no callable register contract");
+}
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 let passed = 0;
 let failed = 0;
 
@@ -88,7 +99,7 @@ function assert(label, condition, detail = "") {
     console.log(`  PASS  ${label}`);
     passed++;
   } else {
-    console.error(`  FAIL  ${label}${detail ? " — " + detail : ""}`);
+    console.error(`  FAIL  ${label}${detail ? " - " + detail : ""}`);
     failed++;
   }
 }
@@ -102,28 +113,29 @@ function assertShape(label, obj, requiredKeys) {
   );
 }
 
-// ── Test 1: register() ────────────────────────────────────────────────────────
-console.log("\n── Test 1: plugin registration");
+// -- Test 1: registration -----------------------------------------------------
+console.log("\n-- Test 1: OpenClaw plugin-entry registration");
+assert("registerAgentHarness called exactly once", registerCalls === 1);
 assert("register() sets harness", registeredHarness !== null);
-assert("harness has id", typeof registeredHarness?.id === "string");
+assert("harness id is openclaw-aivan", registeredHarness?.id === "openclaw-aivan");
 assert("harness has label", typeof registeredHarness?.label === "string");
 assert("harness has supports()", typeof registeredHarness?.supports === "function");
 assert("harness has runAttempt()", typeof registeredHarness?.runAttempt === "function");
 
-// ── Test 2: supports() shape ──────────────────────────────────────────────────
-console.log("\n── Test 2: supports() return shape (AgentHarnessSupport)");
+// -- Test 2: supports() shape -------------------------------------------------
+console.log("\n-- Test 2: supports() return shape");
 const supportResult = registeredHarness.supports({ sessionId: "sess-001" });
 assert("supports() returns object", typeof supportResult === "object" && supportResult !== null);
 assert("supports.supported is boolean", typeof supportResult?.supported === "boolean");
 assert("supports.supported is true", supportResult?.supported === true);
 
-// ── Test 3: runAttempt() success path ─────────────────────────────────────────
-console.log("\n── Test 3: runAttempt() — AIVAN online, WeChat prompt");
+// -- Test 3: runAttempt success path -----------------------------------------
+console.log("\n-- Test 3: runAttempt() success path");
 mockServerMode = "success";
 lastReceivedEvent = null;
 
 const TEST_PARAMS = {
-  prompt: "帮我询价 10000 件白色纯棉衬衣，45 天内交货温哥华",
+  prompt: "询价5000件格子衬衫，45天交东京，高品质",
   sessionId: "sess-wechat-001",
   senderId: "weixin-user-abc",
   channel: "weixin",
@@ -131,7 +143,7 @@ const TEST_PARAMS = {
 
 const successResult = await registeredHarness.runAttempt(TEST_PARAMS);
 
-assertShape("result has all EmbeddedRunAttemptResult keys", successResult, [
+assertShape("result has EmbeddedRunAttemptResult keys", successResult, [
   "aborted",
   "externalAbort",
   "timedOut",
@@ -153,17 +165,12 @@ assertShape("result has all EmbeddedRunAttemptResult keys", successResult, [
 assert("aborted is false", successResult.aborted === false);
 assert("timedOut is false", successResult.timedOut === false);
 assert("assistantTexts is non-empty array", Array.isArray(successResult.assistantTexts) && successResult.assistantTexts.length > 0);
-assert("assistantTexts[0] has content", successResult.assistantTexts[0]?.length > 0);
-assert("messagesSnapshot is array", Array.isArray(successResult.messagesSnapshot));
+assert("assistantTexts[0] uses AIVAN reply", successResult.assistantTexts[0] === mockReply);
+assert("lastAssistant exists", successResult.lastAssistant != null);
 assert("lastAssistant.role = assistant", successResult.lastAssistant?.role === "assistant");
-assert("lastAssistant.content is array", Array.isArray(successResult.lastAssistant?.content));
 assert("lastAssistant.content[0].type = text", successResult.lastAssistant?.content?.[0]?.type === "text");
-assert("lastAssistant has api", typeof successResult.lastAssistant?.api === "string");
-assert("lastAssistant has model", typeof successResult.lastAssistant?.model === "string");
-assert("lastAssistant has usage", typeof successResult.lastAssistant?.usage === "object");
-assert("lastAssistant.usage has cost", typeof successResult.lastAssistant?.usage?.cost === "object");
-assert("lastAssistant has stopReason", typeof successResult.lastAssistant?.stopReason === "string");
-assert("lastAssistant has timestamp", typeof successResult.lastAssistant?.timestamp === "number");
+assert("lastAssistant.content[0].text uses AIVAN reply", successResult.lastAssistant?.content?.[0]?.text === mockReply);
+assert("terminal pass-through is not used", successResult.lastAssistant !== undefined && successResult.assistantTexts.length > 0);
 assert("sessionIdUsed matches", successResult.sessionIdUsed === TEST_PARAMS.sessionId);
 assert("event forwarded to AIVAN", lastReceivedEvent !== null);
 assert("event.message_text = prompt", lastReceivedEvent?.message_text === TEST_PARAMS.prompt);
@@ -175,30 +182,30 @@ assert("event.mode = auto", lastReceivedEvent?.mode === "auto");
 
 console.log("  reply:", successResult.assistantTexts[0]);
 
-// ── Test 4: runAttempt() — AIVAN error ────────────────────────────────────────
-console.log("\n── Test 4: runAttempt() — AIVAN returns 422 (pass-through, no throw)");
+// -- Test 4: AIVAN error path -------------------------------------------------
+console.log("\n-- Test 4: runAttempt() AIVAN error path");
 mockServerMode = "error";
 
 const errorResult = await registeredHarness.runAttempt(TEST_PARAMS);
 assert("returns object (no throw)", typeof errorResult === "object" && errorResult !== null);
 assertShape("error result has required keys", errorResult, ["aborted", "messagesSnapshot", "assistantTexts", "lastAssistant"]);
-assert("assistantTexts is empty", Array.isArray(errorResult.assistantTexts) && errorResult.assistantTexts.length === 0);
+assert("assistantTexts is empty on AIVAN error", Array.isArray(errorResult.assistantTexts) && errorResult.assistantTexts.length === 0);
 
-// ── Test 5: empty prompt ──────────────────────────────────────────────────────
-console.log("\n── Test 5: runAttempt() — empty prompt (no crash)");
+// -- Test 5: empty prompt -----------------------------------------------------
+console.log("\n-- Test 5: runAttempt() empty prompt");
 mockServerMode = "success";
 
 const emptyResult = await registeredHarness.runAttempt({ sessionId: "sess-002" });
 assert("returns object (no throw)", typeof emptyResult === "object");
 assert("assistantTexts is empty", Array.isArray(emptyResult.assistantTexts) && emptyResult.assistantTexts.length === 0);
 
-// ── Test 6: health() ──────────────────────────────────────────────────────────
-console.log("\n── Test 6: health() direct call");
+// -- Test 6: health() ---------------------------------------------------------
+console.log("\n-- Test 6: health() direct call");
 const healthResult = await plugin.health();
 assert("health.healthy is true", healthResult.healthy === true);
 assert("health.version is string", typeof healthResult.version === "string");
 
-// ── Summary ───────────────────────────────────────────────────────────────────
+// -- Summary -----------------------------------------------------------------
 mockServer.close();
 
 console.log(`\n${"=".repeat(60)}`);

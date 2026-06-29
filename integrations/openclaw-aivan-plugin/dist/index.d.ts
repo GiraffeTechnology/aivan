@@ -44,6 +44,7 @@ export declare function forwardEvent(event: {
     project_id?: string;
     action?: string;
     reply_text?: string;
+    output?: string;
     error?: string;
 }>;
 /**
@@ -86,6 +87,6 @@ export declare function rejectDraft(draftId: string, reason?: string): Promise<{
     draft_id: string;
     error?: string;
 }>;
-declare const _default: import("openclaw/plugin-sdk/tool-plugin").DefinedToolPluginEntry;
-export default _default;
+declare const pluginEntry: any;
+export default pluginEntry;
 export declare function register(api: any): void;
