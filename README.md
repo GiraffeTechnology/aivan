@@ -8,11 +8,22 @@ AIVAN is not a generic chatbot. It is an auditable trade execution system for pr
 
 ---
 
-## Current Status — Server-Side PASS, Live WeChat Business Flow BLOCKED
+## Current Status — Live WeChat Connectivity PASS, Backend Dependency BLOCKED
 
-Last verification snapshot: **2026-06-28**.
+Latest live WeChat verification: **2026-06-30**.
 
-AIVAN has reached the private-domain RFQ execution milestone on the server side, but the live WeChat-to-AIVAN business flow is **not yet accepted**. The README must not claim full WeChat production acceptance until the live WeChat command path creates an RFQ/project and a pending human-approved draft inside AIVAN.
+AIVAN has now passed the live WeChat connectivity milestone. A real WeChat message sent to `WeixinClawBot` triggered an AIVAN/OpenClaw-side response instead of being dropped before the agent layer.
+
+The current blocker has moved from **WeChat connectivity** to **AIVAN backend dependency availability**. The live verification response showed:
+
+```text
+Model Fallback: aivan/aivan
+(selected ollama/qwen3.5:0.8b; selected model unavailable)
+
+AIVAN 处理请求时遇到后端依赖错误，请稍后再试。
+```
+
+This means the WeChat invocation path is alive, but the selected local model / backend dependency was unavailable, so AIVAN could not complete the RFQ business workflow.
 
 ### Validated environment
 
@@ -23,7 +34,8 @@ Database: PostgreSQL in server deployment; SQLite for local development
 OpenClaw Gateway: v2026.6.10 test target
 OpenClaw plugin: openclaw-aivan
 Plugin package: @giraffetechnology/openclaw-aivan v0.1.0
-IM bridge under test: WeixinClawBot
+Live IM bridge: WeixinClawBot
+Selected local model under test: ollama/qwen3.5:0.8b
 ```
 
 ### Acceptance matrix
@@ -38,25 +50,43 @@ IM bridge under test: WeixinClawBot
 | `openclaw-aivan` package build/typecheck | PASS | TypeScript build and metadata are aligned with OpenClaw plugin requirements. |
 | `openclaw-aivan` plugin install/load/inspect | PASS | Plugin can be discovered, installed, loaded, and inspected by Gateway in the tested environment. |
 | Gateway/plugin to AIVAN event endpoint | PASS | Server-side event forwarding path is available. |
-| WeixinClawBot direct response | PASS | The WeChat bot bridge can respond at the bridge layer. |
-| Live WeChat → OpenClaw → `openclaw-aivan` → AIVAN RFQ workflow | **FAIL / P0 BLOCKER** | Live WeChat invocation does not yet complete the business flow inside AIVAN. |
-| ClawHub production publication | NOT READY | Requires live business-flow acceptance, not only package validation. |
+| WeixinClawBot live response | PASS | A real WeChat message produced a bot response. |
+| Live WeChat → OpenClaw/AIVAN invocation | PASS | AIVAN/OpenClaw returned a model fallback/backend dependency message, proving the request reached the agent-side invocation path. |
+| Selected local model availability | **FAIL / P0 BLOCKER** | `ollama/qwen3.5:0.8b` was selected but unavailable during live verification. |
+| Live AIVAN RFQ business completion | **BLOCKED** | RFQ/project creation and pending approval draft still require backend dependency availability. |
+| ClawHub production publication | NOT READY | Requires live business-flow acceptance, not only connectivity. |
 
 ### Current P0 blocker
 
-The next fix must focus on the live WeChat invocation chain:
+The WeChat channel is no longer the primary blocker. The next fix must focus on backend dependency readiness:
 
 ```text
 WeChat user command
 → WeixinClawBot
-→ OpenClaw Gateway
-→ openclaw-aivan AgentHarness
+→ OpenClaw Gateway / AIVAN invocation
+→ selected AIVAN model/provider
 → AIVAN POST /api/openclaw/events
 → RFQ/project creation
 → pending draft / approval request
 ```
 
-Passing package installation, Gateway inspection, and direct server calls is not enough. The acceptance target is a real WeChat command creating an auditable AIVAN trade workflow.
+Current observed failure point:
+
+```text
+selected ollama/qwen3.5:0.8b unavailable
+backend dependency error
+```
+
+Required next acceptance target:
+
+```text
+A real WeChat command reaches AIVAN.
+The configured local model/provider is available.
+AIVAN creates or updates an RFQ/project.
+AIVAN stores the inbound event and OpenClaw context.
+AIVAN generates a pending draft or structured approval request.
+AIVAN does not send any counterparty message without human approval.
+```
 
 Example live acceptance message:
 
@@ -64,13 +94,13 @@ Example live acceptance message:
 帮我询价 10000 件白色纯棉衬衣，45 天内交温哥华
 ```
 
-Expected acceptance result:
+Expected final business result:
 
 ```text
 AIVAN creates or updates an RFQ/project.
 AIVAN stores the inbound event and OpenClaw context.
 AIVAN generates a pending draft or structured approval request.
-AIVAN does not send any counterparty message without human approval.
+No outbound counterparty message is sent without human approval.
 ```
 
 ---
@@ -175,7 +205,7 @@ Stored state: projects, events, drafts, suppliers, accounts, platforms, preferen
 LLM providers:
 
 ```text
-mock | OpenAI | Anthropic/Claude | Google/Gemini | DeepSeek | Qwen
+mock | OpenAI | Anthropic/Claude | Google/Gemini | DeepSeek | Qwen | Ollama
 ```
 
 ---
@@ -306,7 +336,7 @@ AIVAN_DB_URL=postgresql://aivan:<password>@127.0.0.1:5432/aivan
 
 | Variable | Default | Description |
 |---|---|---|
-| `AIVAN_LLM_PROVIDER` | `mock` | `mock`, `openai`, `anthropic`, `google`, `deepseek`, or `qwen`. |
+| `AIVAN_LLM_PROVIDER` | `mock` | `mock`, `openai`, `anthropic`, `google`, `deepseek`, `qwen`, or `ollama`. |
 | `OPENAI_API_KEY` | empty | Required when provider is `openai`. |
 | `OPENAI_BASE_URL` | empty | Optional custom OpenAI-compatible endpoint. |
 | `OPENAI_MODEL` | empty | OpenAI model name. |
@@ -320,17 +350,27 @@ AIVAN_DB_URL=postgresql://aivan:<password>@127.0.0.1:5432/aivan
 | `QWEN_API_KEY` | empty | Required when provider is `qwen`. |
 | `QWEN_BASE_URL` | empty | Qwen / DashScope compatible-mode base URL. |
 | `QWEN_MODEL` | empty | Qwen model name. |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Local Ollama native API base URL. Do not include `/v1`. |
+| `OLLAMA_MODEL` | `qwen3.5:0.8b` | Local Ollama model name exactly as shown by `ollama list`. |
 | `AIVAN_LLM_TIMEOUT_SECONDS` | `30` | LLM request timeout. |
 | `AIVAN_LLM_MAX_RETRIES` | `2` | Maximum LLM retries. |
 | `AIVAN_LLM_TEMPERATURE` | `0` | Deterministic default. |
 
-Qwen example:
+Qwen / DashScope-compatible example:
 
 ```env
 AIVAN_LLM_PROVIDER=qwen
 QWEN_API_KEY=sk-...
 QWEN_MODEL=qwen-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+Local Ollama example:
+
+```env
+AIVAN_LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3.5:0.8b
 ```
 
 ### Alibaba / 1688
@@ -501,7 +541,7 @@ activated: true
 diagnostics: []
 ```
 
-This verifies plugin loading only. It does **not** prove live WeChat business-flow acceptance.
+This verifies plugin loading only. Final production readiness also requires live business-flow acceptance.
 
 ---
 
@@ -540,7 +580,7 @@ node test-gateway-harness.mjs
 
 These tests verify package metadata, local install lifecycle, Gateway inspection, ID alignment, AgentHarness shape, and mock event routing.
 
-### Required P0 live acceptance test
+### Required live acceptance test
 
 Before claiming production readiness, run a real WeChat command and verify that it reaches AIVAN business logic:
 
@@ -554,13 +594,14 @@ Required result:
 OpenClaw receives the WeChat event.
 openclaw-aivan receives the OpenClaw runtime call.
 AIVAN receives POST /api/openclaw/events.
+AIVAN's configured model/provider is available.
 AIVAN creates or updates an RFQ/project.
 AIVAN records event context.
 AIVAN creates a pending draft or approval request.
 No unapproved counterparty outbound message is sent.
 ```
 
-Until this passes, live WeChat integration remains a P0 blocker.
+Live WeChat connectivity has passed; business-flow acceptance remains blocked until the backend model/provider dependency is available and the RFQ workflow completes.
 
 ---
 
