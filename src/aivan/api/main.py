@@ -3,6 +3,7 @@ import logging
 import os
 import secrets
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
@@ -57,7 +58,7 @@ app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 
 # OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
 SKILL_INVOKE_PATHS = frozenset(
-    {"/api/openclaw/events", "/api/skill/invoke", "/api/rfq/create-from-event"}
+    {"/invoke", "/api/openclaw/events", "/api/skill/invoke", "/api/rfq/create-from-event"}
 )
 
 # WeChat-visible degraded reply when the backend pipeline fails. Must be
@@ -125,6 +126,75 @@ def _skill_response(result) -> dict:
     )
     return {**data, "status": "ok", "output": reply_text, "reply_text": reply_text}
 
+
+def _run_skill_event(event_data: dict, db: Session) -> dict:
+    """Single skill-execution entry point shared by every OpenClaw skill route.
+
+    Parses the OpenClaw event and runs the RFQ pipeline, then wraps the result in
+    the skill envelope. Kept as one function so /invoke, /api/openclaw/events,
+    /api/skill/invoke and /api/rfq/create-from-event all run identical logic and a
+    raised exception fails soft via the shared handler (these paths are in
+    SKILL_INVOKE_PATHS).
+    """
+    from aivan.openclaw.event_adapter import parse_openclaw_event
+    from aivan.execution.rfq_execution import create_rfq_from_event
+
+    return _skill_response(create_rfq_from_event(parse_openclaw_event(event_data), db))
+
+
+def _normalize_invoke_payload(raw: dict) -> dict:
+    """Normalize any supported /invoke body into a native OpenClaw event dict.
+
+    Accepts three shapes and maps them onto the fields parse_openclaw_event reads,
+    preserving project_id / role_context so follow-up supplier/buyer turns attach to
+    the existing project instead of being misclassified as a new RFQ:
+      - OpenClaw event   : {message_text, conversation_id, ...}  (native, passthrough)
+      - OpenClaw standard: {session_id, user_input, context}
+      - WeChat webhook   : {content, from_user, room_id, msg_type}
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("payload must be a JSON object")
+
+    # Native OpenClaw event — already in the shape the adapter expects.
+    if "message_text" in raw:
+        return dict(raw)
+
+    # OpenClaw standard skill invocation.
+    if "user_input" in raw:
+        context = raw.get("context")
+        if not isinstance(context, dict):
+            context = {}
+        event = {
+            "source": "openclaw",
+            "channel": _first_non_empty(context.get("channel")) or "openclaw",
+            "conversation_id": _first_non_empty(raw.get("session_id"), context.get("conversation_id"))
+            or str(uuid.uuid4()),
+            "sender_id": _first_non_empty(context.get("sender_id")) or "openclaw-user",
+            "message_text": raw.get("user_input") or "",
+            "message_type": "text",
+            "mode": _first_non_empty(context.get("mode")) or "auto",
+        }
+        if _first_non_empty(context.get("project_id")):
+            event["project_id"] = context["project_id"]
+        if _first_non_empty(context.get("role_context")):
+            event["role_context"] = context["role_context"]
+        return event
+
+    # WeChat webhook delivery.
+    if "content" in raw:
+        return {
+            "source": "wechat",
+            "channel": "wechat",
+            "conversation_id": _first_non_empty(raw.get("room_id"), raw.get("from_user"))
+            or str(uuid.uuid4()),
+            "sender_id": _first_non_empty(raw.get("from_user")) or "wechat-user",
+            "message_text": raw.get("content") or "",
+            "message_type": _first_non_empty(raw.get("msg_type")) or "text",
+            "mode": "auto",
+        }
+
+    raise ValueError(f"unrecognized payload keys: {sorted(raw.keys())}")
+
 _templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
 _static_dir = os.path.join(os.path.dirname(__file__), "..", "app", "static")
 
@@ -137,6 +207,7 @@ except Exception:
 
 @app.get("/health")
 @app.get("/api/health")
+@app.get("/healthz")
 def health():
     return {"status": "ok", "product": "AIVAN", "version": "0.2.0"}
 
@@ -145,22 +216,49 @@ def health():
 def serve_app(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "title": "AIVAN"})
 
+
+@app.post("/invoke")
+async def invoke(request: Request, db: Session = Depends(get_db)):
+    """OpenClaw / WeChat skill invocation endpoint.
+
+    Registered directly on the root app (the real harness calls POST /invoke).
+    Accepts OpenClaw-standard, WeChat-webhook, and native OpenClaw-event bodies,
+    and is in SKILL_INVOKE_PATHS so it always fails soft: never 404, never 500.
+    """
+    try:
+        raw = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=200,
+            content={"status": "error", "output": "Invalid JSON body.", "reply_text": "Invalid JSON body.", "artifacts": []},
+        )
+    try:
+        event_data = _normalize_invoke_payload(raw)
+    except Exception as exc:
+        logger.warning("invoke payload normalization failed: %s", exc)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "error",
+                "output": "Unrecognized request format.",
+                "reply_text": "无法识别的请求格式，请检查消息内容。",
+                "artifacts": [],
+            },
+        )
+    return _run_skill_event(event_data, db)
+
+
 @app.post("/api/openclaw/events")
 def openclaw_event(
     event_data: dict,
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    from aivan.openclaw.event_adapter import parse_openclaw_event
-    from aivan.execution.rfq_execution import create_rfq_from_event
-    event = parse_openclaw_event(event_data)
-    return _skill_response(create_rfq_from_event(event, db))
+    return _run_skill_event(event_data, db)
 
 @app.post("/api/skill/invoke")
 def skill_invoke(event_data: dict, db: Session = Depends(get_db)):
-    from aivan.openclaw.event_adapter import parse_openclaw_event
-    from aivan.execution.rfq_execution import create_rfq_from_event
-    return _skill_response(create_rfq_from_event(parse_openclaw_event(event_data), db))
+    return _run_skill_event(event_data, db)
 
 
 @app.post("/api/rfq/create-from-event")
@@ -169,9 +267,7 @@ def create_rfq_from_event_api(
     db: Session = Depends(get_db),
     _: None = Depends(_require_api_key),
 ):
-    from aivan.openclaw.event_adapter import parse_openclaw_event
-    from aivan.execution.rfq_execution import create_rfq_from_event
-    return _skill_response(create_rfq_from_event(parse_openclaw_event(event_data), db))
+    return _run_skill_event(event_data, db)
 
 
 def _do_approve_draft(draft_id: str, body: dict | None, db: Session) -> dict:
