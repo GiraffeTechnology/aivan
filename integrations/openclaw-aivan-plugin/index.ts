@@ -11,7 +11,7 @@
  * AIVAN API, which enforces the human-approval policy.
  */
 
-import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8765";
@@ -118,6 +118,7 @@ export async function forwardEvent(event: {
   project_id?: string;
   action?: string;
   reply_text?: string;
+  output?: string;
   error?: string;
 }> {
   const result = await safeFetch("/api/openclaw/events", {
@@ -132,11 +133,24 @@ export async function forwardEvent(event: {
     };
   }
   const d = result.data as Record<string, unknown>;
+  const replyText = d["reply_text"]
+    ? String(d["reply_text"])
+    : d["output"]
+      ? String(d["output"])
+      : undefined;
+  process.stderr.write(
+    `[aivan] AIVAN HTTP status=${result.status} fields=${JSON.stringify({
+      status: d["status"],
+      output: d["output"] ? String(d["output"]).slice(0, 120) : undefined,
+      reply_text: d["reply_text"] ? String(d["reply_text"]).slice(0, 120) : undefined,
+    })}\n`
+  );
   return {
     accepted: true,
     project_id: d["project_id"] ? String(d["project_id"]) : undefined,
     action: d["action"] ? String(d["action"]) : undefined,
-    reply_text: d["reply_text"] ? String(d["reply_text"]) : undefined,
+    reply_text: replyText,
+    output: d["output"] ? String(d["output"]) : undefined,
   };
 }
 
@@ -235,7 +249,7 @@ export async function rejectDraft(
 }
 
 // ─── Plugin metadata export for `openclaw plugins validate` ───────────────────
-export default defineToolPlugin({
+const pluginEntry: any = definePluginEntry({
   id: "openclaw-aivan",
   name: "AIVAN OpenClaw Bridge",
   description:
@@ -248,8 +262,10 @@ export default defineToolPlugin({
     },
     { additionalProperties: false }
   ),
-  tools: (_tool) => [],
-});
+  register,
+} as any);
+
+export default pluginEntry;
 
 // ─── AgentHarness helpers ─────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@
  * All draft approval and rejection actions are forwarded to the local
  * AIVAN API, which enforces the human-approval policy.
  */
-import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 const DEFAULT_BASE_URL = "http://127.0.0.1:8765";
 function baseUrl() {
@@ -92,11 +92,22 @@ export async function forwardEvent(event) {
         };
     }
     const d = result.data;
+    const replyText = d["reply_text"]
+        ? String(d["reply_text"])
+        : d["output"]
+            ? String(d["output"])
+            : undefined;
+    process.stderr.write(`[aivan] AIVAN HTTP status=${result.status} fields=${JSON.stringify({
+        status: d["status"],
+        output: d["output"] ? String(d["output"]).slice(0, 120) : undefined,
+        reply_text: d["reply_text"] ? String(d["reply_text"]).slice(0, 120) : undefined,
+    })}\n`);
     return {
         accepted: true,
         project_id: d["project_id"] ? String(d["project_id"]) : undefined,
         action: d["action"] ? String(d["action"]) : undefined,
-        reply_text: d["reply_text"] ? String(d["reply_text"]) : undefined,
+        reply_text: replyText,
+        output: d["output"] ? String(d["output"]) : undefined,
     };
 }
 /**
@@ -158,15 +169,16 @@ export async function rejectDraft(draftId, reason) {
     return { rejected: true, draft_id: draftId };
 }
 // ─── Plugin metadata export for `openclaw plugins validate` ───────────────────
-export default defineToolPlugin({
+const pluginEntry = definePluginEntry({
     id: "openclaw-aivan",
     name: "AIVAN OpenClaw Bridge",
     description: "OpenClaw bridge for forwarding IM/email/marketplace events to the local AIVAN service with human approval.",
     configSchema: Type.Object({
         aivanBaseUrl: Type.Optional(Type.String({ default: "http://127.0.0.1:8765" })),
     }, { additionalProperties: false }),
-    tools: (_tool) => [],
+    register,
 });
+export default pluginEntry;
 // ─── AgentHarness helpers ─────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractPrompt(params) {
