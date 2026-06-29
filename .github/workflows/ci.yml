@@ -10,6 +10,8 @@ jobs:
   python:
     name: Python tests
     runs-on: ubuntu-latest
+    env:
+      GIRAFFE_DB_CONTRACT_TOKEN: ${{ secrets.GIRAFFE_DB_CONTRACT_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +33,33 @@ jobs:
           OPENCLAW_MOCK_MODE: "true"
           AIVAN_DB_URL: "sqlite:///:memory:"
           AIVAN_REQUIRE_HUMAN_APPROVAL: "true"
+
+      # The DB-contract scanner is owned by giraffe-db (the single source of
+      # truth for record-ID conventions). AIVAN does not vendor a copy. When a
+      # cross-repo token is configured, CI checks out the giraffe-db scanner and
+      # runs it against this repo. When the token is unavailable, CI still
+      # enforces AIVAN's consumer-side contract tests in this repository and
+      # skips only the optional cross-repo scanner checkout.
+      - name: Check out giraffe-db DB-contract scanner (source of truth)
+        if: ${{ env.GIRAFFE_DB_CONTRACT_TOKEN != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: GiraffeTechnology/giraffe-db
+          path: giraffe-db-contract
+          sparse-checkout: scripts/check_unified_data_ids.py
+          sparse-checkout-cone-mode: false
+          token: ${{ env.GIRAFFE_DB_CONTRACT_TOKEN }}
+
+      - name: Unified giraffe-db data-ID contract scan (giraffe-db-owned)
+        if: ${{ env.GIRAFFE_DB_CONTRACT_TOKEN != '' }}
+        run: python giraffe-db-contract/scripts/check_unified_data_ids.py --repo .
+
+      - name: Skip giraffe-db scanner when token is unavailable
+        if: ${{ env.GIRAFFE_DB_CONTRACT_TOKEN == '' }}
+        run: |
+          echo "GIRAFFE_DB_CONTRACT_TOKEN is not configured for this workflow run."
+          echo "Skipping cross-repo giraffe-db scanner checkout."
+          echo "Consumer-side contract tests remain enforced in this repository."
 
       - name: Validate ClawHub plugin metadata
         run: uv run python scripts/validate_clawhub_aivan_plugin.py

@@ -8,11 +8,13 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from aivan.gpm.auth import require_auth
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
+from aivan.gpm.record_id import validation_error as record_id_validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +64,21 @@ class ApprovalRequest(BaseModel):
     notes: Optional[str] = None
 
 
-@router.post("/quote-guidance", status_code=201)
+@router.post("/quote-guidance", status_code=201, response_model=None)
 async def create_quote_guidance(
     body: QuoteGuidanceRequest,
     tenant_id: str = Depends(require_auth),
-) -> dict:
+) -> dict | JSONResponse:
     """Analyse a supplier quote and persist the resulting decision packet."""
+    # A supplier_id that is a retired giraffe-db legacy id is rejected, never
+    # remapped. AIVAN's own (non-giraffe-db) supplier ids pass through. The
+    # envelope is returned at the top level (not wrapped under FastAPI's
+    # ``detail``) because consumers match on ``error``/``received`` directly.
+    if body.supplier_id is not None:
+        id_error = record_id_validation_error(body.supplier_id)
+        if id_error is not None:
+            return JSONResponse(status_code=422, content=id_error)
+
     runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
     if runtime_mode == "mock":
         analysis = mock_quote_analysis(body.sku, body.supplier_quote)
