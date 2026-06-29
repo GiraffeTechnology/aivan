@@ -226,6 +226,26 @@ def reject_draft(
     return _do_reject_draft(draft_id, db)
 
 
+@app.get("/api/openclaw/drafts/{draft_id}")
+def get_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_api_key),
+):
+    """Fetch a single draft by id.
+
+    Returns 200 with the full draft (same shape as the ``drafts[]`` elements
+    elsewhere in the API), or a structured JSON 404 when the draft is absent.
+    """
+    draft = DraftRepository(db).get(draft_id)
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "draft_id": draft_id},
+        )
+    return _serialize_draft(draft)
+
+
 # Short-form aliases used by the OpenClaw plugin and dashboard
 @app.post("/api/drafts/{draft_id}/approve")
 def approve_draft_alias(

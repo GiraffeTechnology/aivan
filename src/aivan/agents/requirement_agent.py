@@ -1,8 +1,31 @@
 from __future__ import annotations
+from pydantic import BaseModel
 from aivan.schemas.requirement import BuyerRequirement, MissingField
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import REQUIREMENT_STRUCTURING_SYSTEM
 from aivan.utils.language import detect_language
+
+
+def _coerce_nulls(data: dict, model: type[BaseModel]) -> dict:
+    """Replace LLM-emitted ``null`` values with each field's declared default.
+
+    Real LLM providers (Qwen, OpenAI, ...) frequently emit ``null`` for optional
+    fields instead of omitting them. For a field whose type does not accept
+    ``None`` (e.g. ``str``/``bool`` with a non-None default), that null would
+    raise a ValidationError. We replace such nulls with the field's default (or
+    default_factory result) while leaving genuinely optional fields — those whose
+    default is ``None`` — untouched. Fields not declared on the model are ignored.
+    """
+    result = dict(data)
+    for field_name, field_info in model.model_fields.items():
+        if field_name not in result or result[field_name] is not None:
+            continue
+        if field_info.is_required():
+            continue
+        default = field_info.get_default(call_default_factory=True)
+        if default is not None:
+            result[field_name] = default
+    return result
 
 APPAREL_REQUIRED_FIELDS = [
     ("quantity", "Order quantity", "订购数量是多少？"),
@@ -129,6 +152,7 @@ def structure_customer_requirement_with_llm(
     missing_raw = result.pop("missing_fields", [])
 
     safe_data = {k: v for k, v in result.items() if k in BuyerRequirement.model_fields and k not in ("missing_fields", "project_id", "raw_text")}
+    safe_data = _coerce_nulls(safe_data, BuyerRequirement)
     req = BuyerRequirement(project_id=project_id, raw_text=raw_text, **safe_data)
 
     req.missing_fields = _detect_missing_fields(req)
