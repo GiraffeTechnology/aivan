@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
@@ -30,6 +32,8 @@ from aivan.schemas.rfq import (
     RFQStrategy,
     SupplierRoutingDecision,
 )
+
+logger = logging.getLogger(__name__)
 
 CLASSIFICATION_SYSTEM = """
 You classify AIVAN private-domain trade events. Return JSON only.
@@ -102,6 +106,14 @@ def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> 
 
 
 def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
+    try:
+        from aivan.intake.persistence import persist_inquiry_intake
+
+        persist_inquiry_intake(event, db)
+    except Exception:
+        logger.exception("RFQ intake persistence failed for message_id=%s", event.message_id)
+        db.rollback()
+
     classification = classify_event(event, db)
     if classification.event_type == "supplier_reply":
         return _handle_supplier_reply_event(event, classification, db)
