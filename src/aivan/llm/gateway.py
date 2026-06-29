@@ -23,6 +23,9 @@ def _build_provider(name: str) -> LLMProvider:
     elif name == "qwen":
         from aivan.llm.providers.qwen_provider import QwenProvider
         return QwenProvider()
+    elif name == "ollama":
+        from aivan.llm.providers.ollama_provider import OllamaProvider
+        return OllamaProvider()
     else:
         from aivan.llm.providers.mock_provider import MockLLMProvider
         return MockLLMProvider()
