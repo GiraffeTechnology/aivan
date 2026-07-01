@@ -53,6 +53,39 @@ def test_llm_complete_json_with_temperature():
     assert isinstance(result, dict)
 
 
+def test_private_domain_test_mode_disables_llm_api_calls(monkeypatch):
+    """With the LLM API disabled, no provider is reached and the call raises."""
+    from aivan.llm import gateway
+    from aivan.llm.gateway import LLMApiDisabledError
+
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
+    reset_provider()
+
+    # A provider must never be built or invoked while disabled.
+    def _boom(*args, **kwargs):
+        raise AssertionError("no LLM provider may be built while the API is disabled")
+
+    monkeypatch.setattr(gateway, "_build_provider", _boom)
+
+    with pytest.raises(LLMApiDisabledError):
+        llm_complete_json(
+            task="requirement_structuring",
+            system_prompt="sys",
+            user_prompt="I need 10000 pcs white cotton shirts.",
+        )
+
+
+def test_provider_disabled_name_also_blocks_llm_calls(monkeypatch):
+    from aivan.llm.gateway import LLMApiDisabledError
+
+    monkeypatch.delenv("AIVAN_LLM_API_ENABLED", raising=False)
+    monkeypatch.setenv("AIVAN_LLM_PROVIDER", "disabled")
+    reset_provider()
+
+    with pytest.raises(LLMApiDisabledError):
+        llm_complete_json(task="requirement_structuring", system_prompt="s", user_prompt="u")
+
+
 def test_llm_complete_json_falls_back_on_provider_error(monkeypatch):
     """If the provider raises, gateway falls back to MockLLMProvider."""
     def bad_complete(*args, **kwargs):

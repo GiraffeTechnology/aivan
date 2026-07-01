@@ -69,26 +69,35 @@ CNC_REQUIRED_FIELDS = [
     ("delivery_days", "Delivery deadline", "需要多少天内交货？"),
 ]
 
-# Deterministic destination aliases (surface form -> canonical English city).
-# The giraffe-language-skill overlay is authoritative when enabled; these keep
-# the local fallback able to recognize common destinations — including Tokyo /
-# Osaka — when the service is disabled or the LLM drops the field.
-CITY_ALIASES = [
-    ("Vancouver", "Vancouver"),
-    ("温哥华", "Vancouver"),
-    ("Los Angeles", "Los Angeles"),
-    ("洛杉矶", "Los Angeles"),
-    ("New York", "New York"),
-    ("纽约", "New York"),
-    ("London", "London"),
-    ("伦敦", "London"),
-    ("Shanghai", "Shanghai"),
-    ("上海", "Shanghai"),
-    ("Tokyo", "Tokyo"),
-    ("东京", "Tokyo"),
-    ("Osaka", "Osaka"),
-    ("大阪", "Osaka"),
+# Delivery-phrase patterns used only to PRESERVE raw destination evidence when
+# no authorized canonicalization source is available. AIVAN deliberately owns no
+# city/port/warehouse alias table: canonical destinations come from
+# giraffe-language-skill (or, later, a shared location resolver / Giraffe DB
+# reference), never from AIVAN production code. These patterns capture the
+# surface token the buyer wrote; they do not translate or canonicalize it.
+_RAW_DESTINATION_PATTERNS = [
+    r'(?:deliver(?:ed|y)?|ship(?:ped|ping)?|send|sent)\s+to\s+([A-Za-z][A-Za-z .\'\-]+?)(?:\s+(?:within|in|by|before|no)\b|[,.;:]|$)',
+    r'destination[:\s]+([A-Za-z][A-Za-z .\'\-]+?)(?:[,.;:]|$)',
+    r'(?:交货至|交货地|运往|发往|送到|交到|交|到)\s*([一-鿿]{2,6})',
 ]
+
+
+def _extract_raw_destination_evidence(raw_text: str) -> str | None:
+    """Capture the raw destination phrase the buyer wrote, without canonicalizing.
+
+    Returns the surface token (e.g. ``"东京"`` or ``"Osaka"``) or ``None``. This is
+    evidence preservation only — it never maps a surface form to a canonical city.
+    """
+    import re
+
+    for pattern in _RAW_DESTINATION_PATTERNS:
+        match = re.search(pattern, raw_text, re.IGNORECASE)
+        if match:
+            token = match.group(1).strip(" ,.;:'-")
+            if token:
+                return token
+    return None
+
 
 def _deterministic_parse(raw_text: str) -> dict:
     """Fallback: detect basic fields from raw text without LLM."""
@@ -117,10 +126,11 @@ def _deterministic_parse(raw_text: str) -> dict:
     if "plaid" in text_lower or "checkered" in text_lower or "格子" in raw_text:
         result["notes"] = "plaid/checkered pattern"
 
-    for alias, destination in CITY_ALIASES:
-        if alias.lower() in text_lower or alias in raw_text:
-            result["destination"] = destination
-            break
+    # NOTE: destination is intentionally NOT set here. AIVAN does not canonicalize
+    # destinations locally; canonical values come from giraffe-language-skill.
+    # Raw destination evidence is preserved separately (see
+    # _annotate_destination_provenance) so unresolved destinations trigger a
+    # confirmation request rather than a guess.
 
     day_match = re.search(r'(\d+)\s*(?:days?|天|日)', text_lower)
     if day_match:
@@ -141,6 +151,31 @@ def _deterministic_parse(raw_text: str) -> dict:
         result["logistics_preference"] = "sea"
 
     return result
+
+def _annotate_destination_provenance(req: BuyerRequirement, raw_text: str) -> None:
+    """Record destination provenance and preserve raw evidence.
+
+    - When giraffe-language-skill supplied the canonical destination, its overlay
+      has already recorded ``destination_source="language_skill"``; leave it.
+    - Otherwise, if the canonical destination is still unresolved, preserve the
+      raw phrase the buyer wrote under ``extra.destination_raw`` and keep
+      ``destination_canonical`` null so downstream logic asks for confirmation
+      rather than guessing a global location.
+    """
+    if req.extra.get("destination_source") == "language_skill":
+        return
+
+    raw_evidence = _extract_raw_destination_evidence(raw_text)
+    if raw_evidence and "destination_raw" not in req.extra:
+        req.extra["destination_raw"] = raw_evidence
+
+    if not (req.destination and req.destination.strip()):
+        # Unresolved canonical destination: never invent one from a local table.
+        req.destination = ""
+        req.extra["destination_canonical"] = None
+        req.extra.setdefault("destination_source", "raw_text_only")
+        req.extra.setdefault("destination_confidence", 0.0)
+
 
 def _detect_missing_fields(req: BuyerRequirement) -> list[MissingField]:
     missing = []
@@ -220,6 +255,10 @@ def structure_customer_requirement_with_llm(
     # asks for what is genuinely absent.
     if canonicalization:
         apply_to_requirement(req, canonicalization)
+
+    # Record destination provenance / preserve raw evidence without AIVAN-side
+    # canonicalization (giraffe-language-skill remains the authoritative source).
+    _annotate_destination_provenance(req, raw_text)
 
     req.missing_fields = _detect_missing_fields(req)
 

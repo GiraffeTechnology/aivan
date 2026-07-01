@@ -111,6 +111,12 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
     if structure_data:
         structured = structure_data.get("structured") or {}
         _overlay_fields(req, structured, structure_data.get("confidence_score"))
+        _record_destination_provenance(
+            req,
+            structured,
+            normalize_data.get("field_evidence") or {},
+            structure_data.get("confidence_score"),
+        )
         ls_meta.update(
             {
                 "schema": structure_data.get("schema"),
@@ -124,6 +130,37 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
 
     req.extra["language_skill"] = ls_meta
     return req
+
+
+def _record_destination_provenance(
+    req: BuyerRequirement,
+    structured: dict[str, Any],
+    field_evidence: dict[str, Any],
+    confidence: Any,
+) -> None:
+    """Mark the canonical destination as sourced from the language skill.
+
+    AIVAN owns no destination dictionary, so provenance must make it auditable
+    that a canonical destination came from giraffe-language-skill (not an
+    AIVAN-local alias table). Only recorded when the skill actually resolved one.
+    """
+    canonical = structured.get("destination")
+    if canonical is None or (isinstance(canonical, str) and not canonical.strip()):
+        return
+
+    evidence = field_evidence.get("destination") if isinstance(field_evidence, dict) else None
+    raw = None
+    dest_confidence: Any = confidence
+    if isinstance(evidence, dict):
+        raw = evidence.get("raw_text") or evidence.get("span")
+        if isinstance(evidence.get("confidence"), (int, float)):
+            dest_confidence = evidence["confidence"]
+
+    req.extra["destination_raw"] = raw
+    req.extra["destination_canonical"] = canonical
+    req.extra["destination_source"] = "language_skill"
+    if isinstance(dest_confidence, (int, float)):
+        req.extra["destination_confidence"] = float(dest_confidence)
 
 
 def _overlay_fields(req: BuyerRequirement, structured: dict[str, Any], confidence: Any) -> None:

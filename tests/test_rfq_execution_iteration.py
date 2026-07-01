@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -59,6 +60,61 @@ def _user_rfq_event() -> dict:
         "role_context": "user",
         "mode": "command",
     }
+
+
+def _zh_tokyo_rfq_event() -> dict:
+    return {
+        "source": "openclaw",
+        "channel": "wechat",
+        "conversation_id": "conv_zh_tokyo_rfq_001",
+        "message_id": "msg_zh_tokyo_rfq_001",
+        "sender_id": "user_001",
+        "sender_display_name": "Michael",
+        "message_text": "帮我询价 5000 件格子衬衫，45 天内交东京，高品质。",
+        "role_context": "user",
+        "mode": "command",
+    }
+
+
+def _language_skill_tokyo_handler(request: httpx.Request) -> httpx.Response:
+    """In-memory giraffe-language-skill returning a canonical Tokyo RFQ."""
+    path = request.url.path
+    if path == "/v1/inbound/normalize":
+        return httpx.Response(
+            200,
+            json={
+                "raw_text": "帮我询价 5000 件格子衬衫，45 天内交东京，高品质。",
+                "language": {"detected": "zh", "confidence": 0.98},
+                "canonical_language": "en",
+                "canonical_text": "inquiry 5000 pcs high quality plaid shirt, deliver to Tokyo, 45 days",
+                "field_evidence": {
+                    "destination": {"value": "Tokyo", "span": "交东京", "confidence": 1.0},
+                },
+                "translation": {"provider": "mock", "model": "mock"},
+                "warnings": [],
+            },
+        )
+    if path == "/v1/structure/rfq":
+        return httpx.Response(
+            200,
+            json={
+                "schema": "trade_rfq.v1",
+                "validation_status": "valid",
+                "structured": {
+                    "quantity": 5000,
+                    "quantity_unit": "pcs",
+                    "product_name": "plaid shirt",
+                    "product_category": "apparel",
+                    "product_modifier": ["plaid"],
+                    "destination": "Tokyo",
+                    "lead_time_days": 45,
+                    "quality_level": "high",
+                },
+                "missing_fields": [],
+                "confidence_score": 0.95,
+            },
+        )
+    return httpx.Response(404, json={"detail": "not found"})
 
 
 def _customer_email_event() -> dict:
@@ -134,7 +190,84 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert user_notifications[0]["status"] == "sent"
 
 
-def test_chinese_user_control_message_is_localized_and_pending_approval():
+def test_workflow_closes_with_language_skill_and_llm_api_off(api_client, monkeypatch):
+    # Private-domain proof: language skill ON, LLM API OFF. The RFQ workflow must
+    # still close (canonical destination from the skill, deterministic drafts) and
+    # never call an LLM provider.
+    from aivan.integrations import language_skill_client
+    from aivan.llm import gateway
+
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
+    monkeypatch.setenv("AIVAN_LLM_PROVIDER", "disabled")
+
+    def _no_provider(*a, **k):
+        raise AssertionError("no LLM provider may be built with the LLM API disabled")
+
+    monkeypatch.setattr(gateway, "_build_provider", _no_provider)
+    gateway.reset_provider()
+    language_skill_client.set_default_transport(
+        httpx.MockTransport(_language_skill_tokyo_handler)
+    )
+    try:
+        response = api_client.post("/api/rfq/create-from-event", json=_zh_tokyo_rfq_event())
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["action"] == "pending_email_approval"
+        assert payload["drafts_created"]
+        assert payload["requirement"]["destination"] == "Tokyo"
+        assert payload["requirement"]["extra"]["destination_source"] == "language_skill"
+
+        drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
+        supplier_drafts = [d for d in drafts if d["target_role"] == "supplier"]
+        assert supplier_drafts
+        assert {d["status"] for d in supplier_drafts} == {"pending_approval"}
+    finally:
+        language_skill_client.set_default_transport(None)
+        gateway.reset_provider()
+
+
+def test_destination_unresolved_withholds_supplier_drafts(api_client, monkeypatch):
+    # Language skill OFF + LLM API OFF: destination cannot be canonicalized, so no
+    # supplier drafts may be created — AIVAN asks for confirmation instead.
+    from aivan.llm import gateway
+
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
+    monkeypatch.setenv("AIVAN_LLM_PROVIDER", "disabled")
+    gateway.reset_provider()
+    try:
+        response = api_client.post("/api/rfq/create-from-event", json=_zh_tokyo_rfq_event())
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["action"] == "pending_destination_confirmation"
+        assert payload["drafts_created"] == []
+        assert not payload["requirement"]["destination"]
+        assert "东京" in (payload["requirement"]["extra"].get("destination_raw") or "")
+
+        drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
+        supplier_drafts = [d for d in drafts if d["target_role"] == "supplier"]
+        assert supplier_drafts == []
+    finally:
+        gateway.reset_provider()
+
+
+def test_no_supplier_outbound_without_human_approval(api_client):
+    # Supplier-facing drafts are created only as pending_approval; nothing is sent.
+    response = api_client.post("/api/rfq/create-from-event", json=_user_rfq_event())
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
+    supplier_drafts = [d for d in drafts if d["target_role"] == "supplier"]
+    assert supplier_drafts
+    assert {d["status"] for d in supplier_drafts} == {"pending_approval"}
+    assert all(d["status"] != "sent" for d in supplier_drafts)
+
+
+def test_chinese_user_control_message_preserves_pending_approval_signal():
     import types
 
     from aivan.execution.rfq_execution import _build_user_control_message

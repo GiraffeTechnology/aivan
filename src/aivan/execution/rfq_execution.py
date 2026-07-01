@@ -208,6 +208,38 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
             actor="giraffe_db",
         )
 
+    if _destination_unresolved(requirement):
+        # No authorized source confirmed a canonical destination — withhold
+        # supplier drafts and ask the operator to confirm rather than guessing.
+        confirm_message = _build_destination_confirmation_message(requirement)
+        notification = _send_user_control_notification(project.project_id, event, confirm_message, db)
+        event_repo.append(
+            project.project_id,
+            "DESTINATION_CONFIRMATION_REQUIRED",
+            "Canonical destination unresolved; supplier drafts withheld pending confirmation.",
+            payload={
+                "destination_raw": requirement.extra.get("destination_raw"),
+                "destination_source": requirement.extra.get("destination_source"),
+                "message_text": confirm_message,
+                "notification": notification,
+            },
+            actor="aivan",
+        )
+        db.commit()
+        return RFQExecutionResult(
+            project_id=project.project_id,
+            event_type=classification.event_type,
+            action="pending_destination_confirmation",
+            message="Canonical destination unresolved. Supplier drafts withheld until the delivery destination is confirmed.",
+            strategy=strategy,
+            requirement=requirement.model_dump(),
+            giraffe_context=giraffe,
+            gltg_simulation=gltg,
+            supplier_routing=SupplierRoutingDecision(),
+            drafts_created=[],
+            user_control_message=confirm_message,
+        )
+
     drafts_created = _create_supplier_email_drafts(project.project_id, event, requirement, strategy, giraffe, gltg, routing, db)
     user_message = _build_user_control_message(requirement, strategy, gltg, routing, drafts_created)
     user_notification = _send_user_control_notification(project.project_id, event, user_message, db)
@@ -506,6 +538,36 @@ def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, 
 def _should_use_chinese_user_message(requirement: BuyerRequirement) -> bool:
     return requirement.language == "zh" or any(
         "一" <= ch <= "鿿" for ch in requirement.raw_text
+    )
+
+
+def _destination_unresolved(requirement: BuyerRequirement) -> bool:
+    """True when no authorized source has confirmed a canonical destination.
+
+    AIVAN never guesses a canonical destination from a local table, so when the
+    language skill (or another authorized resolver) has not produced one, the
+    destination is treated as unresolved and supplier drafts are withheld.
+    """
+    return not (requirement.destination and requirement.destination.strip())
+
+
+def _build_destination_confirmation_message(requirement: BuyerRequirement) -> str:
+    raw = requirement.extra.get("destination_raw")
+    if _should_use_chinese_user_message(requirement):
+        evidence = f"（原文线索：{raw}）" if raw else ""
+        return (
+            f"RFQ 已创建，等待人工审批：{requirement.quantity or 'TBD'} {requirement.quantity_unit} "
+            f"{requirement.product_type or requirement.category or 'product'}。"
+            f"目的地尚未确认{evidence}，请确认交货城市、港口、保税仓或完整收货地址后再生成供应商询价。"
+            f"在目的地确认前不会生成供应商邮件草稿，仍需人工审批后才会发送。"
+        )
+    evidence = f" (raw evidence: {raw})" if raw else ""
+    return (
+        f"RFQ created and pending approval: {requirement.quantity or 'TBD'} {requirement.quantity_unit} "
+        f"{requirement.product_type or requirement.category or 'product'}. "
+        f"Destination is not confirmed{evidence}. Please confirm the delivery city, port, warehouse, "
+        f"or full delivery address before supplier RFQs are drafted. No supplier drafts were created; "
+        f"nothing is sent without human approval."
     )
 
 

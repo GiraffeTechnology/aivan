@@ -128,6 +128,20 @@ def test_requirement_agent_uses_language_skill(enabled_service, monkeypatch):
     assert req.extra["language_skill"]["validation_status"] == "valid"
 
 
+def test_language_skill_overlay_sets_canonical_destination_tokyo(enabled_service):
+    canon = canonicalize_rfq(ZH_RFQ)
+    req = BuyerRequirement(project_id="p1", raw_text=ZH_RFQ)
+    apply_to_requirement(req, canon)
+
+    # Canonical destination is authoritative from the language skill, and the
+    # provenance makes that auditable (not an AIVAN-local alias table).
+    assert req.destination == "Tokyo"
+    assert req.extra["destination_canonical"] == "Tokyo"
+    assert req.extra["destination_source"] == "language_skill"
+    assert req.extra["destination_raw"] == "交东京"
+    assert req.extra["destination_confidence"] == pytest.approx(1.0)
+
+
 def test_chinese_rfq_language_skill_keeps_tokyo_plaid_and_quality(enabled_service, monkeypatch):
     # Canonical non-English path: the language skill (not an AIVAN-internal
     # translation layer) supplies Tokyo, the plaid modifier, and the high
