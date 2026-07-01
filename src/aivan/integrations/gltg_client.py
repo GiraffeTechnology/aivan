@@ -105,6 +105,12 @@ class GLTGClient:
         payload = {"order": order, "suppliers": suppliers or [], "constraints": constraints or {}}
         return self._request("POST", "/v1/lead-time/estimate", json=payload)
 
+    def simulate_lead_time_v2(self, payload: dict[str, Any]) -> GLTGClientResult:
+        order = payload.get("order") if isinstance(payload, dict) else None
+        if not isinstance(order, dict) or "quantity" not in order:
+            return GLTGClientResult(False, None, "invalid v2 payload: order.quantity required", None)
+        return self._request("POST", "/v2/lead-time/simulate", json=payload)
+
     def enumerate_paths(
         self,
         order: dict[str, Any],

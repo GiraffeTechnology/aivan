@@ -80,6 +80,12 @@ class GLTGSimulation(BaseModel):
     selected_confidence_days: int
     deadline_risk_level: str = "unknown"
     explanation: str = ""
+    gltg_run_id: str | None = None
+    source_api_version: str = "v1"
+    assessment_schema_version: str | None = None
+    assessment_packet: dict = Field(default_factory=dict)
+    manual_review_required: bool | None = None
+    fallback_supplier_required: bool | None = None
 
 
 class SupplierRoutingDecision(BaseModel):
