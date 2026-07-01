@@ -1,16 +1,20 @@
-# AIVAN — AI Trade Salesperson
+# AIVAN — Private-Domain AI Trade Execution Worker
 
 `Python 3.11+` | `AIVAN v0.2.0` | `Standalone Product` | `OpenClaw Gateway` | `Multi-LLM` | `Giraffe DB / GPM` | `GLTG` | `Human-in-the-loop`
 
-AIVAN is a standalone AI trade salesperson assistant for private-domain RFQ execution. It receives buyer inquiries from IM, email, marketplace, or OpenClaw-controlled channels; structures the requirement; looks up private business context; screens supplier risk; calls GLTG for lead-time simulation; drafts buyer/supplier messages; and keeps a mandatory human approval gate before any counterparty-facing message is sent.
+AIVAN is a private-domain AI trade execution worker built for high-stakes RFQ and quote workflows. It connects to approved private-domain communication channels through OpenClaw, receives buyer inquiries from IM, enterprise chat, email-like channels, marketplace, or other approved connectors, structures RFQ intake data, checks whether a new inquiry belongs to an existing RFQ workspace, and persists the workflow into AIVAN DB / Giraffe DB.
 
-AIVAN is not a generic chatbot. It is an auditable trade-execution system for trading companies, merchandisers, and cross-border sourcing teams.
+AIVAN owns the trade execution logic. OpenClaw owns channel and account connectivity. WeChat has been validated as a priority IM channel in the live OpenClaw → AIVAN test path, and it is especially important for Mainland China deployment because it is the dominant IM channel there.
+
+AIVAN helps a trading company receive inquiries, structure buyer requirements, run controlled reasoning through local or configured LLM providers, call GLTG for lead-time simulation, generate quote or supplier-follow-up drafts, and keep all counterparty-facing actions behind a mandatory human approval gate.
+
+AIVAN is not a generic chatbot. It is an auditable trade-execution system for trading companies, merchandisers, sourcing teams, and cross-border procurement operators.
 
 ---
 
 ## Current Status
 
-Status snapshot: **2026-06-30**.
+Status snapshot: **2026-07-01**.
 
 | Area | Status | Notes |
 |---|---:|---|
@@ -19,25 +23,23 @@ Status snapshot: **2026-06-30**.
 | AIVAN runtime / API | PASS | FastAPI app exposes `/app`, `/invoke`, `/api/openclaw/events`, RFQ, project, draft, platform, account, GPM, and health endpoints. |
 | Local state DB | PASS | SQLite for local development; PostgreSQL can be used through `AIVAN_DB_URL` in server deployment. |
 | OpenClaw plugin package | PASS | `@giraffetechnology/openclaw-aivan` builds and typechecks as a Gateway plugin. |
-| Gateway package/install/load/inspect path | PASS | P0 plugin lifecycle scripts are present and should be run before every release. |
-| Live WeChat → OpenClaw/AIVAN invocation | PASS | A real WeChat message reached the AIVAN/OpenClaw invocation path. |
-| Configured model/provider availability | BLOCKED | The selected backend model/provider must be available in the live environment. |
-| Live RFQ business-flow acceptance | BLOCKED | AIVAN must create/update an RFQ/project and generate a pending approval draft from a real WeChat command. |
+| OpenClaw → AIVAN live IM invocation | PASS | A live WeChat message reached the AIVAN/OpenClaw invocation path. |
+| Local Ollama provider | PASS | Native Ollama `/api/chat` provider is available for server-local models such as `qwen3.5:0.8b`. |
+| Live RFQ business-flow acceptance | IN PROGRESS | AIVAN must complete one live simple RFQ/quote workflow with local model and GLTG dependencies available. |
 | ClawHub production publication | NOT READY | Requires both Gateway P0 acceptance and live business-flow acceptance. |
-
-The main blocker is no longer basic WeChat connectivity. The current P0 blocker is **backend dependency readiness**: the configured LLM/model provider and supporting services must be available so a live command can complete the RFQ workflow.
 
 Required live acceptance path:
 
 ```text
-Real WeChat command
-→ WeixinClawBot / OpenClaw Gateway
+IM / Email / Approved Private-Domain Channel
+→ OpenClaw Gateway
 → openclaw-aivan plugin
 → AIVAN /invoke or /api/openclaw/events
-→ configured model/provider available
+→ configured local or hosted LLM provider
+→ GLTG lead-time simulation
 → RFQ/project created or updated
 → inbound event and OpenClaw context stored
-→ pending draft or structured approval request created
+→ pending quote, draft, or structured approval request created
 → no outbound counterparty message sent without human approval
 ```
 
@@ -55,6 +57,19 @@ Trading company salespeople and merchandisers repeatedly parse buyer requirement
 
 AIVAN is developed first as an independent product. Stable capabilities may later be ported into `abcdYi` or the broader `giraffe-agent` framework, but active AIVAN runtime, OpenClaw Gateway, RFQ, GLTG, approval-gate, and live-channel fixes belong in this repository first.
 
+AIVAN focuses on private-domain trade execution:
+
+- RFQ intake from IM, enterprise chat, email-like, marketplace, and approved private-domain channels
+- validated WeChat live testing path through OpenClaw
+- WeChat priority configuration for Mainland China deployment while keeping the architecture channel-neutral
+- structured inquiry parsing and temporary RFQ workspace grouping
+- same-inquiry detection and conservative non-merge handling
+- local Ollama support for server-side testing without Qwen/DashScope API dependency
+- GLTG lead-time simulation and risk metadata preservation
+- optional Giraffe DB / GPM workflow memory and execution packet persistence
+- supplier routing, draft generation, and quote workflow preparation
+- human-in-the-loop approval before any counterparty-facing message is sent
+
 ---
 
 ## Product Boundary
@@ -64,17 +79,30 @@ AIVAN owns:
 ```text
 RFQ/project workflow
 trade event classification
+RFQ intake structuring
+same-inquiry grouping policy
 private-domain context orchestration
 Giraffe DB / GPM integration
 GLTG lead-time simulation calls
 supplier routing logic
 supplier risk screening
 user preference memory usage
-draft generation
+draft and quote preparation
 human approval workflow
 audit trail generation
 OpenClaw event ingestion
 channel execution policy
+```
+
+OpenClaw owns:
+
+```text
+IM account connectivity
+email-like connector connectivity
+approved private-domain channel connectivity
+channel account sessions
+connector lifecycle
+Gateway plugin runtime
 ```
 
 AIVAN does not own:
@@ -104,7 +132,7 @@ OpenClaw owns channel connectivity. AIVAN owns trade-execution logic.
 8. Giraffe DB / GPM is the private-domain business context source.
 9. GLTG is the lead-time simulation source.
 10. LLMs provide controlled strategy intelligence; they are not the source of private business facts.
-11. WeChat, LINE, WhatsApp, and similar IM channels are user-control channels.
+11. IM and email-like channels are user-control channels.
 12. Current counterparty outbound execution is approval-first and email/OpenClaw-policy controlled unless an official, API-permitted, auditable channel is implemented.
 13. Never log API keys, credentials, cookies, tokens, private keys, or private server secrets.
 
@@ -113,7 +141,7 @@ OpenClaw owns channel connectivity. AIVAN owns trade-execution logic.
 ## Architecture
 
 ```text
-User IM / Email / Marketplace Account
+IM / Email / Marketplace / Approved Private-Domain Channel
                 │
                 ▼
         OpenClaw Gateway
@@ -124,6 +152,8 @@ User IM / Email / Marketplace Account
                 ▼
       AIVAN /invoke or /api/openclaw/events
                 │
+                ├── RFQ intake structuring
+                ├── same-inquiry workspace grouping
                 ├── RFQ execution pipeline
                 ├── Requirement Agent
                 ├── Supplier Inquiry Agent
@@ -272,7 +302,7 @@ QWEN_MODEL=qwen-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
-Ollama example:
+Local Ollama example:
 
 ```bash
 ollama list
@@ -282,6 +312,7 @@ ollama list
 AIVAN_LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=<exact-model-name-from-ollama-list>
+QWEN_API_KEY=
 ```
 
 ### Alibaba / 1688, search, risk, trade, and GLTG
@@ -294,287 +325,88 @@ OLLAMA_MODEL=<exact-model-name-from-ollama-list>
 | `ALIBABA_APP_SECRET` | empty | Alibaba app secret. |
 | `ALIBABA_ACCESS_TOKEN` | empty | Alibaba OAuth access token. |
 | `ALIBABA_PLATFORM` | `1688\|alibaba_com\|auto` | Alibaba platform selector. |
-| `AIVAN_WEB_SEARCH_PROVIDER` | `mock` | Web-search provider mode. |
-| `AIVAN_WEB_SEARCH_MAX_RESULTS` | `10` | Maximum web-search results. |
-| `AIVAN_WEB_SEARCH_TIMEOUT_SECONDS` | `20` | Web-search timeout. |
-| `AIVAN_ENABLE_UNKNOWN_SUPPLIER_RISK_SEARCH` | `true` | Run web-search risk screening on unknown suppliers. |
-| `AIVAN_BLOCK_CRITICAL_RISK_SUPPLIERS` | `false` | Block critical-risk suppliers unless manually overridden. |
-| `AIVAN_REQUIRE_RISK_REVIEW_FOR_UNKNOWN_SUPPLIERS` | `true` | Require review before unknown suppliers are used. |
-| `AIVAN_DEFAULT_MARGIN_RATE` | `0.15` | Default trading margin. |
-| `AIVAN_HIDE_SUPPLIER_IDENTITY_FROM_BUYER` | `true` | Do not reveal supplier identity to buyer. |
-| `AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER` | `true` | Do not reveal supplier unit price to buyer. |
-| `GLTG_API_BASE_URL` | `http://localhost:8090` | Standalone GLTG service URL. |
+| `AIVAN_WEB_SEARCH_PROVIDER` | `mock` | Web-search provider. |
+| `AIVAN_WEB_SEARCH_MAX_RESULTS` | `10` | Maximum results per search. |
+| `AIVAN_ENABLE_UNKNOWN_SUPPLIER_RISK_SEARCH` | `true` | Run risk search for unknown suppliers. |
+| `AIVAN_BLOCK_CRITICAL_RISK_SUPPLIERS` | `false` | Block critical-risk suppliers when configured. |
+| `AIVAN_REQUIRE_RISK_REVIEW_FOR_UNKNOWN_SUPPLIERS` | `true` | Require review for unknown suppliers. |
+| `AIVAN_DEFAULT_MARGIN_RATE` | `0.15` | Default margin applied when generating buyer quotes. |
+| `AIVAN_HIDE_SUPPLIER_IDENTITY_FROM_BUYER` | `true` | Do not expose supplier identity to buyers by default. |
+| `AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER` | `true` | Do not expose supplier pricing to buyers by default. |
+| `GLTG_API_BASE_URL` | `http://localhost:8090` | Standalone GLTG service base URL. |
 | `GLTG_API_TIMEOUT_SECONDS` | `30` | GLTG request timeout. |
 
-AIVAN must not locally invent lead-time results when GLTG is configured as the authoritative source.
-
 ---
 
-## OpenClaw Integration
+## Direct OpenClaw Event Test
 
-OpenClaw is the channel-connectivity layer. It manages account login/session state, inbound delivery, outbound execution after approval, marketplace/search channel access, and channel-specific policy.
-
-AIVAN stores only account metadata:
-
-```text
-account ID
-platform
-display name
-status
-project/event/draft linkage
-permissions metadata
-```
-
-AIVAN never stores passwords, cookies, session tokens, or credential material.
-
-### Native Gateway plugin
-
-Plugin path:
-
-```text
-integrations/openclaw-aivan-plugin/
-```
-
-Plugin metadata:
-
-| Field | Value |
-|---|---|
-| Package name | `@giraffetechnology/openclaw-aivan` |
-| Package version | `0.1.0` |
-| Plugin ID | `openclaw-aivan` |
-| Manifest | `openclaw.plugin.json` |
-| Runtime entry | `./dist/index.js` |
-| Types entry | `./dist/index.d.ts` |
-| Node requirement | `>=18` |
-| OpenClaw package target | `^2026.6.9` |
-| Plugin API compatibility | `1.0` |
-
-Build and typecheck:
+Run a local OpenClaw-shaped event before testing a live IM connector:
 
 ```bash
-cd integrations/openclaw-aivan-plugin
-npm install
-npm run build
-npm run typecheck
-npx tsc
+curl -sS http://127.0.0.1:8765/api/openclaw/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "openclaw",
+    "channel": "openclaw-weixin",
+    "conversation_id": "local-test",
+    "sender_id": "operator",
+    "message_id": "local-rfq-001",
+    "message_text": "询价5000件格子衬衫，45天交东京，高品质，请给我一个初步报价"
+  }' | python -m json.tool
 ```
 
-Install locally through OpenClaw:
-
-```bash
-openclaw plugins install . --force
-openclaw plugins list --verbose
-openclaw plugins inspect openclaw-aivan --runtime --json
-```
-
-The plugin forwards normalized events to AIVAN and preserves OpenClaw context fields such as:
+Expected behavior:
 
 ```text
-project_id
-role_context
-conversation_id
-sender_id
-channel
+AIVAN receives the event.
+The configured model/provider is available.
+GLTG is called for lead-time simulation.
+A project/RFQ is created or updated.
+A pending approval draft or quote summary is created.
+No counterparty-facing message is sent without approval.
 ```
-
-Context preservation is required so supplier-side replies attach to the correct trade project instead of being misclassified as new buyer inquiries.
 
 ---
 
-## Running Tests
-
-Python test suite:
+## Development Tests
 
 ```bash
-uv run pytest
-# or
-uv run aivan test
+uv run pytest --tb=short -q
+python -m compileall src/aivan scripts tests -q
 ```
 
-Normal tests run in mock mode and should not require live credentials.
-
-Core E2E scripts:
+Focused smoke tests:
 
 ```bash
-uv run python scripts/run_aivan_e2e.py
-uv run python scripts/run_aivan_private_domain_rfq_e2e.py
-uv run python scripts/run_aivan_marketplace_e2e.py
-uv run python scripts/run_aivan_unknown_supplier_risk_e2e.py
-uv run python scripts/run_aivan_platform_whitelist_e2e.py
-uv run python scripts/run_gpm_llm_api_smoke.py
+uv run pytest tests/test_ollama_provider.py -q
+uv run pytest tests/test_gltg_client.py -q
+uv run python scripts/validate_clawhub_aivan_plugin.py
+uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
 ```
-
-OpenClaw Gateway / ClawHub P0 checks:
-
-```bash
-python scripts/validate_clawhub_aivan_plugin.py
-python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
-python scripts/run_aivan_openclaw_install_smoke_test.py
-python scripts/run_aivan_openclaw_gateway_p0_test.py
-python scripts/run_aivan_openclaw_install_simulation.py
-python scripts/run_aivan_openclaw_full_check.py
-```
-
-The full check runs the package validator, install smoke test, Gateway P0 test, and install simulation in sequence. It should exit with code `0` before any release claim.
 
 ---
 
-## CLI Reference
+## Release / Live Acceptance Checklist
 
-| Command | Description |
-|---|---|
-| `uv run aivan init` | Initialize local database and platform whitelist. |
-| `uv run aivan serve` | Start the local web UI and API server. |
-| `uv run aivan demo` | Run the core RFQ E2E demo. |
-| `uv run aivan demo-marketplace` | Run the marketplace sourcing demo. |
-| `uv run aivan demo-risk-check` | Run supplier risk-screening demo. |
-| `uv run aivan test` | Run the pytest suite. |
-| `uv run aivan import-suppliers [file]` | Import suppliers from CSV. |
-| `uv run aivan import-marketplace-results [file]` | Import marketplace result data from CSV. |
-| `uv run aivan risk-check --supplier-name "Supplier Name"` | Run risk screening for a supplier. |
-| `uv run aivan platforms list` | List all platform records. |
-| `uv run aivan platforms whitelist` | List trusted platforms. |
-| `uv run aivan platforms suggest --domain example.com --reason "Reason"` | Create a platform suggestion for review. |
-| `uv run aivan accounts list` | List OpenClaw account connections recorded in AIVAN. |
-| `uv run aivan accounts register --file account.json` | Register account metadata. |
-| `uv run aivan accounts revoke <account_connection_id>` | Revoke account metadata. |
-
----
-
-## API Reference
-
-Default base URL:
+Before production publication or ClawHub release:
 
 ```text
-http://127.0.0.1:8765
+1. Plugin build/typecheck passes.
+2. OpenClaw plugin metadata validates.
+3. Offline plugin smoke test passes.
+4. AIVAN API health check passes.
+5. Direct /api/openclaw/events test passes.
+6. Configured LLM provider is available.
+7. GLTG service is available.
+8. Giraffe DB / GPM integration is either available or intentionally disabled for the test scope.
+9. A live IM message reaches OpenClaw Gateway and AIVAN.
+10. AIVAN creates or updates an RFQ/project.
+11. AIVAN generates a pending approval quote or draft.
+12. No counterparty outbound message is sent without human approval.
 ```
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health`, `/api/health`, `/healthz` | Health checks. |
-| `GET` | `/app`, `/` | Web UI. |
-| `POST` | `/invoke` | OpenClaw / WeChat skill invocation endpoint. |
-| `POST` | `/api/openclaw/events` | Native OpenClaw event ingestion. |
-| `POST` | `/api/skill/invoke` | Skill invocation alias. |
-| `POST` | `/api/rfq/create-from-event` | Create RFQ from normalized event. |
-| `GET` | `/api/projects` | List trade projects. |
-| `GET` | `/api/projects/{project_id}` | Fetch project detail. |
-| `GET` | `/api/projects/{project_id}/events` | List project audit events. |
-| `GET` | `/api/projects/{project_id}/drafts` | List project drafts. |
-| `POST` | `/api/projects/{project_id}/strategy` | Update RFQ strategy. |
-| `POST` | `/api/projects/{project_id}/run-gltg` | Run GLTG lead-time simulation. |
-| `GET` | `/api/drafts` | List pending drafts. |
-| `GET` | `/api/openclaw/drafts/{draft_id}` | Fetch draft detail. |
-| `POST` | `/api/openclaw/drafts/{draft_id}/approve` | Approve and send if policy allows. |
-| `POST` | `/api/openclaw/drafts/{draft_id}/reject` | Reject a pending draft. |
-| `GET` | `/api/suppliers` | List active suppliers. |
-| `POST` | `/api/suppliers/import` | Import suppliers by CSV body. |
-| `POST` | `/api/suppliers/match` | Match suppliers for a requirement. |
-| `GET` | `/api/platforms` | List known platforms. |
-| `GET` | `/api/platforms/whitelist` | List trusted platforms. |
-| `GET` | `/api/platforms/suggestions` | List platform suggestions. |
-| `POST` | `/api/platforms/suggestions/{id}/approve` | Approve platform suggestion. |
-| `GET` | `/api/openclaw/accounts` | List OpenClaw account metadata. |
-| `POST` | `/api/openclaw/accounts/register` | Register OpenClaw account metadata. |
-| `POST` | `/api/openclaw/accounts/{id}/revoke` | Revoke OpenClaw account metadata. |
-| `GET` | `/api/user-preferences` | List user preference memory. |
-| `POST` | `/api/user-preferences/update` | Upsert user preference memory. |
-| `*` | `/api/gpm/*` | GPM router for AIVAN private-domain packets/context. |
-
-When `AIVAN_API_KEY` is configured, protected endpoints require:
-
-```http
-X-AIVAN-API-Key: <configured-key>
-```
-
----
-
-## Giraffe DB / GPM Contract
-
-AIVAN treats Giraffe DB / GPM as the private-domain business context source. The LLM may reason over AIVAN-supplied context, but it must not invent private supplier facts, customer history, historical prices, lead-time history, or user preference memory.
-
-GPM outputs should preserve:
-
-```text
-source traces
-lineage
-missing_inputs
-fallback mode
-approval requirement
-```
-
-If supplier count is fewer than three, AIVAN must not crash or fabricate additional suppliers. It should surface the shortfall and continue with a guarded fallback where possible.
-
----
-
-## GLTG Contract
-
-GLTG is the authoritative lead-time simulation service. AIVAN calls it over HTTP and stores the result trace in the project audit trail.
-
-Configure:
-
-```env
-GLTG_API_BASE_URL=http://localhost:8090
-GLTG_API_TIMEOUT_SECONDS=30
-```
-
-AIVAN may explain GLTG output, but it must not replace GLTG calculations with LLM output or local invented estimates.
-
----
-
-## ClawHub Publication Gate
-
-The plugin is ready for ClawHub publication only after both conditions pass:
-
-```text
-1. Gateway P0 package/install/load/inspect/call tests pass.
-2. Live WeChat business-flow acceptance passes end to end.
-```
-
-Dry run:
-
-```bash
-clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin --dry-run
-```
-
-Publish:
-
-```bash
-clawhub package publish integrations/openclaw-aivan-plugin --family code-plugin
-```
-
-Passing TypeScript build is not enough. The plugin is valid for public release only when OpenClaw Gateway can discover, install, load, inspect, call AIVAN, and complete the live business workflow.
-
----
-
-## Security and Deployment Notes
-
-Do not commit:
-
-```text
-.env files
-API keys
-server IPs
-private keys
-OpenClaw credentials
-WeChat session material
-database passwords
-cookies
-tokens
-```
-
-Public documentation should describe deployment topology without exposing private infrastructure details.
-
----
-
-## Disclaimer
-
-AIVAN is a decision-support and workflow-execution tool. It does not make final legal, credit, sanctions, trade-compliance, or binding commercial decisions. Users are responsible for verifying supplier information and complying with applicable laws, platform rules, and contractual obligations.
 
 ---
 
 ## License
 
-MIT License
-
-Copyright (c) 2025 Giraffe Technology
+See `LICENSE`.
