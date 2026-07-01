@@ -12,10 +12,18 @@ from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
-from aivan.integrations.gltg import GLTGClient
+from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
+from aivan.llm.policy import ExternalModelApiRequiresApprovalError
+from aivan.execution.safety import (
+    ExecutionGateResult,
+    evaluate_requirement_readiness,
+    evaluate_supplier_readiness,
+)
+from aivan.rfq.dependency_policy import classify_exception
+from aivan.rfq.operator_reply import render_operator_reply
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.client import get_openclaw_client
 from aivan.openclaw.contracts import OpenClawEvent
@@ -119,16 +127,36 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         attachments=event.attachments,
         existing_requirement=existing_requirement,
         project_id=project.project_id,
+        source_channel=event.channel,
     )
 
-    strategy = interpret_strategy(event.message_text)
-    giraffe = GiraffeDBClient(db).build_context(
-        requirement=requirement,
-        customer_id=project.customer_id,
-        user_id=event.actor_id or event.sender_id,
-    )
-    strategy = interpret_strategy(event.message_text, giraffe)
-    gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    # ---- Execution readiness gate ------------------------------------- #
+    # Nothing downstream (strategy, giraffe-db context, GLTG, graph
+    # persistence, supplier drafts) may run until the requirement is ready.
+    gate = evaluate_requirement_readiness(requirement)
+    if not gate.ready:
+        return _blocked_requirement_result(project, event, classification, requirement, gate, db)
+
+    # ---- Dependency-guarded execution --------------------------------- #
+    try:
+        strategy = interpret_strategy(event.message_text)
+        giraffe = GiraffeDBClient(db).build_context(
+            requirement=requirement,
+            customer_id=project.customer_id,
+            user_id=event.actor_id or event.sender_id,
+        )
+        strategy = interpret_strategy(event.message_text, giraffe)
+
+        supplier_feasibility, suppliers_ready = evaluate_supplier_readiness(giraffe.suppliers)
+        if not suppliers_ready and supplier_feasibility == "none":
+            return _pending_supplier_selection_result(
+                project, event, classification, requirement, strategy, db
+            )
+
+        gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    except (GLTGUnavailableError, ExternalModelApiRequiresApprovalError) as exc:
+        return _dependency_recovery_result(project, event, classification, requirement, exc, db)
+
     giraffe_db_graph: dict = {}
     giraffe_db_graph_error: dict | None = None
     try:
@@ -209,18 +237,8 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         )
 
     drafts_created = _create_supplier_email_drafts(project.project_id, event, requirement, strategy, giraffe, gltg, routing, db)
-    user_message = _build_user_control_message(requirement, strategy, gltg, routing, drafts_created)
-    user_notification = _send_user_control_notification(project.project_id, event, user_message, db)
-    event_repo.append(
-        project.project_id,
-        "USER_CONTROL_APPROVAL_REQUESTED",
-        "Prepared user IM approval summary",
-        payload={"message_text": user_message, "draft_ids": drafts_created, "notification": user_notification},
-        actor="aivan",
-    )
-    db.commit()
 
-    return RFQExecutionResult(
+    result = RFQExecutionResult(
         project_id=project.project_id,
         event_type=classification.event_type,
         action="pending_email_approval",
@@ -231,7 +249,149 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         gltg_simulation=gltg,
         supplier_routing=routing,
         drafts_created=drafts_created,
-        user_control_message=user_message,
+    )
+    # Deterministic, language-matched operator reply (no debug fields / raw ids).
+    user_message = render_operator_reply(result, requirement.language)
+    result.user_control_message = user_message
+    user_notification = _send_user_control_notification(project.project_id, event, user_message, db)
+    event_repo.append(
+        project.project_id,
+        "USER_CONTROL_APPROVAL_REQUESTED",
+        "Prepared user IM approval summary",
+        payload={"message_text": user_message, "draft_ids": drafts_created, "notification": user_notification},
+        actor="aivan",
+    )
+    db.commit()
+    return result
+
+
+def _empty_gltg_simulation() -> "GLTGSimulation":
+    """A zeroed GLTG simulation for blocked/recovery results (GLTG not run)."""
+    from aivan.schemas.rfq import GLTGSimulation
+
+    return GLTGSimulation(
+        p50_days=0,
+        p80_days=0,
+        p90_days=0,
+        minimum_feasible_days=0,
+        supplier_set_feasibility="unknown",
+        known_suppliers_first_feasibility="unknown_without_deadline",
+        public_bidding_time_cost_days=0,
+        fallback_trigger_recommendation=FallbackTrigger(),
+        selected_confidence_days=0,
+        deadline_risk_level="unknown",
+        explanation="GLTG not run (requirement/dependency gate blocked execution).",
+    )
+
+
+def _persist_raw_requirement_only(project, requirement, gate, db) -> None:
+    """Persist the raw requirement and gate state without executing anything."""
+    payload = requirement.model_dump()
+    payload["execution_gate"] = gate.model_dump()
+    ProjectRepository(db).update_requirement(project.project_id, payload)
+
+
+def _blocked_requirement_result(project, event, classification, requirement, gate, db):
+    """Requirement not ready: preserve raw evidence, ask for confirmation."""
+    _persist_raw_requirement_only(project, requirement, gate, db)
+    event_repo = ExecutionEventRepository(db)
+    event_repo.append(
+        project.project_id,
+        "EXECUTION_GATE_BLOCKED",
+        gate.blocked_reason,
+        payload=gate.model_dump(),
+        actor="aivan_execution_gate",
+    )
+    result = RFQExecutionResult(
+        project_id=project.project_id,
+        event_type=classification.event_type,
+        action=gate.next_action,
+        message=gate.blocked_reason,
+        strategy=RFQStrategy(),
+        requirement=requirement.model_dump(),
+        giraffe_context=GiraffeContext(),
+        gltg_simulation=_empty_gltg_simulation(),
+        supplier_routing=SupplierRoutingDecision(),
+        drafts_created=[],
+        user_control_message=gate.operator_message,
+    )
+    notification = _send_user_control_notification(
+        project.project_id, event, gate.operator_message, db
+    )
+    event_repo.append(
+        project.project_id,
+        "USER_CONTROL_CONFIRMATION_REQUESTED",
+        "Requested operator confirmation for blocked RFQ",
+        payload={"message_text": gate.operator_message, "notification": notification},
+        actor="aivan",
+    )
+    db.commit()
+    return result
+
+
+def _pending_supplier_selection_result(project, event, classification, requirement, strategy, db):
+    """No authorized supplier candidates: never fabricate drafts."""
+    zh = _should_use_chinese_user_message(requirement)
+    message = (
+        "未找到已授权的供应商候选，请先添加或确认供应商。AIVAN 未生成任何供应商草稿。"
+        if zh
+        else "No authorized supplier candidates found. Please add or confirm suppliers. No drafts were created."
+    )
+    event_repo = ExecutionEventRepository(db)
+    event_repo.append(
+        project.project_id,
+        "SUPPLIER_SELECTION_REQUIRED",
+        "No authorized supplier candidates available",
+        payload={"message_text": message},
+        actor="aivan_execution_gate",
+    )
+    notification = _send_user_control_notification(project.project_id, event, message, db)
+    db.commit()
+    return RFQExecutionResult(
+        project_id=project.project_id,
+        event_type=classification.event_type,
+        action="pending_supplier_selection",
+        message=message,
+        strategy=strategy,
+        requirement=requirement.model_dump(),
+        giraffe_context=GiraffeContext(),
+        gltg_simulation=_empty_gltg_simulation(),
+        supplier_routing=SupplierRoutingDecision(),
+        drafts_created=[],
+        user_control_message=message,
+    )
+
+
+def _dependency_recovery_result(project, event, classification, requirement, exc, db):
+    """Structured recovery for a dependency failure (never a generic backend error)."""
+    recovery = classify_exception(exc)
+    zh = _should_use_chinese_user_message(requirement)
+    message = recovery.operator_message(zh)
+    event_repo = ExecutionEventRepository(db)
+    event_repo.append(
+        project.project_id,
+        "DEPENDENCY_RECOVERY",
+        f"Dependency '{recovery.dependency}' unavailable: {recovery.blocked_reason}",
+        payload=recovery.model_dump(),
+        actor="aivan_dependency_policy",
+    )
+    logger.warning(
+        "Dependency recovery for project %s: %s", project.project_id, recovery.blocked_reason
+    )
+    notification = _send_user_control_notification(project.project_id, event, message, db)
+    db.commit()
+    return RFQExecutionResult(
+        project_id=project.project_id,
+        event_type=classification.event_type,
+        action=recovery.action,
+        message=recovery.blocked_reason,
+        strategy=RFQStrategy(),
+        requirement=requirement.model_dump(),
+        giraffe_context=GiraffeContext(),
+        gltg_simulation=_empty_gltg_simulation(),
+        supplier_routing=SupplierRoutingDecision(),
+        drafts_created=[],
+        user_control_message=message,
     )
 
 

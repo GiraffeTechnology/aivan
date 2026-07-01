@@ -19,6 +19,7 @@ from aivan.schemas.leadtime import LeadTimeComponent, LeadTimeEstimate
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.rfq import FallbackTrigger, GLTGSimulation, RFQStrategy
 from aivan.utils.ids import new_estimate_id
+from aivan.utils.tenant import resolve_service_tenant_id
 
 
 class GLTGUnavailableError(RuntimeError):
@@ -191,7 +192,7 @@ class GLTGClient:
             result = self._http.simulate_lead_time_v2(
                 {
                     "request_id": new_estimate_id(),
-                    "tenant_id": os.environ.get("AIVAN_TENANT_ID", "tenant_default"),
+                    "tenant_id": resolve_service_tenant_id(),
                     "source_system": "aivan",
                     "source_trace_id": new_estimate_id(),
                     "case_context": {"supplier_id": supplier["supplier_id"]},

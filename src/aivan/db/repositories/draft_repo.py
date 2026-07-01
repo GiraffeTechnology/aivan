@@ -69,6 +69,35 @@ class DraftRepository:
             self.db.flush()
         return d
 
+    def mark_approved_pending_send(self, draft_id: str, approved_by: str = "user") -> InquiryDraftRecord | None:
+        """Transition a pending_approval draft to approved_pending_send.
+
+        Used by the send-aware approval state machine so an approved-but-not-yet-
+        sent draft is distinguishable from a fully sent one. No-op if not pending.
+        """
+        d = self.get(draft_id)
+        if d is None:
+            return None
+        if d.status == "pending_approval":
+            d.status = "approved_pending_send"
+            d.approved_by = approved_by
+            d.approved_at = datetime.now(timezone.utc)
+            self.db.flush()
+        return d
+
+    def mark_send_failed(self, draft_id: str, reason: str = "") -> InquiryDraftRecord | None:
+        """Record a recoverable send failure; never leave a failed send 'approved'."""
+        d = self.get(draft_id)
+        if d is None:
+            return None
+        d.status = "send_failed"
+        if reason:
+            existing = (d.notes or "").strip()
+            note = f"send_failed_reason={reason}"
+            d.notes = f"{existing} {note}".strip() if existing else note
+        self.db.flush()
+        return d
+
     def supersede_customer_quote_drafts(self, project_id: str) -> list[str]:
         """Mark all pending_approval customer_quote_email drafts for the project as superseded.
 

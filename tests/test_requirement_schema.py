@@ -89,16 +89,27 @@ def test_buyer_requirement_extra_field():
     assert req.extra["custom_key"] == "custom_value"
 
 
-def test_deterministic_parse_canonicalizes_tokyo_and_osaka_aliases():
-    assert _deterministic_parse("交东京")["destination"] == "Tokyo"
-    assert _deterministic_parse("deliver to Tokyo")["destination"] == "Tokyo"
-    assert _deterministic_parse("shipped to Osaka")["destination"] == "Osaka"
-    assert _deterministic_parse("交大阪")["destination"] == "Osaka"
+def test_deterministic_parse_does_not_canonicalize_destination():
+    # No business-semantic hardcoding: the deterministic parser must NOT map a
+    # place surface form to a canonical destination (PRD §2.1/§2.2). Destination
+    # canonicalization requires an authoritative source (language-skill /
+    # resolver / human confirmation), never a local alias table.
+    assert "destination" not in _deterministic_parse("交东京")
+    assert "destination" not in _deterministic_parse("shipped to Osaka")
 
 
-def test_deterministic_fallback_chinese_rfq_keeps_tokyo_and_plaid(monkeypatch):
-    # With the language skill disabled and the LLM returning nothing, the local
-    # deterministic fallback must still recover the hard fields.
+def test_deterministic_parse_keeps_numeric_raw_evidence():
+    # Numeric evidence (quantity, days) is preserved; it is not business-semantic
+    # canonicalization.
+    parsed = _deterministic_parse("询价 5000 件，45天交货")
+    assert parsed["quantity"] == 5000
+    assert parsed["delivery_days"] == 45
+
+
+def test_deterministic_fallback_chinese_rfq_blocks_on_destination(monkeypatch):
+    # With language-skill disabled and the LLM returning nothing, the fallback
+    # keeps numeric evidence but leaves destination non-authoritative, so the
+    # readiness gate must block rather than canonicalize "东京" locally.
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
     monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
 
@@ -106,14 +117,18 @@ def test_deterministic_fallback_chinese_rfq_keeps_tokyo_and_plaid(monkeypatch):
         "询价 5000 件格子衬衫，45天交东京，高品质，请给我一个初步报价"
     )
 
+    from aivan.execution.safety import evaluate_requirement_readiness
+
     assert req.language == "zh"
-    assert req.destination == "Tokyo"
     assert req.quantity == 5000
     assert req.delivery_days == 45
-    assert "plaid" in req.notes
+    assert req.destination == ""  # never guessed from raw text
+    gate = evaluate_requirement_readiness(req)
+    assert not gate.ready
+    assert "destination" in gate.missing_fields
 
 
-def test_deterministic_fallback_english_osaka_keeps_osaka(monkeypatch):
+def test_deterministic_fallback_english_osaka_blocks_on_destination(monkeypatch):
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
     monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
 
@@ -121,6 +136,10 @@ def test_deterministic_fallback_english_osaka_keeps_osaka(monkeypatch):
         "Inquiry: Order 5000 plaid shirts, to be shipped to Osaka within 45 days."
     )
 
-    assert req.destination == "Osaka"
+    from aivan.execution.safety import evaluate_requirement_readiness
+
     assert req.delivery_days == 45
-    assert "plaid" in req.notes
+    assert req.destination == ""
+    gate = evaluate_requirement_readiness(req)
+    assert not gate.ready
+    assert "destination" in gate.missing_fields
