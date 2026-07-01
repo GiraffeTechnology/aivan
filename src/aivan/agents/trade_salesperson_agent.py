@@ -91,6 +91,7 @@ def _handle_customer_message(event, project_id, project, db_session) -> AgentTur
         attachments=event.attachments,
         existing_requirement=existing_req,
         project_id=project_id,
+        source_channel=event.channel,
     )
 
     project_repo.update_requirement(project_id, req.model_dump())

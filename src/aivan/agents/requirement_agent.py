@@ -4,6 +4,7 @@ from aivan.schemas.requirement import BuyerRequirement, MissingField
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import REQUIREMENT_STRUCTURING_SYSTEM
 from aivan.utils.language import detect_language
+from aivan.integrations.language_skill import apply_to_requirement, canonicalize_rfq
 
 
 def _coerce_nulls(data: dict, model: type[BaseModel]) -> dict:
@@ -115,9 +116,23 @@ def structure_customer_requirement_with_llm(
     attachments: list | None = None,
     existing_requirement: BuyerRequirement | None = None,
     project_id: str = "",
+    source_channel: str | None = None,
 ) -> BuyerRequirement:
-    """Structure a customer requirement using LLM, with deterministic fallback."""
+    """Structure a customer requirement using LLM, with deterministic fallback.
+
+    When the shared giraffe-language-skill service is enabled
+    (``AIVAN_LANGUAGE_SKILL_ENABLED=true``), the raw message is first
+    canonicalized there. Its deterministic extraction is authoritative for the
+    explicit business facts a small local LLM tends to drop (quantity,
+    destination, lead time, product), and the full provenance chain is recorded
+    under ``requirement.extra["language_skill"]``. The call is fail-soft.
+    """
     language = detect_language(raw_text)
+
+    # Canonicalize inbound RFQ via the language skill (no-op when disabled).
+    canonicalization = canonicalize_rfq(
+        raw_text, source_channel=source_channel, tenant_id=project_id or "default"
+    )
 
     attach_note = ""
     if attachments:
@@ -154,6 +169,12 @@ def structure_customer_requirement_with_llm(
     safe_data = {k: v for k, v in result.items() if k in BuyerRequirement.model_fields and k not in ("missing_fields", "project_id", "raw_text")}
     safe_data = _coerce_nulls(safe_data, BuyerRequirement)
     req = BuyerRequirement(project_id=project_id, raw_text=raw_text, **safe_data)
+
+    # Overlay the language-skill canonicalization (authoritative for explicit
+    # business facts) before computing missing fields, so clarification only
+    # asks for what is genuinely absent.
+    if canonicalization:
+        apply_to_requirement(req, canonicalization)
 
     req.missing_fields = _detect_missing_fields(req)
 
