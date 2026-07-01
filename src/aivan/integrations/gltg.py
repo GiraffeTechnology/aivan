@@ -21,6 +21,18 @@ from aivan.schemas.rfq import FallbackTrigger, GLTGSimulation, RFQStrategy
 from aivan.utils.ids import new_estimate_id
 
 
+def _resolve_gltg_tenant() -> str:
+    """Resolve the tenant for a GLTG v2 simulation call.
+
+    Fails closed rather than defaulting to a shared placeholder tenant, so a
+    misconfigured deployment cannot scope another tenant's behavioral stats or
+    persist runs under the wrong tenant.
+    """
+    from aivan.tenancy.resolver import resolve_service_tenant
+
+    return resolve_service_tenant(context="gltg_v2_simulation")
+
+
 class GLTGUnavailableError(RuntimeError):
     """Raised when the GLTG service cannot be reached or returns an error.
 
@@ -191,7 +203,7 @@ class GLTGClient:
             result = self._http.simulate_lead_time_v2(
                 {
                     "request_id": new_estimate_id(),
-                    "tenant_id": os.environ.get("AIVAN_TENANT_ID", "tenant_default"),
+                    "tenant_id": _resolve_gltg_tenant(),
                     "source_system": "aivan",
                     "source_trace_id": new_estimate_id(),
                     "case_context": {"supplier_id": supplier["supplier_id"]},

@@ -204,7 +204,10 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
     if not base_url:
         return {}
 
-    tenant_id = os.environ.get("AIVAN_TENANT_ID") or os.environ.get("GIRAFFE_DB_TENANT_ID") or "server_e2e"
+    # Fail closed: never stamp giraffe-db business facts under a guessed tenant.
+    from aivan.tenancy.resolver import resolve_service_tenant
+
+    tenant_id = resolve_service_tenant(context="giraffe_db_rfq_graph_write")
     headers = _giraffe_db_service_headers(tenant_id)
     timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
 

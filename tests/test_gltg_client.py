@@ -139,6 +139,8 @@ def test_facade_uses_v2_when_configured(monkeypatch):
     from aivan.schemas.rfq import RFQStrategy
 
     monkeypatch.setenv("GLTG_API_VERSION", "v2")
+    # GLTG v2 now requires an explicit tenant (no silent placeholder fallback).
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-alpha")
     cap: dict = {}
     facade = GLTGFacade(http=_client(cap))
 
