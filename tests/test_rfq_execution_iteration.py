@@ -114,7 +114,13 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert payload["strategy"]["priority"] == "speed"
     assert payload["gltg_simulation"]["p80_days"] > 0
     assert payload["drafts_created"]
-    assert "pending approval" in payload["user_control_message"].lower()
+    # The user command is Chinese, so the operator summary is rendered in Chinese.
+    user_control_message = payload["user_control_message"]
+    assert (
+        "pending approval" in user_control_message.lower()
+        or "等待人工审批" in user_control_message
+        or "仍需人工审批" in user_control_message
+    )
 
     drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
     supplier_drafts = [draft for draft in drafts if draft["target_role"] == "supplier"]
@@ -126,6 +132,35 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert {draft["draft_type"] for draft in supplier_drafts} == {"supplier_inquiry_email"}
     assert user_notifications[0]["draft_type"] == "approval_request_im"
     assert user_notifications[0]["status"] == "sent"
+
+
+def test_chinese_user_control_message_is_localized_and_pending_approval():
+    import types
+
+    from aivan.execution.rfq_execution import _build_user_control_message
+    from aivan.schemas.rfq import RFQStrategy, SupplierRoutingDecision
+
+    requirement = BuyerRequirement(
+        project_id="p1",
+        raw_text="帮我询价 10000 件白色纯棉衬衣，45 天内交东京，高品质。",
+        language="zh",
+        product_type="shirt",
+        quantity=10000,
+        destination="Tokyo",
+        delivery_days=45,
+    )
+    strategy = RFQStrategy(priority="speed", supplier_scope="known_suppliers_first")
+    gltg = types.SimpleNamespace(selected_confidence_days=40, deadline_risk_level="medium")
+    routing = SupplierRoutingDecision(selected_supplier_ids=["sup_001", "sup_002"])
+
+    message = _build_user_control_message(
+        requirement, strategy, gltg, routing, ["draft_1", "draft_2"]
+    )
+
+    # Chinese operator summary must still signal that the outbound drafts are
+    # blocked on human approval.
+    assert "等待人工审批" in message or "仍需人工审批" in message
+    assert "Tokyo" in message
 
 
 def test_giraffe_db_graph_persist_failure_does_not_block_pending_drafts(api_client, api_db, monkeypatch):

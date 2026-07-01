@@ -69,6 +69,27 @@ CNC_REQUIRED_FIELDS = [
     ("delivery_days", "Delivery deadline", "需要多少天内交货？"),
 ]
 
+# Deterministic destination aliases (surface form -> canonical English city).
+# The giraffe-language-skill overlay is authoritative when enabled; these keep
+# the local fallback able to recognize common destinations — including Tokyo /
+# Osaka — when the service is disabled or the LLM drops the field.
+CITY_ALIASES = [
+    ("Vancouver", "Vancouver"),
+    ("温哥华", "Vancouver"),
+    ("Los Angeles", "Los Angeles"),
+    ("洛杉矶", "Los Angeles"),
+    ("New York", "New York"),
+    ("纽约", "New York"),
+    ("London", "London"),
+    ("伦敦", "London"),
+    ("Shanghai", "Shanghai"),
+    ("上海", "Shanghai"),
+    ("Tokyo", "Tokyo"),
+    ("东京", "Tokyo"),
+    ("Osaka", "Osaka"),
+    ("大阪", "Osaka"),
+]
+
 def _deterministic_parse(raw_text: str) -> dict:
     """Fallback: detect basic fields from raw text without LLM."""
     import re
@@ -93,10 +114,12 @@ def _deterministic_parse(raw_text: str) -> dict:
         result["fabric_material"] = "100% cotton"
     if "white" in text_lower or "白色" in text_lower:
         result["color"] = "white"
+    if "plaid" in text_lower or "checkered" in text_lower or "格子" in raw_text:
+        result["notes"] = "plaid/checkered pattern"
 
-    for city in ["Vancouver", "Los Angeles", "New York", "London", "Shanghai", "温哥华", "洛杉矶", "纽约"]:
-        if city.lower() in text_lower or city in raw_text:
-            result["destination"] = city
+    for alias, destination in CITY_ALIASES:
+        if alias.lower() in text_lower or alias in raw_text:
+            result["destination"] = destination
             break
 
     day_match = re.search(r'(\d+)\s*(?:days?|天|日)', text_lower)

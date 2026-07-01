@@ -128,6 +128,26 @@ def test_requirement_agent_uses_language_skill(enabled_service, monkeypatch):
     assert req.extra["language_skill"]["validation_status"] == "valid"
 
 
+def test_chinese_rfq_language_skill_keeps_tokyo_plaid_and_quality(enabled_service, monkeypatch):
+    # Canonical non-English path: the language skill (not an AIVAN-internal
+    # translation layer) supplies Tokyo, the plaid modifier, and the high
+    # quality level. Force the local LLM to return nothing so the overlay is the
+    # authoritative source.
+    from aivan.agents import requirement_agent
+
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text=ZH_RFQ, project_id="p1", source_channel="wechat"
+    )
+
+    assert req.language == "zh"
+    assert req.destination == "Tokyo"
+    assert req.extra["product_modifier"] == ["plaid"]
+    assert req.extra["quality_level"] == "high"
+    assert req.extra["language_skill"]["structured"]["quality_level"] == "high"
+
+
 def test_requirement_agent_coerces_malformed_llm_string_fields(monkeypatch):
     from aivan.agents import requirement_agent
 
