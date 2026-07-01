@@ -128,6 +128,35 @@ def test_requirement_agent_uses_language_skill(enabled_service, monkeypatch):
     assert req.extra["language_skill"]["validation_status"] == "valid"
 
 
+def test_requirement_agent_coerces_malformed_llm_string_fields(monkeypatch):
+    from aivan.agents import requirement_agent
+
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
+    monkeypatch.setattr(
+        requirement_agent,
+        "llm_complete_json",
+        lambda *a, **k: {
+            "category": "apparel",
+            "product_type": "shirt",
+            "quantity": 5000,
+            "delivery_days": 45,
+            "destination": "Osaka",
+            "notes": ["Order: 5000 plaid shirts", "Shipped to Osaka within 45 days"],
+            "confidence": 0.7,
+            "language": "en",
+        },
+    )
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text="Inquiry: Order 5000 plaid shirts, to be shipped to Osaka within 45 days.",
+        project_id="p1",
+        source_channel="email",
+    )
+
+    assert req.destination == "Osaka"
+    assert req.notes == "Order: 5000 plaid shirts; Shipped to Osaka within 45 days"
+
+
 def test_overlay_does_not_null_existing_when_service_omits(enabled_service):
     # A structure response missing a field must not wipe an existing value.
     req = BuyerRequirement(project_id="p1", raw_text=ZH_RFQ, color="white")

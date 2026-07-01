@@ -1,4 +1,6 @@
 from __future__ import annotations
+import json
+
 from pydantic import BaseModel
 from aivan.schemas.requirement import BuyerRequirement, MissingField
 from aivan.llm.gateway import llm_complete_json
@@ -26,6 +28,25 @@ def _coerce_nulls(data: dict, model: type[BaseModel]) -> dict:
         default = field_info.get_default(call_default_factory=True)
         if default is not None:
             result[field_name] = default
+    return result
+
+
+def _coerce_field_shapes(data: dict, model: type[BaseModel]) -> dict:
+    """Normalize common malformed LLM field shapes before Pydantic validation."""
+    result = dict(data)
+    for field_name, field_info in model.model_fields.items():
+        if field_name not in result:
+            continue
+        value = result[field_name]
+        if value is None:
+            continue
+        if field_info.annotation is str and not isinstance(value, str):
+            if isinstance(value, list):
+                result[field_name] = "; ".join(str(item) for item in value if item is not None)
+            elif isinstance(value, dict):
+                result[field_name] = json.dumps(value, ensure_ascii=False)
+            else:
+                result[field_name] = str(value)
     return result
 
 APPAREL_REQUIRED_FIELDS = [
@@ -168,6 +189,7 @@ def structure_customer_requirement_with_llm(
 
     safe_data = {k: v for k, v in result.items() if k in BuyerRequirement.model_fields and k not in ("missing_fields", "project_id", "raw_text")}
     safe_data = _coerce_nulls(safe_data, BuyerRequirement)
+    safe_data = _coerce_field_shapes(safe_data, BuyerRequirement)
     req = BuyerRequirement(project_id=project_id, raw_text=raw_text, **safe_data)
 
     # Overlay the language-skill canonicalization (authoritative for explicit
