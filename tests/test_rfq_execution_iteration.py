@@ -128,6 +128,34 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert user_notifications[0]["status"] == "sent"
 
 
+def test_giraffe_db_graph_persist_failure_does_not_block_pending_drafts(api_client, api_db, monkeypatch):
+    import aivan.execution.rfq_execution as rfq_execution
+
+    def fail_persist(**kwargs):
+        raise RuntimeError("giraffe-db unavailable")
+
+    monkeypatch.setattr(rfq_execution, "persist_rfq_gltg_graph", fail_persist)
+
+    response = api_client.post("/api/rfq/create-from-event", json=_user_rfq_event())
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "pending_email_approval"
+    assert payload["drafts_created"]
+
+    drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
+    supplier_drafts = [draft for draft in drafts if draft["target_role"] == "supplier"]
+    assert supplier_drafts
+    assert {draft["status"] for draft in supplier_drafts} == {"pending_approval"}
+
+    from aivan.db.repositories.event_repo import ExecutionEventRepository
+
+    events = ExecutionEventRepository(api_db).list_for_project(payload["project_id"])
+    failure_events = [event for event in events if event.event_type == "GIRAFFE_DB_GRAPH_PERSIST_FAILED"]
+    assert failure_events
+    assert failure_events[0].payload_json["error_type"] == "RuntimeError"
+
+
 def test_openclaw_events_uses_same_rfq_chain(api_client):
     response = api_client.post("/api/openclaw/events", json=_user_rfq_event())
 

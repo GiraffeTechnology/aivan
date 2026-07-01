@@ -155,3 +155,22 @@ def test_facade_uses_v2_when_configured(monkeypatch):
     assert result.assessment_packet["follow_up_questions"]
     assert result.p50_days == 32
     assert result.selected_confidence_days == 45
+
+
+def test_giraffe_db_headers_include_service_auth_secret(monkeypatch):
+    from aivan.integrations.giraffe_db import _giraffe_db_service_headers
+
+    monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "svc-test-secret")
+
+    assert _giraffe_db_service_headers("tenant-alpha") == {
+        "X-Service-Tenant-ID": "tenant-alpha",
+        "X-Service-Auth": "svc-test-secret",
+    }
+
+
+def test_giraffe_db_headers_omit_empty_service_auth(monkeypatch):
+    from aivan.integrations.giraffe_db import _giraffe_db_service_headers
+
+    monkeypatch.delenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", raising=False)
+
+    assert _giraffe_db_service_headers("tenant-alpha") == {"X-Service-Tenant-ID": "tenant-alpha"}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy.orm import Session
 
 from aivan.schemas.requirement import BuyerRequirement
@@ -179,6 +181,14 @@ class GiraffeDBClient:
         return flags
 
 
+def _giraffe_db_service_headers(tenant_id: str) -> dict[str, str]:
+    headers = {"X-Service-Tenant-ID": tenant_id}
+    service_auth = os.environ.get("GIRAFFE_DB_SERVICE_AUTH_SECRET")
+    if service_auth:
+        headers["X-Service-Auth"] = service_auth
+    return headers
+
+
 def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, gltg) -> dict:
     """Persist a pre-PO RFQ/GLTG decision graph to giraffe-db over HTTP.
 
@@ -186,7 +196,6 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
     existing in-process facade. Server E2E enables this with
     AIVAN_PERSIST_GIRAFFE_DB_GRAPH=true.
     """
-    import os
     import httpx
 
     if os.environ.get("AIVAN_PERSIST_GIRAFFE_DB_GRAPH", "false").lower() != "true":
@@ -196,7 +205,7 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         return {}
 
     tenant_id = os.environ.get("AIVAN_TENANT_ID") or os.environ.get("GIRAFFE_DB_TENANT_ID") or "server_e2e"
-    headers = {"X-Service-Tenant-ID": tenant_id}
+    headers = _giraffe_db_service_headers(tenant_id)
     timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
 
     def post(client: httpx.Client, path: str, payload: dict) -> dict:

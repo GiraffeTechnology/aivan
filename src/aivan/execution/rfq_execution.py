@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
@@ -30,6 +32,8 @@ from aivan.schemas.rfq import (
     RFQStrategy,
     SupplierRoutingDecision,
 )
+
+logger = logging.getLogger(__name__)
 
 CLASSIFICATION_SYSTEM = """
 You classify AIVAN private-domain trade events. Return JSON only.
@@ -125,13 +129,25 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     )
     strategy = interpret_strategy(event.message_text, giraffe)
     gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
-    giraffe_db_graph = persist_rfq_gltg_graph(
-        event=event,
-        project_id=project.project_id,
-        requirement=requirement,
-        strategy=strategy,
-        gltg=gltg,
-    )
+    giraffe_db_graph: dict = {}
+    giraffe_db_graph_error: dict | None = None
+    try:
+        giraffe_db_graph = persist_rfq_gltg_graph(
+            event=event,
+            project_id=project.project_id,
+            requirement=requirement,
+            strategy=strategy,
+            gltg=gltg,
+        )
+    except Exception as exc:
+        giraffe_db_graph_error = {
+            "error_type": exc.__class__.__name__,
+            "message": str(exc),
+        }
+        logger.exception(
+            "Failed to persist giraffe-db RFQ/GLTG graph for project %s",
+            project.project_id,
+        )
     routing = _select_suppliers(giraffe, strategy)
 
     project_payload = requirement.model_dump()
@@ -181,6 +197,14 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
             "GIRAFFE_DB_GRAPH_PERSISTED",
             f"Persisted pre-PO transaction graph {giraffe_db_graph.get('procurement_case_id')}",
             payload=giraffe_db_graph,
+            actor="giraffe_db",
+        )
+    if giraffe_db_graph_error:
+        event_repo.append(
+            project.project_id,
+            "GIRAFFE_DB_GRAPH_PERSIST_FAILED",
+            "Failed to persist pre-PO transaction graph; RFQ workflow continued.",
+            payload=giraffe_db_graph_error,
             actor="giraffe_db",
         )
 
