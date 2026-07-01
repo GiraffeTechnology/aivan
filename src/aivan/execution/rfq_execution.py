@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
@@ -9,7 +11,7 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
-from aivan.integrations.giraffe_db import GiraffeDBClient
+from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
 from aivan.integrations.gltg import GLTGClient
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.schemas.leadtime import LeadTimeEstimate
@@ -30,6 +32,8 @@ from aivan.schemas.rfq import (
     RFQStrategy,
     SupplierRoutingDecision,
 )
+
+logger = logging.getLogger(__name__)
 
 CLASSIFICATION_SYSTEM = """
 You classify AIVAN private-domain trade events. Return JSON only.
@@ -125,6 +129,25 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     )
     strategy = interpret_strategy(event.message_text, giraffe)
     gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    giraffe_db_graph: dict = {}
+    giraffe_db_graph_error: dict | None = None
+    try:
+        giraffe_db_graph = persist_rfq_gltg_graph(
+            event=event,
+            project_id=project.project_id,
+            requirement=requirement,
+            strategy=strategy,
+            gltg=gltg,
+        )
+    except Exception as exc:
+        giraffe_db_graph_error = {
+            "error_type": exc.__class__.__name__,
+            "message": str(exc),
+        }
+        logger.exception(
+            "Failed to persist giraffe-db RFQ/GLTG graph for project %s",
+            project.project_id,
+        )
     routing = _select_suppliers(giraffe, strategy)
 
     project_payload = requirement.model_dump()
@@ -134,6 +157,8 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         "risk_flags": len(giraffe.risk_flags),
     }
     project_payload["gltg_simulation"] = gltg.model_dump()
+    if giraffe_db_graph:
+        project_payload["giraffe_db_graph"] = giraffe_db_graph
     ProjectRepository(db).update_requirement(project.project_id, project_payload)
     _learn_strategy_preference(event.actor_id or event.sender_id or "default", strategy, db)
 
@@ -166,6 +191,22 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         payload=gltg.model_dump(),
         actor="gltg",
     )
+    if giraffe_db_graph:
+        event_repo.append(
+            project.project_id,
+            "GIRAFFE_DB_GRAPH_PERSISTED",
+            f"Persisted pre-PO transaction graph {giraffe_db_graph.get('procurement_case_id')}",
+            payload=giraffe_db_graph,
+            actor="giraffe_db",
+        )
+    if giraffe_db_graph_error:
+        event_repo.append(
+            project.project_id,
+            "GIRAFFE_DB_GRAPH_PERSIST_FAILED",
+            "Failed to persist pre-PO transaction graph; RFQ workflow continued.",
+            payload=giraffe_db_graph_error,
+            actor="giraffe_db",
+        )
 
     drafts_created = _create_supplier_email_drafts(project.project_id, event, requirement, strategy, giraffe, gltg, routing, db)
     user_message = _build_user_control_message(requirement, strategy, gltg, routing, drafts_created)

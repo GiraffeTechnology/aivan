@@ -12,6 +12,8 @@ it never silently substitutes a locally computed estimate.
 
 from __future__ import annotations
 
+import os
+
 from aivan.integrations.gltg_client import GLTGClient as GLTGHttpClient
 from aivan.schemas.leadtime import LeadTimeComponent, LeadTimeEstimate
 from aivan.schemas.requirement import BuyerRequirement
@@ -46,6 +48,7 @@ class GLTGClient:
             logistics_preference=requirement.logistics_preference or "sea",
             deadline_days=requirement.delivery_days,
             capacity_per_day=None,
+            lead_time_confidence=strategy.lead_time_confidence,
         )
 
         p50 = int(data["p50_days"])
@@ -77,6 +80,12 @@ class GLTGClient:
                 f"GLTG estimate via standalone service: p50={p50}d, p80={p80}d, p90={p90}d; "
                 f"deadline risk={risk}."
             ),
+            gltg_run_id=data.get("gltg_run_id"),
+            source_api_version=data.get("source_api_version", "v1"),
+            assessment_schema_version=data.get("assessment_schema_version"),
+            assessment_packet=data.get("assessment_packet") or {},
+            manual_review_required=data.get("manual_review_required"),
+            fallback_supplier_required=data.get("fallback_supplier_required"),
         )
 
     # ------------------------------------------------------------------ #
@@ -99,6 +108,7 @@ class GLTGClient:
             logistics_preference=getattr(requirement, "logistics_preference", "sea") or "sea",
             deadline_days=deadline_days,
             capacity_per_day=capacity,
+            lead_time_confidence="P80",
         )
 
         p50 = int(data["p50_days"])
@@ -165,6 +175,7 @@ class GLTGClient:
         logistics_preference: str,
         deadline_days: int | None,
         capacity_per_day: int | None,
+        lead_time_confidence: str = "P80",
     ) -> dict:
         order = {
             "product_type": "apparel",
@@ -176,10 +187,61 @@ class GLTGClient:
         # A single requirement-level supplier (no stage data) -> GLTG applies its
         # own baseline stage estimates. AIVAN never computes stages locally.
         supplier = {"supplier_id": "requirement", "capacity_per_day": capacity_per_day, "confidence": 0.7}
+        if os.environ.get("GLTG_API_VERSION", "v1").lower() == "v2":
+            result = self._http.simulate_lead_time_v2(
+                {
+                    "request_id": new_estimate_id(),
+                    "tenant_id": os.environ.get("AIVAN_TENANT_ID", "tenant_default"),
+                    "source_system": "aivan",
+                    "source_trace_id": new_estimate_id(),
+                    "case_context": {"supplier_id": supplier["supplier_id"]},
+                    "order": {
+                        "product_type": order["product_type"],
+                        "quantity": quantity,
+                        "quantity_unit": "pcs",
+                        "destination": destination,
+                        "logistics_mode": logistics_preference,
+                        "deadline_days": deadline_days,
+                    },
+                    "supplier": supplier,
+                    "constraints": {"lead_time_confidence": lead_time_confidence},
+                }
+            )
+            if not result.ok or result.data is None:
+                raise GLTGUnavailableError(result.error or "GLTG v2 returned no data")
+            return self._normalize_v2_result(result.data)
+
         result = self._http.estimate_lead_time(order=order, suppliers=[supplier], constraints={})
         if not result.ok or result.data is None:
             raise GLTGUnavailableError(result.error or "GLTG returned no data")
         return result.data
+
+    @staticmethod
+    def _normalize_v2_result(data: dict) -> dict:
+        quantiles = data.get("quantiles") or {}
+        risk = data.get("risk") or {}
+        p50 = quantiles.get("p50_days")
+        p80 = quantiles.get("p80_days")
+        p90 = quantiles.get("p90_days")
+        selected = risk.get("selected_confidence_days") or p80
+        if p50 is None or p80 is None or p90 is None or selected is None:
+            raise GLTGUnavailableError("GLTG v2 response missing quantiles")
+        return {
+            "source_api_version": "v2",
+            "gltg_run_id": data.get("gltg_run_id"),
+            "assessment_schema_version": data.get("assessment_schema_version"),
+            "assessment_packet": data.get("assessment_packet") or {},
+            "manual_review_required": data.get("manual_review_required"),
+            "fallback_supplier_required": data.get("fallback_supplier_required"),
+            "estimated_lead_time_days": selected,
+            "p50_days": p50,
+            "p80_days": p80,
+            "p90_days": p90,
+            "minimum_feasible_days": p50,
+            "risk_level": risk.get("deadline_risk_level", "unknown"),
+            "feasible": risk.get("deadline_feasible"),
+            "calculation_trace": [],
+        }
 
     @staticmethod
     def _feasibility(confidence_days: int, deadline_days: int | None) -> str:

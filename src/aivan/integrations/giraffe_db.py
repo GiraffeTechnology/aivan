@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy.orm import Session
 
 from aivan.schemas.requirement import BuyerRequirement
@@ -177,3 +179,151 @@ class GiraffeDBClient:
             for tag in supplier.risk_tags:
                 flags.append({"supplier_id": supplier.supplier_id, "risk_flag": tag})
         return flags
+
+
+def _giraffe_db_service_headers(tenant_id: str) -> dict[str, str]:
+    headers = {"X-Service-Tenant-ID": tenant_id}
+    service_auth = os.environ.get("GIRAFFE_DB_SERVICE_AUTH_SECRET")
+    if service_auth:
+        headers["X-Service-Auth"] = service_auth
+    return headers
+
+
+def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, gltg) -> dict:
+    """Persist a pre-PO RFQ/GLTG decision graph to giraffe-db over HTTP.
+
+    Disabled by default so local unit tests and offline development keep using the
+    existing in-process facade. Server E2E enables this with
+    AIVAN_PERSIST_GIRAFFE_DB_GRAPH=true.
+    """
+    import httpx
+
+    if os.environ.get("AIVAN_PERSIST_GIRAFFE_DB_GRAPH", "false").lower() != "true":
+        return {}
+    base_url = os.environ.get("GIRAFFE_DB_BASE_URL", "").rstrip("/")
+    if not base_url:
+        return {}
+
+    tenant_id = os.environ.get("AIVAN_TENANT_ID") or os.environ.get("GIRAFFE_DB_TENANT_ID") or "server_e2e"
+    headers = _giraffe_db_service_headers(tenant_id)
+    timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
+
+    def post(client: httpx.Client, path: str, payload: dict) -> dict:
+        response = client.post(f"{base_url}{path}", json=payload, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
+    buyer_name = event.sender_display_name or event.sender_id or "AIVAN Buyer"
+    requirement_payload = requirement.model_dump() if hasattr(requirement, "model_dump") else dict(requirement or {})
+    strategy_payload = strategy.model_dump() if hasattr(strategy, "model_dump") else dict(strategy or {})
+    gltg_payload = gltg.model_dump() if hasattr(gltg, "model_dump") else dict(gltg or {})
+
+    with httpx.Client(timeout=timeout) as client:
+        buyer = post(client, "/api/data/buyers", {"buyer_name": buyer_name, "metadata_json": {"aivan_sender_id": event.sender_id}})
+        buyer_id = buyer["buyer_id"]
+        case = post(
+            client,
+            "/api/data/procurement-cases",
+            {
+                "buyer_id": buyer_id,
+                "source_channel": event.channel,
+                "source_conversation_id": event.conversation_id,
+                "source_event_id": event.message_id or None,
+                "status": "open",
+                "metadata_json": {"aivan_project_id": project_id, "requirement": requirement_payload},
+            },
+        )
+        procurement_case_id = case["procurement_case_id"]
+        rfq = post(
+            client,
+            "/api/data/rfqs",
+            {
+                "procurement_case_id": procurement_case_id,
+                "buyer_id": buyer_id,
+                "title": f"AIVAN RFQ {project_id}",
+                "status": "draft_pending_approval",
+                "metadata_json": {"aivan_project_id": project_id, "requirement": requirement_payload, "strategy": strategy_payload},
+            },
+        )
+        rfq_id = rfq["id"]
+        gltg_run = post(
+            client,
+            "/api/data/gltg-simulation-runs",
+            {
+                "procurement_case_id": procurement_case_id,
+                "rfq_id": rfq_id,
+                "buyer_id": buyer_id,
+                "final_p50_days": gltg_payload.get("p50_days"),
+                "final_p80_days": gltg_payload.get("p80_days"),
+                "final_p90_days": gltg_payload.get("p90_days"),
+                "deadline_risk_level": gltg_payload.get("deadline_risk_level"),
+                "output_json": gltg_payload,
+                "explanation_json": {
+                    "source": "aivan",
+                    "source_api_version": gltg_payload.get("source_api_version"),
+                    "gltg_service_run_id": gltg_payload.get("gltg_run_id"),
+                    "assessment_packet": gltg_payload.get("assessment_packet") or {},
+                },
+            },
+        )
+        gltg_run_id = gltg_run["gltg_run_id"]
+        pricing = post(
+            client,
+            "/api/data/pricing-decision-inputs",
+            {
+                "procurement_case_id": procurement_case_id,
+                "rfq_id": rfq_id,
+                "buyer_id": buyer_id,
+                "gltg_run_id": gltg_run_id,
+                "input_json": {"source": "aivan", "strategy": strategy_payload},
+                "manual_review_required": True,
+                "explanation_json": {"source": "aivan", "reason": "pre-PO RFQ pending human approval"},
+            },
+        )
+        pricing_input_id = pricing["pricing_input_id"]
+        decision = post(
+            client,
+            "/api/data/case-decision-options",
+            {
+                "procurement_case_id": procurement_case_id,
+                "rfq_id": rfq_id,
+                "buyer_id": buyer_id,
+                "option_label": "known_suppliers_first",
+                "option_type": strategy_payload.get("supplier_scope", "known_suppliers_first"),
+                "gltg_run_ids_json": [gltg_run_id],
+                "pricing_input_ids_json": [pricing_input_id],
+                "estimated_lead_time_days": gltg_payload.get("selected_confidence_days"),
+                "p50_days": gltg_payload.get("p50_days"),
+                "p80_days": gltg_payload.get("p80_days"),
+                "p90_days": gltg_payload.get("p90_days"),
+                "deadline_risk_level": gltg_payload.get("deadline_risk_level"),
+                "recommendation_score": 0.7,
+                "recommendation_reason_json": {"source": "aivan", "human_approval_required": True},
+                "tradeoff_summary_json": {"gltg": gltg_payload},
+                "status": "draft",
+            },
+        )
+        comparison = post(
+            client,
+            "/api/data/quote-comparison-snapshots",
+            {
+                "procurement_case_id": procurement_case_id,
+                "rfq_id": rfq_id,
+                "buyer_id": buyer_id,
+                "snapshot_type": "pre_po_gltg_decision",
+                "gltg_run_ids_json": [gltg_run_id],
+                "pricing_input_ids_json": [pricing_input_id],
+                "comparison_json": {"source": "aivan", "gltg": gltg_payload},
+                "ranking_json": {"top_decision_option_id": decision["decision_option_id"]},
+            },
+        )
+
+    return {
+        "tenant_id": tenant_id,
+        "procurement_case_id": procurement_case_id,
+        "rfq_id": rfq_id,
+        "gltg_run_id": gltg_run_id,
+        "pricing_input_id": pricing_input_id,
+        "decision_option_id": decision["decision_option_id"],
+        "comparison_snapshot_id": comparison["comparison_snapshot_id"],
+    }
