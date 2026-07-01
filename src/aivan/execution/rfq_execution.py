@@ -503,6 +503,15 @@ def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, 
     return "\n".join(lines)
 
 
+def _should_use_chinese_user_message(requirement: BuyerRequirement) -> bool:
+    return requirement.language == "zh" or any("\u4e00" <= ch <= "\u9fff" for ch in requirement.raw_text)
+
+
+def _risk_label_for_user(risk_level: str) -> str:
+    labels = {"low": "低", "medium": "中", "high": "高", "critical": "严重", "unknown": "未知"}
+    return labels.get((risk_level or "unknown").lower(), risk_level or "未知")
+
+
 def _build_user_control_message(
     requirement: BuyerRequirement,
     strategy: RFQStrategy,
@@ -510,6 +519,16 @@ def _build_user_control_message(
     routing: SupplierRoutingDecision,
     drafts_created: list[str],
 ) -> str:
+    if _should_use_chinese_user_message(requirement):
+        deadline = f"目标交期 {requirement.delivery_days} 天" if requirement.delivery_days else "目标交期待确认"
+        return (
+            f"RFQ 已创建，等待人工审批：{requirement.quantity or 'TBD'} {requirement.quantity_unit} "
+            f"{requirement.product_type or requirement.category or 'product'}，目的地 {requirement.destination or 'TBD'}，{deadline}。"
+            f"策略={strategy.priority}/{strategy.supplier_scope}，GLTG {strategy.lead_time_confidence}="
+            f"{gltg.selected_confidence_days} 天，交期风险={_risk_label_for_user(gltg.deadline_risk_level)}。"
+            f"已生成 {len(routing.selected_supplier_ids)} 封供应商邮件草稿，仍需人工审批后才会发送：{', '.join(drafts_created)}。"
+        )
+
     return (
         f"RFQ ready for approval: {requirement.quantity or 'TBD'} {requirement.quantity_unit} "
         f"{requirement.color} {requirement.product_type or requirement.category} to {requirement.destination or 'TBD'}. "

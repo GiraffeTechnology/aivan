@@ -114,7 +114,12 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert payload["strategy"]["priority"] == "speed"
     assert payload["gltg_simulation"]["p80_days"] > 0
     assert payload["drafts_created"]
-    assert "pending approval" in payload["user_control_message"].lower()
+    user_control_message = payload["user_control_message"]
+    assert (
+        "pending approval" in user_control_message.lower()
+        or "等待人工审批" in user_control_message
+        or "仍需人工审批" in user_control_message
+    )
 
     drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
     supplier_drafts = [draft for draft in drafts if draft["target_role"] == "supplier"]

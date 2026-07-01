@@ -5,6 +5,11 @@ material_spec, tolerance, surface_finish, cad_attachment, process_type, notes,
 missing_fields (list of {field_name, description, question}), confidence (0-1), language (en/zh).
 Do NOT invent values. Use null for unknown fields. List missing_fields for anything required but unspecified."""
 
+REQUIREMENT_TRANSLATION_SYSTEM = """You translate non-English customer trade inquiries into English before RFQ extraction.
+Preserve all hard facts exactly: quantities, units, product names, deadlines, destinations, materials, quality requirements,
+prices, currencies, incoterms, and logistics preferences.
+Return JSON with: translated_text (English only), confidence (0-1). Do NOT add or change facts."""
+
 CLARIFICATION_SYSTEM = """You are a professional trade salesperson. Generate concise clarification questions in the customer's language
 for missing fields. Be polite and professional. Return JSON with: message_text (the full message to send), missing_fields (list of {field_name, question})."""
 
