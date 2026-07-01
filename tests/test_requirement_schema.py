@@ -1,5 +1,10 @@
 """Tests for aiven.schemas.requirement — BuyerRequirement and MissingField."""
 import pytest
+from aivan.agents import requirement_agent
+from aivan.agents.requirement_agent import (
+    _deterministic_parse,
+    structure_customer_requirement_with_llm,
+)
 from aivan.schemas.requirement import BuyerRequirement, MissingField
 
 
@@ -82,3 +87,40 @@ def test_buyer_requirement_extra_field():
         extra={"custom_key": "custom_value"},
     )
     assert req.extra["custom_key"] == "custom_value"
+
+
+def test_deterministic_parse_canonicalizes_tokyo_and_osaka_aliases():
+    assert _deterministic_parse("交东京")["destination"] == "Tokyo"
+    assert _deterministic_parse("deliver to Tokyo")["destination"] == "Tokyo"
+    assert _deterministic_parse("shipped to Osaka")["destination"] == "Osaka"
+    assert _deterministic_parse("交大阪")["destination"] == "Osaka"
+
+
+def test_deterministic_fallback_chinese_rfq_keeps_tokyo_and_plaid(monkeypatch):
+    # With the language skill disabled and the LLM returning nothing, the local
+    # deterministic fallback must still recover the hard fields.
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
+
+    req = structure_customer_requirement_with_llm(
+        "询价 5000 件格子衬衫，45天交东京，高品质，请给我一个初步报价"
+    )
+
+    assert req.language == "zh"
+    assert req.destination == "Tokyo"
+    assert req.quantity == 5000
+    assert req.delivery_days == 45
+    assert "plaid" in req.notes
+
+
+def test_deterministic_fallback_english_osaka_keeps_osaka(monkeypatch):
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
+
+    req = structure_customer_requirement_with_llm(
+        "Inquiry: Order 5000 plaid shirts, to be shipped to Osaka within 45 days."
+    )
+
+    assert req.destination == "Osaka"
+    assert req.delivery_days == 45
+    assert "plaid" in req.notes
