@@ -121,7 +121,7 @@ export async function forwardEvent(event: {
   output?: string;
   error?: string;
 }> {
-  const result = await safeFetch("/api/openclaw/events", {
+  const result = await safeFetch("/invoke", {
     method: "POST",
     body: JSON.stringify(event),
   });
