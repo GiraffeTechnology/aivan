@@ -41,11 +41,25 @@ def test_benchmark_mode_c_records_real_ollama_call(monkeypatch, _cases):
     assert agg["mock_fallback_count"] == 0
     assert agg["external_api_call_count"] == 0
     assert agg["expected_local_provider"] == "ollama"
-    assert agg["expected_local_model"] == "qwen3.5:0.8b"
+    assert agg["expected_local_model"] == "qwen3.5:2b"  # production default
     for r in report["results"]:
         assert r["real_local_call"] is True
-        assert r["local_llm_model"] == "qwen3.5:0.8b"
+        assert r["local_llm_model"] == "qwen3.5:2b"
         assert r["external_api_called"] is False
+    assert report["hard_thresholds_passed"] is True
+
+
+def test_expected_local_model_override(monkeypatch, _cases):
+    # --expected-local-model / expected_local_model points the provider at the
+    # given tag and asserts it in telemetry.
+    monkeypatch.setattr(OllamaProvider, "complete_json", lambda self, *a, **k: dict(_CANNED))
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
+
+    report = benchmark.run_benchmark(_cases, "C", expected_local_model="qwen3.5:0.8b")
+    assert report["aggregate"]["expected_local_model"] == "qwen3.5:0.8b"
+    for r in report["results"]:
+        assert r["local_llm_model"] == "qwen3.5:0.8b"
+        assert r["local_call_status"] == "real_local_call"
     assert report["hard_thresholds_passed"] is True
 
 

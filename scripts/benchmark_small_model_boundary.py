@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from aivan.telemetry.benchmark import (  # noqa: E402
+    DEFAULT_EXPECTED_LOCAL_MODEL,
     default_cases_path,
     filter_cases,
     format_progress_line,
@@ -63,8 +64,11 @@ def main() -> int:
                         help="Stop at the first failing case")
     parser.add_argument("--max-local-failure-rate", type=float, default=None,
                         help="C/D only: fail if the local-model call-failure rate exceeds this "
-                             "fraction (default off — a called-but-failed 0.8b is measured capability, "
-                             "not an integrity violation)")
+                             "fraction (default off — a called-but-failed local model is measured "
+                             "capability, not an integrity violation)")
+    parser.add_argument("--expected-local-model", default=DEFAULT_EXPECTED_LOCAL_MODEL,
+                        help=f"C/D: the local model that must be called (default {DEFAULT_EXPECTED_LOCAL_MODEL}). "
+                             "Points the Ollama provider at this tag and asserts it in telemetry.")
     args = parser.parse_args()
 
     all_cases = load_cases(args.cases)
@@ -97,6 +101,7 @@ def main() -> int:
                 per_case_timeout=args.per_case_timeout,
                 fail_fast=args.fail_fast,
                 max_local_failure_rate=args.max_local_failure_rate,
+                expected_local_model=args.expected_local_model,
             )
             if args.fail_fast and reports[mode].get("stopped_early"):
                 break

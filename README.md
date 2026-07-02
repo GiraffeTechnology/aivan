@@ -388,10 +388,12 @@ uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
 
 ## Small Local Model Boundary Benchmark
 
-Measures the production capability boundary of the CTYUN local-only model
-(`qwen3.5:0.8b`) with external provider APIs OFF. The harness reads real provider
-telemetry (not env guesses): modes C/D fail unless a real Ollama call with the
-expected model is recorded for every case, with zero external API calls and zero
+Measures the production capability boundary of the CTYUN local-only model with
+external provider APIs OFF. Production model is **qwen3.5:2b** (`qwen3.5:4b`
+rejected on CPU-only; `qwen3.5:0.8b` is historical baseline only). The harness
+reads real provider telemetry (not env guesses): modes C/D fail unless a real
+Ollama call with the expected model (`--expected-local-model`, default
+`qwen3.5:2b`) is recorded for every case, with zero external API calls and zero
 mock fallback.
 
 Developer ergonomics:
@@ -432,10 +434,10 @@ called-but-failed 0.8b is a capability datapoint, not an integrity violation —
 so a run like "21 real / 10 failed" passes integrity and reports a 32% local
 failure rate for the accuracy discussion.
 
-Smoke command (fast local check against CTYUN `qwen3.5:0.8b`):
+Smoke command (fast local check against CTYUN `qwen3.5:2b`):
 
 ```bash
-uv run python scripts/benchmark_small_model_boundary.py --modes C --max-cases 3 --progress --fail-on-threshold
+uv run python scripts/benchmark_small_model_boundary.py --modes C --max-cases 3 --progress --expected-local-model qwen3.5:2b --fail-on-threshold
 ```
 
 ### Recommended profiles
@@ -446,15 +448,22 @@ false-ready, backend errors, and (C/D) missing/wrong local calls or a dead Ollam
 It does NOT block on `local_call_failed` (model capability).
 
 ```bash
-uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold
+uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --expected-local-model qwen3.5:2b --fail-on-threshold
 ```
 
 **Capability profile** — for model-selection decisions (not for blocking this
 architecture PR). Adds a call-failure-rate ceiling on top of the integrity gate.
 
 ```bash
-uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold --max-local-failure-rate 0.20
+uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --expected-local-model qwen3.5:2b --fail-on-threshold --max-local-failure-rate 0.20
 ```
+
+### Operational smoke + deployment
+
+`scripts/run_aivan_prod_smoke.py` asserts the private-domain safety invariants
+(no external API, no mock fallback, gating, deterministic fallback, auth
+fail-closed) against the configured local model. The CTYUN deployment runbook is
+in [`docs/DEPLOYMENT_CTYUN.md`](docs/DEPLOYMENT_CTYUN.md).
 
 The report separates `integrity_status` (pass/fail — the merge gate),
 `capability_status` (`report_only` unless `--max-local-failure-rate` is passed,

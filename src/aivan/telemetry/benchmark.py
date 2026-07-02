@@ -33,7 +33,13 @@ from aivan.rfq import semantic_sources
 # Modes that must actually exercise a private-domain local model.
 LOCAL_LLM_MODES = frozenset({"C", "D"})
 EXPECTED_LOCAL_PROVIDER = "ollama"
-EXPECTED_LOCAL_MODEL = "qwen3.5:0.8b"
+# Production private-domain local model (CTYUN decision):
+#   qwen3.5:2b  -> required production model
+#   qwen3.5:4b  -> rejected (CPU-only smoke: 100% failure, ~90s/case)
+#   qwen3.5:0.8b -> historical baseline only
+# Override per-run with --expected-local-model / run_benchmark(expected_local_model=...).
+DEFAULT_EXPECTED_LOCAL_MODEL = "qwen3.5:2b"
+EXPECTED_LOCAL_MODEL = DEFAULT_EXPECTED_LOCAL_MODEL  # back-compat alias
 
 # Env overrides per benchmark mode (PRD §16.2).
 MODES: dict[str, dict[str, str]] = {
@@ -56,7 +62,7 @@ MODES: dict[str, dict[str, str]] = {
         "AIVAN_LLM_API_ENABLED": "true",
         "AIVAN_LLM_PROVIDER": "ollama",
         "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
-        "OLLAMA_MODEL": "qwen3.5:0.8b",
+        "OLLAMA_MODEL": "qwen3.5:2b",
         "AIVAN_LANGUAGE_SKILL_ENABLED": "true",
         "GLTG_LOCAL_LLM_ENABLED": "true",
     },
@@ -65,7 +71,7 @@ MODES: dict[str, dict[str, str]] = {
         "AIVAN_LLM_API_ENABLED": "true",
         "AIVAN_LLM_PROVIDER": "ollama",
         "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
-        "OLLAMA_MODEL": "qwen3.5:0.8b",
+        "OLLAMA_MODEL": "qwen3.5:2b",
         "AIVAN_LANGUAGE_SKILL_ENABLED": "false",
         "GLTG_LOCAL_LLM_ENABLED": "true",
     },
@@ -85,7 +91,7 @@ class BenchmarkCase:
     raw_text: str
     expects: dict = field(default_factory=dict)
     # In modes C/D the RFQ structuring step is model-required, so every case is
-    # expected to attempt a local qwen3.5:0.8b call. A fixture may set
+    # expected to attempt the local production model. A fixture may set
     # ``llm_required: false`` to declare a deterministic/no-model-needed case;
     # then an absent local call is intentionally_skipped, not a missing call.
     llm_required: bool = True
@@ -152,8 +158,12 @@ def format_progress_line(result: dict) -> str:
 
 
 @contextmanager
-def _mode_env(mode_key: str):
-    overrides = MODES[mode_key]
+def _mode_env(mode_key: str, expected_local_model: str | None = None):
+    overrides = dict(MODES[mode_key])
+    # In local modes the run's expected model IS the model the provider should
+    # call, so keep OLLAMA_MODEL and the expected-model check in lockstep.
+    if expected_local_model and mode_key in LOCAL_LLM_MODES:
+        overrides["OLLAMA_MODEL"] = expected_local_model
     saved = {k: os.environ.get(k) for k in overrides}
     os.environ.update(overrides)
     _gateway.reset_provider()
@@ -168,7 +178,8 @@ def _mode_env(mode_key: str):
         _gateway.reset_provider()
 
 
-def run_case(case: BenchmarkCase, mode_key: str) -> dict:
+def run_case(case: BenchmarkCase, mode_key: str,
+             expected_local_model: str = DEFAULT_EXPECTED_LOCAL_MODEL) -> dict:
     """Run one case through intake + readiness; return per-case metrics.
 
     Provider usage is read from real gateway telemetry (not env guesses), so the
@@ -255,7 +266,7 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
     elif not provider_ok:
         local_call_status = "local_call_failed"
         llm_skipped_reason = ""
-    elif local_llm_model != EXPECTED_LOCAL_MODEL:
+    elif local_llm_model != expected_local_model:
         local_call_status = "unexpected_local_model"
         llm_skipped_reason = ""
     else:
@@ -361,14 +372,15 @@ def _timeout_result(case: BenchmarkCase, mode_key: str, timeout_seconds: float,
     }
 
 
-def _run_one(case: BenchmarkCase, mode_key: str, per_case_timeout: float | None) -> dict:
+def _run_one(case: BenchmarkCase, mode_key: str, per_case_timeout: float | None,
+             expected_local_model: str) -> dict:
     """Run a single case, enforcing an optional wall-clock per-case timeout."""
     if not per_case_timeout or per_case_timeout <= 0:
-        return run_case(case, mode_key)
+        return run_case(case, mode_key, expected_local_model)
     started = time.perf_counter()
     started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(run_case, case, mode_key)
+    future = executor.submit(run_case, case, mode_key, expected_local_model)
     try:
         return future.result(timeout=per_case_timeout)
     except FutureTimeout:
@@ -387,6 +399,7 @@ def run_benchmark(
     per_case_timeout: float | None = None,
     fail_fast: bool = False,
     max_local_failure_rate: float | None = None,
+    expected_local_model: str = DEFAULT_EXPECTED_LOCAL_MODEL,
 ) -> dict:
     """Run all cases under one mode and aggregate metrics + threshold checks.
 
@@ -395,18 +408,19 @@ def run_benchmark(
     ``per_case_timeout`` marks any case exceeding it as a failed timeout and
     continues (unless ``fail_fast``). ``fail_fast`` stops at the first failing
     case. ``max_local_failure_rate`` optionally gates the local-model
-    call-failure rate (default off — a called-but-failed 0.8b is measured
-    capability, not an integrity violation). With no filters/hooks the behavior
-    is identical to before.
+    call-failure rate (default off — a called-but-failed local model is measured
+    capability, not an integrity violation). ``expected_local_model`` is the
+    model modes C/D must call (and the model the provider is pointed at). With no
+    filters/hooks the behavior is identical to before.
     """
     if mode_key not in MODES:
         raise ValueError(f"Unknown benchmark mode: {mode_key}")
 
     results: list[dict] = []
     stopped_early = False
-    with _mode_env(mode_key):
+    with _mode_env(mode_key, expected_local_model):
         for case in cases:
-            result = _run_one(case, mode_key, per_case_timeout)
+            result = _run_one(case, mode_key, per_case_timeout, expected_local_model)
             reasons = case_failures(result, mode_key)
             result["failed"] = bool(reasons)
             result["fail_reasons"] = reasons
@@ -481,7 +495,7 @@ def run_benchmark(
             )
         if unexpected_model:
             integrity_failures.append(
-                f"unexpected_local_model>0 ({len(unexpected_model)} case(s); expected {EXPECTED_LOCAL_MODEL})"
+                f"unexpected_local_model>0 ({len(unexpected_model)} case(s); expected {expected_local_model})"
             )
         if model_required and not real_local:
             integrity_failures.append(
@@ -549,7 +563,7 @@ def run_benchmark(
             "local_llm_latency_ms": round(local_llm_latency, 3),
             "local_llm_tasks": local_llm_tasks,
             "expected_local_provider": EXPECTED_LOCAL_PROVIDER if mode_key in LOCAL_LLM_MODES else None,
-            "expected_local_model": EXPECTED_LOCAL_MODEL if mode_key in LOCAL_LLM_MODES else None,
+            "expected_local_model": expected_local_model if mode_key in LOCAL_LLM_MODES else None,
         },
         "hard_thresholds_passed": not all_failures,
         "hard_threshold_failures": all_failures,
@@ -617,7 +631,7 @@ def to_markdown(reports: dict[str, dict]) -> str:
     lines.append("")
     lines.append("integrity_status gates the merge (--fail-on-threshold). capability_status is")
     lines.append("report-only unless --max-local-failure-rate is passed; local_call_failed means")
-    lines.append("qwen3.5:0.8b was attempted but returned unparseable output (model capability),")
+    lines.append("the local model was attempted but returned unparseable output (model capability),")
     lines.append("not a private-domain integrity breach.")
 
     # Local-model outcome breakdown + per-case provider telemetry for C/D.

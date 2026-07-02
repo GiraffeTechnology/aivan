@@ -89,7 +89,7 @@ def test_run_benchmark_calls_on_case_per_case(cases):
 # ── per-case timeout handling ────────────────────────────────────────────────
 
 def test_per_case_timeout_marks_failed_and_continues(cases, monkeypatch):
-    def slow_run_case(case, mode_key):
+    def slow_run_case(case, mode_key, *a, **k):
         time.sleep(1.0)
         return {"case_id": case.case_id, "tier": case.tier, "mode": mode_key, "ready": False}
 
@@ -105,7 +105,7 @@ def test_per_case_timeout_marks_failed_and_continues(cases, monkeypatch):
 
 
 def test_fail_fast_stops_at_first_failure(cases, monkeypatch):
-    def failing_run_case(case, mode_key):
+    def failing_run_case(case, mode_key, *a, **k):
         return {"case_id": case.case_id, "tier": case.tier, "mode": mode_key,
                 "ready": False, "error": "boom", "timed_out": False}
 
@@ -117,7 +117,7 @@ def test_fail_fast_stops_at_first_failure(cases, monkeypatch):
 
 
 def test_fail_fast_and_timeout_together(cases, monkeypatch):
-    def slow_run_case(case, mode_key):
+    def slow_run_case(case, mode_key, *a, **k):
         time.sleep(1.0)
         return {"case_id": case.case_id, "tier": case.tier, "mode": mode_key, "ready": False}
 
