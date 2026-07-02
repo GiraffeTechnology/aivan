@@ -61,6 +61,10 @@ def main() -> int:
                         help="Mark a case exceeding this many seconds as a failed timeout")
     parser.add_argument("--fail-fast", action="store_true",
                         help="Stop at the first failing case")
+    parser.add_argument("--max-local-failure-rate", type=float, default=None,
+                        help="C/D only: fail if the local-model call-failure rate exceeds this "
+                             "fraction (default off — a called-but-failed 0.8b is measured capability, "
+                             "not an integrity violation)")
     args = parser.parse_args()
 
     all_cases = load_cases(args.cases)
@@ -92,6 +96,7 @@ def main() -> int:
                 on_case=make_on_case(),
                 per_case_timeout=args.per_case_timeout,
                 fail_fast=args.fail_fast,
+                max_local_failure_rate=args.max_local_failure_rate,
             )
             if args.fail_fast and reports[mode].get("stopped_early"):
                 break

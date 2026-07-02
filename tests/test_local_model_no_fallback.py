@@ -57,9 +57,10 @@ def test_local_model_unavailable_records_recovery_state():
     assert "cloud" in recovery.operator_message_en.lower()
 
 
-def test_mode_c_benchmark_fails_if_ollama_not_called(monkeypatch):
-    # Ollama unavailable -> structuring raises, benchmark must FAIL mode C rather
-    # than let a dead local model look like success.
+def test_mode_c_benchmark_fails_if_ollama_never_succeeds(monkeypatch):
+    # Ollama unavailable for every case -> the local model never once succeeds,
+    # which is the "dead Ollama must not look like success" guard. These are
+    # attempted-but-failed calls (local_call_failed), not "never attempted".
     def _boom(self, *a, **k):
         raise ConnectionError("ollama refused")
 
@@ -68,6 +69,11 @@ def test_mode_c_benchmark_fails_if_ollama_not_called(monkeypatch):
 
     cases = benchmark.load_cases(benchmark.default_cases_path())[:3]
     report = benchmark.run_benchmark(cases, "C")
+    agg = report["aggregate"]
     assert report["hard_thresholds_passed"] is False
-    assert any("ollama_not_called" in f for f in report["hard_threshold_failures"])
-    assert report["aggregate"]["real_local_call_count"] == 0
+    assert any("local_model_no_successful_calls" in f for f in report["hard_threshold_failures"])
+    assert agg["real_local_call_count"] == 0
+    # The calls WERE attempted (not silently mocked, not "never called").
+    assert agg["local_call_failed_count"] == 3
+    assert agg["mock_fallback_count"] == 0
+    assert agg["expected_local_call_missing_count"] == 0

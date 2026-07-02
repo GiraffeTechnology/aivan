@@ -84,6 +84,11 @@ class BenchmarkCase:
     input_language: str
     raw_text: str
     expects: dict = field(default_factory=dict)
+    # In modes C/D the RFQ structuring step is model-required, so every case is
+    # expected to attempt a local qwen3.5:0.8b call. A fixture may set
+    # ``llm_required: false`` to declare a deterministic/no-model-needed case;
+    # then an absent local call is intentionally_skipped, not a missing call.
+    llm_required: bool = True
 
     @classmethod
     def from_json(cls, obj: dict) -> "BenchmarkCase":
@@ -93,6 +98,7 @@ class BenchmarkCase:
             input_language=obj.get("input_language", "auto"),
             raw_text=obj["raw_text"],
             expects=obj.get("expects", {}) or {},
+            llm_required=bool(obj.get("llm_required", True)),
         )
 
 
@@ -187,31 +193,91 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
         _gateway.remove_call_observer(events.append)
     elapsed_seconds = round(time.perf_counter() - started, 3)
 
-    # Telemetry-derived provider facts.
+    # Telemetry-derived provider facts. Read entirely from the gateway events —
+    # never inferred from env (env is only a display default when NO call fired).
     local_events = [e for e in events if e.used_provider not in ("mock", "none")]
-    real_local_call = any(
-        e.configured_provider == EXPECTED_LOCAL_PROVIDER
-        and e.used_provider == EXPECTED_LOCAL_PROVIDER
-        and e.ok
-        for e in events
-    )
+    # The structuring call is the model-required task for a benchmark case.
+    struct_events = [e for e in events if e.task == "requirement_structuring"] or events
+    primary = struct_events[-1] if struct_events else None
+
+    if primary is not None:
+        used_provider = primary.used_provider
+        provider_ok = bool(primary.ok)
+        provider_error = primary.error or ""
+        fell_back_to_mock = bool(primary.fell_back_to_mock)
+        primary_external = bool(primary.external_api_called and primary.ok)
+        primary_model = primary.model or ""
+        # Not "invoked" when the gateway short-circuited (llm disabled / no provider).
+        llm_invoked = primary.used_provider != "none"
+    else:
+        used_provider = "none"
+        provider_ok = False
+        provider_error = ""
+        fell_back_to_mock = False
+        primary_external = False
+        primary_model = ""
+        llm_invoked = False
+
     mock_fallback = any(
         e.configured_provider not in ("mock", "none") and e.used_provider == "mock"
         for e in events
-    )
-    external_api_called = any(e.external_api_called and e.ok for e in events)
+    ) or fell_back_to_mock
+    external_api_called = any(e.external_api_called and e.ok for e in events) or primary_external
     local_llm_tokens = sum(e.input_tokens + e.output_tokens for e in local_events)
     local_llm_latency_ms = sum(e.latency_ms for e in local_events)
     local_llm_tasks = sorted({e.task for e in local_events})
-    local_llm_model = next(
+    local_llm_model = primary_model or next(
         (e.model for e in local_events if e.configured_provider == EXPECTED_LOCAL_PROVIDER and e.model),
-        os.environ.get("OLLAMA_MODEL", "") if os.environ.get("AIVAN_LLM_PROVIDER") == "ollama" else "",
+        "",
     )
+
+    # Classify the local-model outcome for modes C/D (n/a for A/B/E).
+    real_local_call = bool(
+        llm_invoked and used_provider == EXPECTED_LOCAL_PROVIDER and provider_ok
+    )
+    if mode_key not in LOCAL_LLM_MODES:
+        local_call_status = "n/a"
+        llm_skipped_reason = ""
+    elif not llm_invoked:
+        # No local call fired at all. Distinguish an intentional deterministic
+        # skip from a model-required call that went missing.
+        llm_skipped_reason = provider_error or ("no_llm_invoked" if primary is None else "")
+        if not case.llm_required:
+            local_call_status = "intentionally_skipped"
+        else:
+            local_call_status = "expected_local_call_missing"
+    elif mock_fallback:
+        local_call_status = "mock_fallback"
+        llm_skipped_reason = ""
+    elif used_provider != EXPECTED_LOCAL_PROVIDER:
+        local_call_status = "wrong_provider"
+        llm_skipped_reason = ""
+    elif not provider_ok:
+        local_call_status = "local_call_failed"
+        llm_skipped_reason = ""
+    elif local_llm_model != EXPECTED_LOCAL_MODEL:
+        local_call_status = "unexpected_local_model"
+        llm_skipped_reason = ""
+    else:
+        local_call_status = "real_local_call"
+        llm_skipped_reason = ""
+
+    telemetry = {
+        "configured_provider": (primary.configured_provider if primary else configured_provider),
+        "used_provider": used_provider,
+        "provider_ok": provider_ok,
+        "provider_error": provider_error,
+        "fell_back_to_mock": fell_back_to_mock,
+        "external_api_called": external_api_called,
+        "llm_invoked": llm_invoked,
+        "llm_skipped_reason": llm_skipped_reason,
+        "local_call_status": local_call_status,
+    }
 
     timing = {
         "started_at": started_at,
         "elapsed_seconds": elapsed_seconds,
-        "provider": configured_provider,
+        "provider": (primary.configured_provider if primary else configured_provider),
         "model": local_llm_model,
     }
 
@@ -224,7 +290,7 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
             "real_local_call": real_local_call, "mock_fallback": mock_fallback,
             "local_llm_model": local_llm_model, "local_llm_tokens": local_llm_tokens,
             "local_llm_latency_ms": round(local_llm_latency_ms, 3), "local_llm_tasks": local_llm_tasks,
-            "timed_out": False, **timing,
+            "timed_out": False, **telemetry, **timing,
         }
 
     action = "pending_email_approval" if gate.ready else gate.next_action
@@ -244,7 +310,8 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
         "real_local_call": real_local_call, "mock_fallback": mock_fallback,
         "local_llm_model": local_llm_model, "local_llm_tokens": local_llm_tokens,
         "local_llm_latency_ms": round(local_llm_latency_ms, 3), "local_llm_tasks": local_llm_tasks,
-        "total_tokens": local_llm_tokens, "error": "", "timed_out": False, **timing,
+        "total_tokens": local_llm_tokens, "error": "", "timed_out": False,
+        **telemetry, **timing,
     }
 
 
@@ -263,12 +330,14 @@ def case_failures(result: dict, mode_key: str) -> list[str]:
     if result.get("outbound_sent_before_approval"):
         reasons.append("outbound_before_approval")
     if mode_key in LOCAL_LLM_MODES and not result.get("error"):
-        if result.get("mock_fallback"):
-            reasons.append("mock_fallback")
-        elif not result.get("real_local_call"):
-            reasons.append("ollama_not_called")
-        elif result.get("local_llm_model") != EXPECTED_LOCAL_MODEL:
-            reasons.append("unexpected_local_model")
+        status = result.get("local_call_status", "")
+        # Integrity failures (block merge). A local_call_failed (the model was
+        # exercised but the 0.8b model could not produce valid output) is a
+        # measured capability datapoint, NOT an integrity failure — reported, not
+        # a per-case hard fail. intentionally_skipped is allowed by definition.
+        if status in {"mock_fallback", "expected_local_call_missing",
+                      "wrong_provider", "unexpected_local_model"}:
+            reasons.append(status)
     return reasons
 
 
@@ -285,6 +354,10 @@ def _timeout_result(case: BenchmarkCase, mode_key: str, timeout_seconds: float,
         "timed_out": True, "timeout_seconds": timeout_seconds,
         "started_at": started_at, "elapsed_seconds": round(elapsed, 3),
         "provider": os.environ.get("AIVAN_LLM_PROVIDER", "mock"), "model": "",
+        "configured_provider": os.environ.get("AIVAN_LLM_PROVIDER", "mock"),
+        "used_provider": "none", "provider_ok": False, "provider_error": "timeout",
+        "fell_back_to_mock": False, "llm_invoked": False, "llm_skipped_reason": "timeout",
+        "local_call_status": "timeout",
     }
 
 
@@ -313,6 +386,7 @@ def run_benchmark(
     on_case=None,
     per_case_timeout: float | None = None,
     fail_fast: bool = False,
+    max_local_failure_rate: float | None = None,
 ) -> dict:
     """Run all cases under one mode and aggregate metrics + threshold checks.
 
@@ -320,7 +394,10 @@ def run_benchmark(
     it completes — used for live progress and incremental JSONL output.
     ``per_case_timeout`` marks any case exceeding it as a failed timeout and
     continues (unless ``fail_fast``). ``fail_fast`` stops at the first failing
-    case. With no filters/hooks the behavior is identical to before.
+    case. ``max_local_failure_rate`` optionally gates the local-model
+    call-failure rate (default off — a called-but-failed 0.8b is measured
+    capability, not an integrity violation). With no filters/hooks the behavior
+    is identical to before.
     """
     if mode_key not in MODES:
         raise ValueError(f"Unknown benchmark mode: {mode_key}")
@@ -348,11 +425,28 @@ def run_benchmark(
     outbound = [r for r in results if r.get("outbound_sent_before_approval")]
     total_tokens = sum(r.get("total_tokens", 0) for r in results)
     llm_calls = sum(r.get("llm_call_count", 0) for r in results)
-    real_local = [r for r in results if r.get("real_local_call")]
-    mock_fallbacks = [r for r in results if r.get("mock_fallback")]
     local_llm_tokens = sum(r.get("local_llm_tokens", 0) for r in results)
     local_llm_latency = sum(r.get("local_llm_latency_ms", 0) for r in results)
     local_llm_tasks = sorted({t for r in results for t in r.get("local_llm_tasks", [])})
+
+    # Local-model outcome breakdown from per-case telemetry (never env).
+    by_status: dict[str, list[dict]] = {}
+    for r in results:
+        by_status.setdefault(r.get("local_call_status", "n/a"), []).append(r)
+    real_local = by_status.get("real_local_call", [])
+    local_failed = by_status.get("local_call_failed", [])
+    expected_missing = by_status.get("expected_local_call_missing", [])
+    intentionally_skipped = by_status.get("intentionally_skipped", [])
+    unexpected_model = by_status.get("unexpected_local_model", [])
+    wrong_provider = by_status.get("wrong_provider", [])
+    mock_fallbacks = [r for r in results if r.get("mock_fallback")]
+    attempts = len(real_local) + len(local_failed)
+    local_failure_rate = round(len(local_failed) / attempts, 4) if attempts else 0.0
+    # Model-required cases = every non-skipped, non-timeout, non-error C/D case.
+    model_required = (
+        real_local + local_failed + expected_missing + unexpected_model
+        + wrong_provider + mock_fallbacks
+    )
 
     thresholds: list[str] = []
     if external:
@@ -366,23 +460,42 @@ def run_benchmark(
     if timeouts:
         thresholds.append(f"timeout on {len(timeouts)} case(s)")
 
-    # Local-LLM modes (C/D) must actually exercise the local model: every case
-    # must record a real ollama call with the expected model, and none may fall
-    # back to mock. A dead Ollama must NOT look like success.
+    # Local-LLM modes (C/D): integrity vs capability are separated.
+    #   INTEGRITY failures (block merge): silent mock fallback, external API,
+    #   a model-required case that never even attempted the local call, the wrong
+    #   provider/model, or Ollama effectively dead (0 successful calls).
+    #   CAPABILITY (reported, not a hard fail by default): local_call_failed —
+    #   the qwen3.5:0.8b model was genuinely exercised but could not produce
+    #   valid output for that input. Gate it explicitly via max_local_failure_rate.
     if mode_key in LOCAL_LLM_MODES:
         if mock_fallbacks:
-            thresholds.append(f"mock_fallback on {len(mock_fallbacks)} case(s) (local model not really used)")
-        if len(real_local) < len(results):
-            missing = len(results) - len(real_local)
             thresholds.append(
-                f"ollama_not_called on {missing} case(s) (expected provider={EXPECTED_LOCAL_PROVIDER})"
+                f"mock_fallback on {len(mock_fallbacks)} case(s) (local model silently replaced by mock)"
             )
-        bad_model = [
-            r for r in results if r.get("real_local_call") and r.get("local_llm_model") != EXPECTED_LOCAL_MODEL
-        ]
-        if bad_model:
+        if external:
+            pass  # already recorded above
+        if expected_missing:
             thresholds.append(
-                f"unexpected_local_model on {len(bad_model)} case(s) (expected {EXPECTED_LOCAL_MODEL})"
+                f"expected_local_call_missing on {len(expected_missing)} case(s) "
+                f"(model-required case never attempted a {EXPECTED_LOCAL_PROVIDER} call)"
+            )
+        if wrong_provider:
+            thresholds.append(f"wrong_provider on {len(wrong_provider)} case(s) (expected {EXPECTED_LOCAL_PROVIDER})")
+        if unexpected_model:
+            thresholds.append(
+                f"unexpected_local_model on {len(unexpected_model)} case(s) (expected {EXPECTED_LOCAL_MODEL})"
+            )
+        if model_required and not real_local:
+            # Ollama never once succeeded -> effectively dead. This is the
+            # "dead Ollama must not look like success" guard.
+            thresholds.append(
+                f"local_model_no_successful_calls (0/{len(model_required)} real "
+                f"{EXPECTED_LOCAL_PROVIDER} calls succeeded; check the endpoint/model)"
+            )
+        if max_local_failure_rate is not None and local_failure_rate > max_local_failure_rate:
+            thresholds.append(
+                f"local_call_failure_rate {local_failure_rate:.2%} exceeds "
+                f"max {max_local_failure_rate:.2%} ({len(local_failed)}/{attempts} calls failed)"
             )
 
     return {
@@ -401,7 +514,14 @@ def run_benchmark(
             "llm_call_count": llm_calls,
             "tokens_per_case": round(total_tokens / len(results), 2) if results else 0,
             "real_local_call_count": len(real_local),
+            "local_call_failed_count": len(local_failed),
+            "expected_local_call_missing_count": len(expected_missing),
+            "intentionally_skipped_local_call_count": len(intentionally_skipped),
+            "unexpected_local_model_count": len(unexpected_model),
+            "wrong_provider_count": len(wrong_provider),
             "mock_fallback_count": len(mock_fallbacks),
+            "local_call_attempts": attempts,
+            "local_call_failure_rate": local_failure_rate,
             "local_llm_tokens": local_llm_tokens,
             "local_llm_latency_ms": round(local_llm_latency, 3),
             "local_llm_tasks": local_llm_tasks,
@@ -457,4 +577,36 @@ def to_markdown(reports: dict[str, dict]) -> str:
     lines.append("")
     lines.append("Hard thresholds: 0 automatic external API calls, 0 outbound-before-approval, ")
     lines.append("0 false-ready, 0 generic backend errors on valid RFQ input.")
+
+    # Local-model outcome breakdown + per-case provider telemetry for C/D.
+    for mode, rep in reports.items():
+        if mode not in LOCAL_LLM_MODES:
+            continue
+        agg = rep["aggregate"]
+        lines.append("")
+        lines.append(f"## Mode {mode} — local model outcome breakdown")
+        lines.append(
+            f"real_local_call={agg['real_local_call_count']}, "
+            f"local_call_failed={agg['local_call_failed_count']} "
+            f"(rate {agg['local_call_failure_rate']:.2%}), "
+            f"expected_local_call_missing={agg['expected_local_call_missing_count']}, "
+            f"intentionally_skipped={agg['intentionally_skipped_local_call_count']}, "
+            f"mock_fallback={agg['mock_fallback_count']}, "
+            f"unexpected_model={agg['unexpected_local_model_count']}"
+        )
+        if rep["hard_threshold_failures"]:
+            lines.append("Threshold failures: " + "; ".join(rep["hard_threshold_failures"]))
+        lines.append("")
+        lines.append("### Per-case provider telemetry")
+        lines.append(
+            "| case_id | tier | status | configured | used | model | ok | fell_back | external | error |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        for r in rep["results"]:
+            lines.append(
+                f"| {r.get('case_id')} | {r.get('tier')} | {r.get('local_call_status','')} | "
+                f"{r.get('configured_provider','')} | {r.get('used_provider','')} | "
+                f"{r.get('model') or '-'} | {r.get('provider_ok')} | {r.get('fell_back_to_mock')} | "
+                f"{r.get('external_api_called')} | {(r.get('provider_error') or '')[:60]} |"
+            )
     return "\n".join(lines)

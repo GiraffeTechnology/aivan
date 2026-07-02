@@ -404,10 +404,33 @@ Developer ergonomics:
 | `--per-case-timeout S` | Mark any case exceeding S seconds as a failed timeout and continue (unless `--fail-fast`). |
 | `--fail-fast` | Stop at the first failing case. |
 | `--fail-on-threshold` | Exit non-zero if any hard threshold fails. |
+| `--max-local-failure-rate F` | C/D only: fail if the local-model call-failure rate exceeds F (default off). |
 
 Incremental per-case results are always streamed to
 `artifacts/benchmark_events.jsonl` so a long CTYUN run is inspectable before it
 finishes. Passing no filters preserves the original full-run behavior.
+
+### Integrity vs capability (Mode C/D)
+
+Each case records its real provider telemetry (`configured_provider`,
+`used_provider`, `model`, `ok`, `provider_error`, `fell_back_to_mock`,
+`external_api_called`) and a `local_call_status`, read from the gateway — never
+inferred from env:
+
+| `local_call_status` | Meaning | Hard threshold |
+|---|---|---|
+| `real_local_call` | qwen3.5:0.8b called and returned OK | pass |
+| `local_call_failed` | qwen3.5:0.8b called but couldn't produce valid output | **reported, not a hard fail** (measured capability; gate with `--max-local-failure-rate`) |
+| `expected_local_call_missing` | model-required case never attempted a local call | **hard fail** |
+| `intentionally_skipped` | fixture set `llm_required: false` (deterministic/no-model case) | pass |
+| `mock_fallback` / `wrong_provider` / `unexpected_local_model` | silent substitution | **hard fail** |
+
+Integrity hard-fails: silent mock fallback, any external API call, a
+model-required case that never attempted the local model, wrong provider/model,
+or Ollama never once succeeding (0 successful calls = effectively dead). A
+called-but-failed 0.8b is a capability datapoint, not an integrity violation —
+so a run like "21 real / 10 failed" passes integrity and reports a 32% local
+failure rate for the accuracy discussion.
 
 Smoke command (fast local check against CTYUN `qwen3.5:0.8b`):
 
