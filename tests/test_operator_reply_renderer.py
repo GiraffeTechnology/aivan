@@ -67,6 +67,7 @@ def test_language_skill_output_language_metadata_localizes_reply():
         "extra": {
             "requested_output_language": "zh",
             "final_output_language": "zh",
+            "canonical_english_text": "Inquiry: 5000 pcs plaid shirts to Tokyo within 45 days.",
             "quality_level": "high",
         },
     }
@@ -76,6 +77,8 @@ def test_language_skill_output_language_metadata_localizes_reply():
     assert "RFQ 已创建" in reply
     assert "等待人工审批" in reply or "仍需人工审批" in reply
     assert "draft_abc" not in reply
+    assert req["extra"]["canonical_english_text"].startswith("Inquiry: 5000 pcs")
+    assert "Inquiry: 5000 pcs" not in reply
 
 
 def test_reply_does_not_claim_drafts_when_none_created():

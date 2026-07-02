@@ -98,6 +98,23 @@ def test_deterministic_parse_does_not_canonicalize_destination():
     assert "destination" not in _deterministic_parse("shipped to Osaka")
 
 
+def test_deterministic_parse_does_not_canonicalize_non_english_business_semantics():
+    parsed = _deterministic_parse(
+        "询价 5000 件格子衬衫，白色纯棉，高品质，找熟悉供应商，45天交东京"
+    )
+
+    for forbidden_field in (
+        "product_type",
+        "category",
+        "destination",
+        "fabric_material",
+        "quality_level",
+        "supplier_scope",
+        "supplier_capability",
+    ):
+        assert forbidden_field not in parsed
+
+
 def test_deterministic_parse_keeps_numeric_raw_evidence():
     # Numeric evidence (quantity, days) is preserved; it is not business-semantic
     # canonicalization.
