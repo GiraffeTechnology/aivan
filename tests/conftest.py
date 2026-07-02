@@ -3,6 +3,11 @@ os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
 os.environ.setdefault("AIVAN_DB_URL", "sqlite:///:memory:")
 os.environ.setdefault("AIVAN_REQUIRE_HUMAN_APPROVAL", "true")
+# Sanctioned test-mode tenant fallback so service calls (GLTG v2 / giraffe-db)
+# resolve a tenant in the suite without hardcoding a production placeholder.
+# This gates ONLY tenant resolution — it never enables LLM mock fallback.
+os.environ.setdefault("AIVAN_TEST_MODE", "true")
+os.environ.setdefault("AIVAN_TEST_TENANT_ID", "test_tenant")
 
 import pytest
 from sqlalchemy import create_engine

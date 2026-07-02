@@ -114,6 +114,47 @@ def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> 
 
 
 def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
+    """Idempotent entry point for inbound events.
+
+    A duplicated/retried inbound event (same source+channel+account+conversation+
+    message) replays its original result instead of creating duplicate projects,
+    RFQs, drafts, or execution events. Events without a stable identity (no
+    message id and no conversation id) are processed without idempotency rather
+    than being wrongly collapsed together.
+    """
+    from aivan.db.repositories.inbound_event_repo import (
+        InboundEventRepository,
+        build_inbound_idempotency_key,
+    )
+
+    idem_key = build_inbound_idempotency_key(
+        source=getattr(event, "source", "") or "",
+        channel=event.channel or "",
+        channel_account_id=event.channel_account_id or "",
+        conversation_id=event.conversation_id or "",
+        message_id=event.message_id or "",
+    )
+    repo = InboundEventRepository(db)
+    if idem_key:
+        existing = repo.get(idem_key)
+        if existing is not None:
+            # Replay the stored result; create no new project/RFQ/draft/event.
+            return RFQExecutionResult(**existing.result_json)
+
+    result = _create_rfq_from_event_inner(event, db)
+
+    if idem_key:
+        repo.record(
+            idem_key,
+            project_id=result.project_id,
+            event_type=result.event_type,
+            result_json=result.model_dump(),
+        )
+        db.commit()
+    return result
+
+
+def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
     classification = classify_event(event, db)
     if classification.event_type == "supplier_reply":
         return _handle_supplier_reply_event(event, classification, db)
