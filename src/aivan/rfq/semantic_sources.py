@@ -19,7 +19,10 @@ from typing import Any
 
 from aivan.schemas.requirement import BuyerRequirement
 
-# Sources that may back a canonical business fact.
+# Sources that may back a canonical business fact. A local/small LLM's structured
+# output is NOT here: model output is candidate evidence only and must be
+# confirmed (by the language skill, a resolver, giraffe-db, or a human) before it
+# can pass the execution readiness gate for product/destination.
 AUTHORITATIVE_SOURCES = frozenset(
     {
         "language_skill",
@@ -29,12 +32,13 @@ AUTHORITATIVE_SOURCES = frozenset(
         "giraffe_db_product_reference",
         "giraffe_db_location_reference",
         "giraffe_db_supplier_registry",
-        # The RFQ structuring model's *structured* output is provisional
-        # canonical evidence: it is provenance-tagged and still subject to
-        # human approval, but it is not bare raw text.
-        "llm_structured",
     }
 )
+
+# Provisional sources: candidate evidence produced by a model. They are recorded
+# for provenance and may be shown to an operator, but they never satisfy a
+# readiness gate on their own — the action must be confirmation, not execution.
+PROVISIONAL_SOURCES = frozenset({"llm_structured", "local_llm_candidate"})
 
 # Sources that are NOT sufficient authority for a canonical fact.
 NON_AUTHORITATIVE_SOURCES = frozenset({"raw_text_only", "deterministic", "", "none"})
@@ -85,6 +89,11 @@ def is_authoritative(requirement: BuyerRequirement, field: str) -> bool:
     if value in (None, "", []):
         return False
     return source_of(requirement, field) in AUTHORITATIVE_SOURCES
+
+
+def is_provisional(requirement: BuyerRequirement, field: str) -> bool:
+    """Whether ``field`` holds model-produced candidate evidence needing confirmation."""
+    return source_of(requirement, field) in PROVISIONAL_SOURCES
 
 
 def has_authoritative_product(requirement: BuyerRequirement) -> bool:

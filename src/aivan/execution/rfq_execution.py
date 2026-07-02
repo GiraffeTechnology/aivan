@@ -16,7 +16,7 @@ from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
-from aivan.llm.policy import ExternalModelApiRequiresApprovalError
+from aivan.llm.policy import ExternalModelApiRequiresApprovalError, LocalModelUnavailableError
 from aivan.execution.safety import (
     ExecutionGateResult,
     evaluate_requirement_readiness,
@@ -148,13 +148,16 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         strategy = interpret_strategy(event.message_text, giraffe)
 
         supplier_feasibility, suppliers_ready = evaluate_supplier_readiness(giraffe.suppliers)
-        if not suppliers_ready and supplier_feasibility == "none":
-            return _pending_supplier_selection_result(
-                project, event, classification, requirement, strategy, db
+        if not suppliers_ready:
+            # 0 suppliers -> selection; exactly 1 -> single-supplier confirmation.
+            # Neither is an error, and neither runs GLTG or creates drafts.
+            return _pending_supplier_result(
+                project, event, classification, requirement, strategy,
+                supplier_feasibility, giraffe.suppliers, db,
             )
 
         gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
-    except (GLTGUnavailableError, ExternalModelApiRequiresApprovalError) as exc:
+    except (GLTGUnavailableError, ExternalModelApiRequiresApprovalError, LocalModelUnavailableError) as exc:
         return _dependency_recovery_result(project, event, classification, requirement, exc, db)
 
     giraffe_db_graph: dict = {}
@@ -329,20 +332,48 @@ def _blocked_requirement_result(project, event, classification, requirement, gat
     return result
 
 
-def _pending_supplier_selection_result(project, event, classification, requirement, strategy, db):
-    """No authorized supplier candidates: never fabricate drafts."""
+def _pending_supplier_result(project, event, classification, requirement, strategy,
+                             feasibility, suppliers, db):
+    """Not enough suppliers to execute. Never fabricate drafts, never error.
+
+    0 suppliers -> pending_supplier_selection; exactly 1 -> single-supplier
+    confirmation (single-supplier risk). Both stop before GLTG and drafts.
+    """
+    from aivan.execution.safety import SUPPLIER_FEASIBILITY_ACTION
+
+    action = SUPPLIER_FEASIBILITY_ACTION.get(feasibility, "pending_supplier_selection")
     zh = _should_use_chinese_user_message(requirement)
-    message = (
-        "未找到已授权的供应商候选，请先添加或确认供应商。AIVAN 未生成任何供应商草稿。"
-        if zh
-        else "No authorized supplier candidates found. Please add or confirm suppliers. No drafts were created."
-    )
+    if action == "pending_supplier_confirmation":
+        supplier_name = ""
+        if suppliers:
+            supplier_name = suppliers[0].get("name") or suppliers[0].get("supplier_id") or ""
+        message = (
+            f"仅找到 1 个供应商候选（{supplier_name}）。单一供应商存在风险，"
+            "请确认是否仅向该供应商询价，或补充更多供应商。AIVAN 未发送任何询价。"
+            if zh
+            else (
+                f"Only 1 supplier candidate found ({supplier_name}). Single-supplier "
+                "sourcing carries risk — please confirm whether to inquire this "
+                "supplier alone or add more. No inquiries were sent."
+            )
+        )
+        event_type = "SUPPLIER_CONFIRMATION_REQUIRED"
+        event_summary = "Single supplier candidate; confirmation required"
+    else:
+        message = (
+            "未找到已授权的供应商候选，请先添加或确认供应商。AIVAN 未生成任何供应商草稿。"
+            if zh
+            else "No authorized supplier candidates found. Please add or confirm suppliers. No drafts were created."
+        )
+        event_type = "SUPPLIER_SELECTION_REQUIRED"
+        event_summary = "No authorized supplier candidates available"
+
     event_repo = ExecutionEventRepository(db)
     event_repo.append(
         project.project_id,
-        "SUPPLIER_SELECTION_REQUIRED",
-        "No authorized supplier candidates available",
-        payload={"message_text": message},
+        event_type,
+        event_summary,
+        payload={"message_text": message, "supplier_feasibility": feasibility},
         actor="aivan_execution_gate",
     )
     notification = _send_user_control_notification(project.project_id, event, message, db)
@@ -350,7 +381,7 @@ def _pending_supplier_selection_result(project, event, classification, requireme
     return RFQExecutionResult(
         project_id=project.project_id,
         event_type=classification.event_type,
-        action="pending_supplier_selection",
+        action=action,
         message=message,
         strategy=strategy,
         requirement=requirement.model_dump(),

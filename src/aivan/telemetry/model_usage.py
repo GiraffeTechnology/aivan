@@ -29,6 +29,28 @@ def estimate_tokens(text: str | None) -> int:
 
 
 @dataclass
+class ProviderCallEvent:
+    """Emitted by the LLM gateway for every provider call attempt.
+
+    Lets the benchmark read what *actually* happened (which provider/model ran,
+    whether it fell back to mock, whether an external API was reached) instead of
+    guessing from env vars.
+    """
+
+    task: str
+    configured_provider: str
+    used_provider: str  # provider that actually produced the result ("none" if none)
+    model: str = ""
+    ok: bool = False
+    fell_back_to_mock: bool = False
+    external_api_called: bool = False
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: float = 0.0
+    error: str = ""
+
+
+@dataclass
 class ModelCall:
     task: str
     provider: str

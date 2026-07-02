@@ -18,6 +18,32 @@ from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.rfq import RFQStrategy
 
 
+@pytest.fixture(autouse=True)
+def _language_skill_resolves_canonical_fields(monkeypatch):
+    """These integration tests assume the language skill is available.
+
+    Under the private-domain provenance model a local-LLM-only extraction is
+    provisional and blocks on confirmation; these end-to-end tests exercise the
+    *executed* path, so they simulate the language skill having resolved
+    canonical product/destination (marking those fields authoritative).
+    """
+    import aivan.execution.rfq_execution as rfqe
+
+    real = rfqe.structure_customer_requirement_with_llm
+
+    def wrapped(**kwargs):
+        req = real(**kwargs)
+        sources = req.extra.setdefault("field_sources", {})
+        if req.destination:
+            sources["destination"] = "language_skill"
+        if req.product_type:
+            sources["product_type"] = "language_skill"
+        return req
+
+    monkeypatch.setattr(rfqe, "structure_customer_requirement_with_llm", wrapped)
+    yield
+
+
 @pytest.fixture
 def api_db():
     engine = create_engine(

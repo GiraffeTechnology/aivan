@@ -37,6 +37,24 @@ EXTERNAL_MODEL_API_REQUIRES_EXPLICIT_CONFIRMATION = (
 )
 
 
+class LocalModelUnavailableError(RuntimeError):
+    """Raised when a configured private-domain local model (e.g. Ollama) fails.
+
+    AIVAN must never mask a local-model failure by silently falling back to the
+    mock provider — that would make a local-only benchmark meaningless (a dead
+    Ollama could look like success). Dependency policy converts this into a
+    structured recovery / reduced-strength state instead.
+    """
+
+    def __init__(self, provider: str, message: str | None = None) -> None:
+        self.provider = provider
+        super().__init__(message or f"LOCAL_MODEL_UNAVAILABLE: provider={provider}")
+
+
+# Alias per PR nomenclature.
+LocalLLMCallFailed = LocalModelUnavailableError
+
+
 class ExternalModelApiRequiresApprovalError(RuntimeError):
     """Raised when an external model provider is requested without approval.
 
@@ -87,8 +105,21 @@ def is_external_provider(provider: str | None) -> bool:
 
 
 def external_model_api_enabled() -> bool:
-    """Whether *automatic* external model API calls are allowed at all."""
+    """Whether the external model provider connector is available at all.
+
+    NOTE: this only means "the connector may be built"; it does NOT authorize
+    automatic calls. Every external call still requires an approval packet unless
+    ``AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED`` is explicitly true.
+    """
     return _env_bool("AIVAN_EXTERNAL_MODEL_API_ENABLED", False)
+
+
+def external_model_api_auto_allowed() -> bool:
+    """Whether external calls may proceed WITHOUT a per-call approval packet.
+
+    False by default and must never be true in the private-domain baseline.
+    """
+    return _env_bool("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", False)
 
 
 def llm_api_enabled() -> bool:
@@ -119,29 +150,37 @@ def external_model_approval(approval: ExternalModelApproval):
 
 
 def has_active_external_approval(provider: str, task: str | None = None) -> bool:
+    """Whether a confirmed, in-scope approval is active for this thread.
+
+    A task-scoped approval matches only when the *same* task is requested, so an
+    approval for one task never leaks to another.
+    """
     provider = (provider or "").strip().lower()
     for appr in _active_approvals():
         if appr.status != "approved":
             continue
         if appr.provider.strip().lower() not in {provider, "any", "*"}:
             continue
-        if task and appr.task not in {task, "any", "*"}:
-            continue
-        return True
+        if appr.task in {"any", "*"}:
+            return True
+        if task is not None and task == appr.task:
+            return True
     return False
 
 
 def assert_provider_allowed(provider: str, task: str | None = None) -> None:
     """Raise unless the provider may be reached under current policy.
 
-    Local/private-domain providers are always allowed. External providers are
-    allowed only when automatic external calls are enabled *or* a confirmed
-    approval packet is active for this thread.
+    Local/private-domain providers are always allowed. External providers ALWAYS
+    require an explicit per-call approval packet by default — merely enabling the
+    connector (``AIVAN_EXTERNAL_MODEL_API_ENABLED=true``) is not authorization.
+    The only way to skip per-call approval is the explicit, non-default override
+    ``AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED=true`` (never in private-domain mode).
     """
     if not is_external_provider(provider):
         return
-    if external_model_api_enabled():
-        return
     if has_active_external_approval(provider, task):
+        return
+    if external_model_api_enabled() and external_model_api_auto_allowed():
         return
     raise ExternalModelApiRequiresApprovalError(provider)

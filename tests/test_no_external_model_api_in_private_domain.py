@@ -64,6 +64,57 @@ def test_confirmed_external_approval_allows_call(monkeypatch):
         assert_provider_allowed("openai", "requirement_structuring")
 
 
+# ── P0-3: external API always requires confirmation ──────────────────────────
+
+def test_external_api_enabled_still_requires_approval_by_default(monkeypatch):
+    from aivan.llm.policy import assert_provider_allowed
+
+    # Enabling the connector is NOT authorization; a call without approval raises.
+    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_ENABLED", "true")
+    monkeypatch.delenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", raising=False)
+    with pytest.raises(ExternalModelApiRequiresApprovalError):
+        assert_provider_allowed("openai", "rfq_semantic_enrichment")
+
+
+def test_confirmed_external_approval_allows_one_scoped_call(monkeypatch):
+    from aivan.llm.policy import assert_provider_allowed
+
+    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_ENABLED", "false")
+    approval = ExternalModelApproval(task="draft_polishing", provider="openai")
+    with external_model_approval(approval):
+        assert_provider_allowed("openai", "draft_polishing")  # in-scope: allowed
+    # Outside the scope the approval is gone.
+    with pytest.raises(ExternalModelApiRequiresApprovalError):
+        assert_provider_allowed("openai", "draft_polishing")
+
+
+def test_external_approval_does_not_leak_across_tasks(monkeypatch):
+    from aivan.llm.policy import assert_provider_allowed
+
+    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_ENABLED", "false")
+    approval = ExternalModelApproval(task="draft_polishing", provider="openai")
+    with external_model_approval(approval):
+        # A different task is not covered by this approval.
+        with pytest.raises(ExternalModelApiRequiresApprovalError):
+            assert_provider_allowed("openai", "rfq_semantic_enrichment")
+
+
+def test_external_api_auto_allowed_not_private_domain_default(monkeypatch):
+    from aivan.llm.policy import (
+        assert_provider_allowed,
+        external_model_api_auto_allowed,
+    )
+
+    # Default is false, even in the shipped .env example.
+    monkeypatch.delenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", raising=False)
+    assert external_model_api_auto_allowed() is False
+
+    # Only the explicit override + connector enabled permits an unapproved call.
+    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_ENABLED", "true")
+    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", "true")
+    assert_provider_allowed("openai", "rfq_semantic_enrichment")  # no raise
+
+
 def test_language_skill_with_llm_off_can_structure_rfq(monkeypatch):
     """With the LLM off but the language skill on, canonical fields are authoritative."""
     monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")

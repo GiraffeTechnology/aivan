@@ -40,6 +40,27 @@ def test_no_suppliers_returns_pending_supplier_selection():
     assert ready is False
 
 
+def test_zero_suppliers_pending_selection():
+    from aivan.execution.safety import supplier_action
+
+    assert supplier_action([]) == "pending_supplier_selection"
+
+
+def test_one_supplier_returns_pending_supplier_confirmation_not_error():
+    from aivan.execution.safety import supplier_action
+
+    action = supplier_action([{"supplier_id": "s1", "email": "a@x.com"}])
+    assert action == "pending_supplier_confirmation"  # confirmation, never an error
+
+
+def test_two_suppliers_allowed_with_thin_feasibility():
+    feasibility, ready = evaluate_supplier_readiness(
+        [{"supplier_id": "s1", "email": "a@x.com"}, {"supplier_id": "s2", "email": "b@x.com"}]
+    )
+    assert feasibility == "thin"
+    assert ready is True
+
+
 def test_less_than_three_suppliers_does_not_error():
     one = evaluate_supplier_readiness([{"supplier_id": "s1", "email": "a@x.com"}])
     two = evaluate_supplier_readiness(

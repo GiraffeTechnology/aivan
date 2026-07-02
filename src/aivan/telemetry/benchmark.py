@@ -25,9 +25,12 @@ from pathlib import Path
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
 from aivan.execution.safety import evaluate_requirement_readiness
 from aivan.llm import gateway as _gateway
-from aivan.llm.policy import external_model_api_enabled
 from aivan.rfq import semantic_sources
-from aivan.telemetry.model_usage import ModelUsageRecorder, estimate_tokens
+
+# Modes that must actually exercise a private-domain local model.
+LOCAL_LLM_MODES = frozenset({"C", "D"})
+EXPECTED_LOCAL_PROVIDER = "ollama"
+EXPECTED_LOCAL_MODEL = "qwen3.5:0.8b"
 
 # Env overrides per benchmark mode (PRD §16.2).
 MODES: dict[str, dict[str, str]] = {
@@ -49,6 +52,8 @@ MODES: dict[str, dict[str, str]] = {
         "AIVAN_EXTERNAL_MODEL_API_ENABLED": "false",
         "AIVAN_LLM_API_ENABLED": "true",
         "AIVAN_LLM_PROVIDER": "ollama",
+        "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
+        "OLLAMA_MODEL": "qwen3.5:0.8b",
         "AIVAN_LANGUAGE_SKILL_ENABLED": "true",
         "GLTG_LOCAL_LLM_ENABLED": "true",
     },
@@ -56,6 +61,8 @@ MODES: dict[str, dict[str, str]] = {
         "AIVAN_EXTERNAL_MODEL_API_ENABLED": "false",
         "AIVAN_LLM_API_ENABLED": "true",
         "AIVAN_LLM_PROVIDER": "ollama",
+        "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
+        "OLLAMA_MODEL": "qwen3.5:0.8b",
         "AIVAN_LANGUAGE_SKILL_ENABLED": "false",
         "GLTG_LOCAL_LLM_ENABLED": "true",
     },
@@ -96,6 +103,13 @@ def load_cases(path: str | os.PathLike) -> list[BenchmarkCase]:
     return cases
 
 
+# NOTE: tests/fixtures/rfq_benchmark_cases.jsonl is a SEED dataset spanning all
+# six tiers. TODO(bench): expand to >=20 cases per tier (>=120 total) and enable
+# per-tier accuracy threshold gating (e.g. simple-RFQ field accuracy >= 95%) once
+# a live language-skill / qwen3.5:0.8b endpoint is wired into CI.
+IS_SEED_DATASET = True
+
+
 def default_cases_path() -> Path:
     return Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "rfq_benchmark_cases.jsonl"
 
@@ -118,65 +132,76 @@ def _mode_env(mode_key: str):
 
 
 def run_case(case: BenchmarkCase, mode_key: str) -> dict:
-    """Run one case through intake + readiness; return per-case metrics."""
-    recorder = ModelUsageRecorder()
+    """Run one case through intake + readiness; return per-case metrics.
+
+    Provider usage is read from real gateway telemetry (not env guesses), so the
+    benchmark can prove a local model actually ran and never silently fell back
+    to mock or reached an external API.
+    """
+    events: list = []
+    _gateway.add_call_observer(events.append)
     error = ""
     try:
-        req = structure_customer_requirement_with_llm(
-            raw_text=case.raw_text, project_id="benchmark"
-        )
-        gate = evaluate_requirement_readiness(req)
-        action = "pending_email_approval" if gate.ready else gate.next_action
-        destination_authoritative = semantic_sources.has_authoritative_destination(req)
-        product_authoritative = semantic_sources.has_authoritative_product(req)
-        # false-ready: gate says ready but destination is not authoritative.
-        false_ready = bool(gate.ready and not destination_authoritative)
-        llm_used = os.environ.get("AIVAN_LLM_API_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-        if llm_used:
-            recorder.record_call(
-                task="requirement_structuring",
-                provider=os.environ.get("AIVAN_LLM_PROVIDER", "mock"),
-                model=os.environ.get("OLLAMA_MODEL", ""),
-                input_text=case.raw_text,
-                output_text=req.product_type + " " + (req.destination or ""),
+        try:
+            req = structure_customer_requirement_with_llm(
+                raw_text=case.raw_text, project_id="benchmark"
             )
-    except Exception as exc:  # a normal RFQ must never generic-error out
-        error = f"{exc.__class__.__name__}: {exc}"
+            gate = evaluate_requirement_readiness(req)
+        except Exception as exc:  # a normal RFQ must never generic-error out
+            error = f"{exc.__class__.__name__}: {exc}"
+    finally:
+        _gateway.remove_call_observer(events.append)
+
+    # Telemetry-derived provider facts.
+    local_events = [e for e in events if e.used_provider not in ("mock", "none")]
+    real_local_call = any(
+        e.configured_provider == EXPECTED_LOCAL_PROVIDER
+        and e.used_provider == EXPECTED_LOCAL_PROVIDER
+        and e.ok
+        for e in events
+    )
+    mock_fallback = any(
+        e.configured_provider not in ("mock", "none") and e.used_provider == "mock"
+        for e in events
+    )
+    external_api_called = any(e.external_api_called and e.ok for e in events)
+    local_llm_tokens = sum(e.input_tokens + e.output_tokens for e in local_events)
+    local_llm_latency_ms = sum(e.latency_ms for e in local_events)
+    local_llm_tasks = sorted({e.task for e in local_events})
+    local_llm_model = next(
+        (e.model for e in local_events if e.configured_provider == EXPECTED_LOCAL_PROVIDER and e.model),
+        os.environ.get("OLLAMA_MODEL", "") if os.environ.get("AIVAN_LLM_PROVIDER") == "ollama" else "",
+    )
+
+    if error:
         return {
-            "case_id": case.case_id,
-            "tier": case.tier,
-            "mode": mode_key,
-            "error": error,
-            "action": "error",
-            "ready": False,
-            "false_ready": False,
-            "outbound_sent_before_approval": False,
-            "external_api_called": recorder.external_api_called,
-            "missing_fields": [],
-            "total_tokens": recorder.total_tokens,
-            "llm_call_count": recorder.llm_call_count,
+            "case_id": case.case_id, "tier": case.tier, "mode": mode_key,
+            "error": error, "action": "error", "ready": False, "false_ready": False,
+            "outbound_sent_before_approval": False, "external_api_called": external_api_called,
+            "missing_fields": [], "total_tokens": local_llm_tokens, "llm_call_count": len(events),
+            "real_local_call": real_local_call, "mock_fallback": mock_fallback,
+            "local_llm_model": local_llm_model, "local_llm_tokens": local_llm_tokens,
+            "local_llm_latency_ms": round(local_llm_latency_ms, 3), "local_llm_tasks": local_llm_tasks,
         }
 
+    action = "pending_email_approval" if gate.ready else gate.next_action
+    destination_authoritative = semantic_sources.has_authoritative_destination(req)
+    product_authoritative = semantic_sources.has_authoritative_product(req)
+    false_ready = bool(gate.ready and not destination_authoritative)
+
     return {
-        "case_id": case.case_id,
-        "tier": case.tier,
-        "mode": mode_key,
-        "input_language": case.input_language,
-        "action": action,
-        "ready": gate.ready,
-        "false_ready": false_ready,
-        "outbound_sent_before_approval": False,  # benchmark never sends
-        "external_api_called": recorder.external_api_called,
+        "case_id": case.case_id, "tier": case.tier, "mode": mode_key,
+        "input_language": case.input_language, "action": action, "ready": gate.ready,
+        "false_ready": false_ready, "outbound_sent_before_approval": False,
+        "external_api_called": external_api_called,
         "destination_authoritative": destination_authoritative,
         "product_authoritative": product_authoritative,
-        "missing_fields": gate.missing_fields,
-        "quantity": req.quantity,
-        "delivery_days": req.delivery_days,
-        "input_tokens": recorder.total_input_tokens,
-        "output_tokens": recorder.total_output_tokens,
-        "total_tokens": recorder.total_tokens,
-        "llm_call_count": recorder.llm_call_count,
-        "error": "",
+        "missing_fields": gate.missing_fields, "quantity": req.quantity,
+        "delivery_days": req.delivery_days, "llm_call_count": len(events),
+        "real_local_call": real_local_call, "mock_fallback": mock_fallback,
+        "local_llm_model": local_llm_model, "local_llm_tokens": local_llm_tokens,
+        "local_llm_latency_ms": round(local_llm_latency_ms, 3), "local_llm_tasks": local_llm_tasks,
+        "total_tokens": local_llm_tokens, "error": "",
     }
 
 
@@ -197,6 +222,11 @@ def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
     outbound = [r for r in results if r.get("outbound_sent_before_approval")]
     total_tokens = sum(r.get("total_tokens", 0) for r in results)
     llm_calls = sum(r.get("llm_call_count", 0) for r in results)
+    real_local = [r for r in results if r.get("real_local_call")]
+    mock_fallbacks = [r for r in results if r.get("mock_fallback")]
+    local_llm_tokens = sum(r.get("local_llm_tokens", 0) for r in results)
+    local_llm_latency = sum(r.get("local_llm_latency_ms", 0) for r in results)
+    local_llm_tasks = sorted({t for r in results for t in r.get("local_llm_tasks", [])})
 
     thresholds: list[str] = []
     if external:
@@ -207,6 +237,25 @@ def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
         thresholds.append(f"false_ready on {len(false_ready)} case(s)")
     if errors:
         thresholds.append(f"generic_backend_error on {len(errors)} case(s)")
+
+    # Local-LLM modes (C/D) must actually exercise the local model: every case
+    # must record a real ollama call with the expected model, and none may fall
+    # back to mock. A dead Ollama must NOT look like success.
+    if mode_key in LOCAL_LLM_MODES:
+        if mock_fallbacks:
+            thresholds.append(f"mock_fallback on {len(mock_fallbacks)} case(s) (local model not really used)")
+        if len(real_local) < len(results):
+            missing = len(results) - len(real_local)
+            thresholds.append(
+                f"ollama_not_called on {missing} case(s) (expected provider={EXPECTED_LOCAL_PROVIDER})"
+            )
+        bad_model = [
+            r for r in results if r.get("real_local_call") and r.get("local_llm_model") != EXPECTED_LOCAL_MODEL
+        ]
+        if bad_model:
+            thresholds.append(
+                f"unexpected_local_model on {len(bad_model)} case(s) (expected {EXPECTED_LOCAL_MODEL})"
+            )
 
     return {
         "mode": mode_key,
@@ -222,6 +271,13 @@ def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
             "total_tokens": total_tokens,
             "llm_call_count": llm_calls,
             "tokens_per_case": round(total_tokens / len(results), 2) if results else 0,
+            "real_local_call_count": len(real_local),
+            "mock_fallback_count": len(mock_fallbacks),
+            "local_llm_tokens": local_llm_tokens,
+            "local_llm_latency_ms": round(local_llm_latency, 3),
+            "local_llm_tasks": local_llm_tasks,
+            "expected_local_provider": EXPECTED_LOCAL_PROVIDER if mode_key in LOCAL_LLM_MODES else None,
+            "expected_local_model": EXPECTED_LOCAL_MODEL if mode_key in LOCAL_LLM_MODES else None,
         },
         "hard_thresholds_passed": not thresholds,
         "hard_threshold_failures": thresholds,

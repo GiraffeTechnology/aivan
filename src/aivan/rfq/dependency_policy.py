@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from aivan.llm.policy import ExternalModelApiRequiresApprovalError
+from aivan.llm.policy import (
+    ExternalModelApiRequiresApprovalError,
+    LocalModelUnavailableError,
+)
 from aivan.integrations.gltg import GLTGUnavailableError
 from aivan.integrations.language_skill import LanguageSkillUnavailable
 
@@ -54,6 +57,23 @@ def classify_exception(exc: BaseException, *, step: str = "") -> DependencyRecov
                 "此步骤本可调用外部模型，但私域基线已禁用外部模型 API，"
                 "AIVAN 已在不调用外部模型的情况下继续。如需增强能力，请审批外部模型调用。"
             ),
+        )
+    if isinstance(exc, LocalModelUnavailableError):
+        return DependencyRecovery(
+            dependency="local_model",
+            action="reduced_strength_local_model_unavailable",
+            blocked_reason=str(exc),
+            operator_message_en=(
+                "The private-domain local model is currently unavailable. AIVAN "
+                "continued in reduced-strength mode using deterministic extraction "
+                "and preserved the raw message. It did NOT fall back to any cloud "
+                "model. Confirm canonical fields to proceed."
+            ),
+            operator_message_zh=(
+                "私域本地模型当前不可用。AIVAN 已切换到降级模式（仅确定性抽取），"
+                "并保留原文，未回退到任何云端模型。请确认关键字段后继续。"
+            ),
+            manual_review_required=True,
         )
     if isinstance(exc, LanguageSkillUnavailable):
         return DependencyRecovery(
