@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
@@ -114,6 +117,34 @@ def default_cases_path() -> Path:
     return Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "rfq_benchmark_cases.jsonl"
 
 
+def filter_cases(
+    cases: list[BenchmarkCase],
+    case_ids: list[str] | None = None,
+    max_cases: int | None = None,
+) -> list[BenchmarkCase]:
+    """Apply --case-id / --max-cases filters. No filters -> unchanged list."""
+    selected = cases
+    if case_ids:
+        wanted = list(case_ids)
+        by_id = {c.case_id: c for c in cases}
+        selected = [by_id[cid] for cid in wanted if cid in by_id]
+    if max_cases is not None and max_cases >= 0:
+        selected = selected[:max_cases]
+    return selected
+
+
+def format_progress_line(result: dict) -> str:
+    """One-line progress summary for a completed case."""
+    status = "FAIL(" + ",".join(result.get("fail_reasons") or []) + ")" if result.get("failed") else "PASS"
+    return (
+        f"[{result.get('mode')}] {result.get('case_id')} "
+        f"tier={result.get('tier')} start={result.get('started_at')} "
+        f"elapsed={result.get('elapsed_seconds')}s "
+        f"provider={result.get('provider')} model={result.get('model') or '-'} "
+        f"tokens={result.get('local_llm_tokens', result.get('total_tokens', 0))} {status}"
+    )
+
+
 @contextmanager
 def _mode_env(mode_key: str):
     overrides = MODES[mode_key]
@@ -138,6 +169,9 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
     benchmark can prove a local model actually ran and never silently fell back
     to mock or reached an external API.
     """
+    started = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    configured_provider = os.environ.get("AIVAN_LLM_PROVIDER", "mock")
     events: list = []
     _gateway.add_call_observer(events.append)
     error = ""
@@ -151,6 +185,7 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
             error = f"{exc.__class__.__name__}: {exc}"
     finally:
         _gateway.remove_call_observer(events.append)
+    elapsed_seconds = round(time.perf_counter() - started, 3)
 
     # Telemetry-derived provider facts.
     local_events = [e for e in events if e.used_provider not in ("mock", "none")]
@@ -173,6 +208,13 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
         os.environ.get("OLLAMA_MODEL", "") if os.environ.get("AIVAN_LLM_PROVIDER") == "ollama" else "",
     )
 
+    timing = {
+        "started_at": started_at,
+        "elapsed_seconds": elapsed_seconds,
+        "provider": configured_provider,
+        "model": local_llm_model,
+    }
+
     if error:
         return {
             "case_id": case.case_id, "tier": case.tier, "mode": mode_key,
@@ -182,6 +224,7 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
             "real_local_call": real_local_call, "mock_fallback": mock_fallback,
             "local_llm_model": local_llm_model, "local_llm_tokens": local_llm_tokens,
             "local_llm_latency_ms": round(local_llm_latency_ms, 3), "local_llm_tasks": local_llm_tasks,
+            "timed_out": False, **timing,
         }
 
     action = "pending_email_approval" if gate.ready else gate.next_action
@@ -201,22 +244,105 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
         "real_local_call": real_local_call, "mock_fallback": mock_fallback,
         "local_llm_model": local_llm_model, "local_llm_tokens": local_llm_tokens,
         "local_llm_latency_ms": round(local_llm_latency_ms, 3), "local_llm_tasks": local_llm_tasks,
-        "total_tokens": local_llm_tokens, "error": "",
+        "total_tokens": local_llm_tokens, "error": "", "timed_out": False, **timing,
     }
 
 
-def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
-    """Run all cases under one mode and aggregate metrics + threshold checks."""
+def case_failures(result: dict, mode_key: str) -> list[str]:
+    """Per-case failure reasons for the pass/fail summary and fail-fast."""
+    reasons: list[str] = []
+    if result.get("timed_out"):
+        reasons.append("timeout")
+        return reasons
+    if result.get("error"):
+        reasons.append(f"error:{result['error'][:60]}")
+    if result.get("external_api_called"):
+        reasons.append("external_api_called")
+    if result.get("false_ready"):
+        reasons.append("false_ready")
+    if result.get("outbound_sent_before_approval"):
+        reasons.append("outbound_before_approval")
+    if mode_key in LOCAL_LLM_MODES and not result.get("error"):
+        if result.get("mock_fallback"):
+            reasons.append("mock_fallback")
+        elif not result.get("real_local_call"):
+            reasons.append("ollama_not_called")
+        elif result.get("local_llm_model") != EXPECTED_LOCAL_MODEL:
+            reasons.append("unexpected_local_model")
+    return reasons
+
+
+def _timeout_result(case: BenchmarkCase, mode_key: str, timeout_seconds: float,
+                    started_at: str, elapsed: float) -> dict:
+    return {
+        "case_id": case.case_id, "tier": case.tier, "mode": mode_key,
+        "input_language": case.input_language, "error": "", "action": "timeout",
+        "ready": False, "false_ready": False, "outbound_sent_before_approval": False,
+        "external_api_called": False, "missing_fields": [], "total_tokens": 0,
+        "llm_call_count": 0, "real_local_call": False, "mock_fallback": False,
+        "local_llm_model": "", "local_llm_tokens": 0,
+        "local_llm_latency_ms": round(elapsed * 1000, 3), "local_llm_tasks": [],
+        "timed_out": True, "timeout_seconds": timeout_seconds,
+        "started_at": started_at, "elapsed_seconds": round(elapsed, 3),
+        "provider": os.environ.get("AIVAN_LLM_PROVIDER", "mock"), "model": "",
+    }
+
+
+def _run_one(case: BenchmarkCase, mode_key: str, per_case_timeout: float | None) -> dict:
+    """Run a single case, enforcing an optional wall-clock per-case timeout."""
+    if not per_case_timeout or per_case_timeout <= 0:
+        return run_case(case, mode_key)
+    started = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(run_case, case, mode_key)
+    try:
+        return future.result(timeout=per_case_timeout)
+    except FutureTimeout:
+        elapsed = time.perf_counter() - started
+        return _timeout_result(case, mode_key, per_case_timeout, started_at, elapsed)
+    finally:
+        # Never block shutdown on an orphaned (still-running) case thread.
+        executor.shutdown(wait=False)
+
+
+def run_benchmark(
+    cases: list[BenchmarkCase],
+    mode_key: str,
+    *,
+    on_case=None,
+    per_case_timeout: float | None = None,
+    fail_fast: bool = False,
+) -> dict:
+    """Run all cases under one mode and aggregate metrics + threshold checks.
+
+    ``on_case`` (if given) is called with each per-case result immediately after
+    it completes — used for live progress and incremental JSONL output.
+    ``per_case_timeout`` marks any case exceeding it as a failed timeout and
+    continues (unless ``fail_fast``). ``fail_fast`` stops at the first failing
+    case. With no filters/hooks the behavior is identical to before.
+    """
     if mode_key not in MODES:
         raise ValueError(f"Unknown benchmark mode: {mode_key}")
 
     results: list[dict] = []
+    stopped_early = False
     with _mode_env(mode_key):
         for case in cases:
-            results.append(run_case(case, mode_key))
+            result = _run_one(case, mode_key, per_case_timeout)
+            reasons = case_failures(result, mode_key)
+            result["failed"] = bool(reasons)
+            result["fail_reasons"] = reasons
+            results.append(result)
+            if on_case is not None:
+                on_case(result)
+            if fail_fast and reasons:
+                stopped_early = True
+                break
 
     ready = [r for r in results if r["ready"]]
     errors = [r for r in results if r.get("error")]
+    timeouts = [r for r in results if r.get("timed_out")]
     false_ready = [r for r in results if r.get("false_ready")]
     external = [r for r in results if r.get("external_api_called")]
     outbound = [r for r in results if r.get("outbound_sent_before_approval")]
@@ -237,6 +363,8 @@ def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
         thresholds.append(f"false_ready on {len(false_ready)} case(s)")
     if errors:
         thresholds.append(f"generic_backend_error on {len(errors)} case(s)")
+    if timeouts:
+        thresholds.append(f"timeout on {len(timeouts)} case(s)")
 
     # Local-LLM modes (C/D) must actually exercise the local model: every case
     # must record a real ollama call with the expected model, and none may fall
@@ -268,6 +396,7 @@ def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
             "external_api_call_count": len(external),
             "outbound_before_approval_count": len(outbound),
             "error_count": len(errors),
+            "timeout_count": len(timeouts),
             "total_tokens": total_tokens,
             "llm_call_count": llm_calls,
             "tokens_per_case": round(total_tokens / len(results), 2) if results else 0,
@@ -281,6 +410,7 @@ def run_benchmark(cases: list[BenchmarkCase], mode_key: str) -> dict:
         },
         "hard_thresholds_passed": not thresholds,
         "hard_threshold_failures": thresholds,
+        "stopped_early": stopped_early,
         "results": results,
     }
 

@@ -386,6 +386,43 @@ uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
 
 ---
 
+## Small Local Model Boundary Benchmark
+
+Measures the production capability boundary of the CTYUN local-only model
+(`qwen3.5:0.8b`) with external provider APIs OFF. The harness reads real provider
+telemetry (not env guesses): modes C/D fail unless a real Ollama call with the
+expected model is recorded for every case, with zero external API calls and zero
+mock fallback.
+
+Developer ergonomics:
+
+| Flag | Effect |
+|---|---|
+| `--max-cases N` | Run only the first N (post-filter) cases. |
+| `--case-id ID` | Run only this case id (repeatable). |
+| `--progress` | Print a live per-case line (mode, case_id, tier, start, elapsed, provider, model, tokens, PASS/FAIL). |
+| `--per-case-timeout S` | Mark any case exceeding S seconds as a failed timeout and continue (unless `--fail-fast`). |
+| `--fail-fast` | Stop at the first failing case. |
+| `--fail-on-threshold` | Exit non-zero if any hard threshold fails. |
+
+Incremental per-case results are always streamed to
+`artifacts/benchmark_events.jsonl` so a long CTYUN run is inspectable before it
+finishes. Passing no filters preserves the original full-run behavior.
+
+Smoke command (fast local check against CTYUN `qwen3.5:0.8b`):
+
+```bash
+uv run python scripts/benchmark_small_model_boundary.py --modes C --max-cases 3 --progress --fail-on-threshold
+```
+
+Full release run:
+
+```bash
+uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold
+```
+
+---
+
 ## Release / Live Acceptance Checklist
 
 Before production publication or ClawHub release:
