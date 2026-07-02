@@ -279,3 +279,22 @@ def test_english_singapore_not_overwritten_by_local_llm_when_language_skill_miss
     assert gate.ready is False
     assert gate.next_action == "pending_destination_confirmation"
     assert "destination" in gate.missing_fields
+
+
+def test_valid_language_skill_rfq_skips_requirement_llm(enabled_service, monkeypatch):
+    from aivan.agents import requirement_agent
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("requirement LLM should not run when language-skill RFQ is valid")
+
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", _fail_if_called)
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text=ZH_RFQ, project_id="p1", source_channel="wechat"
+    )
+
+    assert req.destination == "Tokyo"
+    assert req.quantity == 5000
+    assert req.product_type == "plaid shirt"
+    assert req.delivery_days == 45
+    assert req.extra["requirement_llm_skipped"] == "language_skill_valid"

@@ -124,6 +124,17 @@ def _detect_missing_fields(req: BuyerRequirement) -> list[MissingField]:
 
     return missing
 
+
+def _has_valid_language_skill_rfq(canonicalization: dict | None) -> bool:
+    structure = (canonicalization or {}).get("structure") or {}
+    if structure.get("validation_status") != "valid":
+        return False
+    structured = structure.get("structured") or {}
+    return all(
+        structured.get(field) not in (None, "", [])
+        for field in ("quantity", "product_name", "destination", "lead_time_days")
+    )
+
 def structure_customer_requirement_with_llm(
     raw_text: str,
     attachments: list | None = None,
@@ -160,21 +171,32 @@ def structure_customer_requirement_with_llm(
 
     user_prompt = f"Customer message:\n{raw_text}{attach_note}{existing_note}\n\nExtract and structure all requirement fields. Language: {language}"
 
-    llm_used = True
-    try:
-        result = llm_complete_json("requirement_structuring", REQUIREMENT_STRUCTURING_SYSTEM, user_prompt)
-    except ExternalModelApiRequiresApprovalError:
-        # External model disabled without approval: continue in private-domain
-        # baseline (reduced strength), never a silent cloud fallback.
-        result = {}
-    except Exception:
-        result = {}
-
-    if not result or result.get("confidence", 0) < 0.3:
+    skip_requirement_llm = (
+        _has_valid_language_skill_rfq(canonicalization)
+        and not attachments
+        and existing_requirement is None
+    )
+    if skip_requirement_llm:
         result = _deterministic_parse(raw_text)
         result["language"] = language
         result["confidence"] = 0.5
         llm_used = False
+    else:
+        llm_used = True
+        try:
+            result = llm_complete_json("requirement_structuring", REQUIREMENT_STRUCTURING_SYSTEM, user_prompt)
+        except ExternalModelApiRequiresApprovalError:
+            # External model disabled without approval: continue in private-domain
+            # baseline (reduced strength), never a silent cloud fallback.
+            result = {}
+        except Exception:
+            result = {}
+
+        if not result or result.get("confidence", 0) < 0.3:
+            result = _deterministic_parse(raw_text)
+            result["language"] = language
+            result["confidence"] = 0.5
+            llm_used = False
 
     if existing_requirement:
         for field in BuyerRequirement.model_fields:
@@ -208,6 +230,8 @@ def structure_customer_requirement_with_llm(
     if canonicalization:
         apply_to_requirement(req, canonicalization)
         _record_language_skill_sources(req, canonicalization)
+        if skip_requirement_llm:
+            req.extra["requirement_llm_skipped"] = "language_skill_valid"
 
     req.missing_fields = _detect_missing_fields(req)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from sqlalchemy.orm import Session
 
@@ -43,6 +44,14 @@ from aivan.schemas.rfq import (
 
 logger = logging.getLogger(__name__)
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 CLASSIFICATION_SYSTEM = """
 You classify AIVAN private-domain trade events. Return JSON only.
 Allowed event_type values: user_command, customer_new_inquiry, customer_followup,
@@ -70,6 +79,18 @@ def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
         if project:
             validated_project_id = project.project_id
 
+    fallback = _fallback_event_type(event, bool(validated_project_id))
+    if fallback != "unknown" and not _env_bool("AIVAN_EVENT_CLASSIFICATION_LLM_ENABLED"):
+        return EventClassification(
+            event_type=fallback,
+            confidence=0.7,
+            reason="deterministic fallback classification",
+            project_id=validated_project_id,
+            validated_project_attachment=bool(validated_project_id),
+        )
+
+    validated_project_text = validated_project_id or ""
+
     schema_hint = {
         "event_type": "user_command | customer_new_inquiry | customer_followup | customer_reply | supplier_reply | internal_status_request | approval_response | unknown",
         "confidence": 0.0,
@@ -78,13 +99,12 @@ def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
     user_prompt = (
         f"channel={event.channel}\nrole_context={event.role_context}\n"
         f"mode={event.mode}\nmessage={event.message_text}\n"
-        f"validated_project_id={validated_project_id or ''}"
+        f"validated_project_id={validated_project_text}"
     )
     try:
         raw = llm_complete_json("aivan_event_classification", CLASSIFICATION_SYSTEM, user_prompt, schema_hint)
     except Exception:
         raw = {}
-    fallback = _fallback_event_type(event, bool(validated_project_id))
     event_type = raw.get("event_type") if raw.get("event_type") in EventClassification.model_fields["event_type"].annotation.__args__ else fallback
     return EventClassification(
         event_type=event_type or fallback,
@@ -96,6 +116,9 @@ def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
 
 
 def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> RFQStrategy:
+    if not _env_bool("AIVAN_STRATEGY_LLM_ENABLED"):
+        return _fallback_strategy(raw_text)
+
     schema_hint = RFQStrategy().model_dump()
     user_prompt = f"User instruction:\n{raw_text}\n\nAIVAN context keys: {list((context or GiraffeContext()).model_dump().keys())}"
     try:
@@ -667,10 +690,12 @@ def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, 
         "strategy": strategy.model_dump(),
         "gltg": gltg.model_dump(),
     }
-    try:
-        raw = llm_complete_json("aivan_supplier_email_draft", DRAFT_SYSTEM, str(user_prompt), schema_hint)
-    except Exception:
-        raw = {}
+    raw = {}
+    if _env_bool("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED"):
+        try:
+            raw = llm_complete_json("aivan_supplier_email_draft", DRAFT_SYSTEM, str(user_prompt), schema_hint)
+        except Exception:
+            raw = {}
     if raw.get("message_text"):
         return raw["message_text"]
     lines = [

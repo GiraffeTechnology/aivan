@@ -509,6 +509,7 @@ def test_invalid_llm_strategy_fields_fall_back_deterministically(monkeypatch, ra
 def test_partial_llm_strategy_payload_uses_schema_defaults(monkeypatch):
     import aivan.execution.rfq_execution as rfq_execution
 
+    monkeypatch.setenv("AIVAN_STRATEGY_LLM_ENABLED", "true")
     monkeypatch.setattr(rfq_execution, "llm_complete_json", lambda *args, **kwargs: {"priority": "speed"})
 
     strategy = rfq_execution.interpret_strategy("urgent order")
@@ -716,3 +717,66 @@ def test_owner_resolution_ignores_revoked_account_prefers_active(api_client, api
     assert resolved == "active_owner", (
         f"Must resolve the connected account owner, not the revoked one; got {resolved!r}"
     )
+
+
+def test_deterministic_classification_skips_llm_for_clear_wechat_inquiry(monkeypatch, db_session):
+    from aivan.execution import rfq_execution
+    from aivan.openclaw.contracts import OpenClawEvent
+
+    monkeypatch.delenv("AIVAN_EVENT_CLASSIFICATION_LLM_ENABLED", raising=False)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("classification LLM should not run for deterministic inquiry")
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", _fail_if_called)
+    event = OpenClawEvent(
+        channel="wechat",
+        conversation_id="c1",
+        sender_id="buyer",
+        message_text="Inquiry: Order 5000 plaid shirts to Singapore within 45 days.",
+    )
+
+    classification = rfq_execution.classify_event(event, db_session)
+
+    assert classification.event_type == "user_command"
+    assert classification.reason == "deterministic fallback classification"
+
+
+def test_strategy_interpretation_skips_llm_by_default(monkeypatch):
+    from aivan.execution import rfq_execution
+
+    monkeypatch.delenv("AIVAN_STRATEGY_LLM_ENABLED", raising=False)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("strategy LLM should be opt-in")
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", _fail_if_called)
+
+    strategy = rfq_execution.interpret_strategy("urgent order, use known suppliers")
+
+    assert strategy.priority == "speed"
+    assert strategy.supplier_scope == "known_suppliers_first"
+
+
+def test_supplier_email_draft_uses_deterministic_template_by_default(monkeypatch):
+    from aivan.execution import rfq_execution
+    from aivan.schemas.requirement import BuyerRequirement
+    from aivan.schemas.rfq import RFQStrategy
+
+    monkeypatch.delenv("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED", raising=False)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("supplier draft LLM should be opt-in")
+
+    monkeypatch.setattr(rfq_execution, "llm_complete_json", _fail_if_called)
+
+    message = rfq_execution._draft_supplier_email(
+        BuyerRequirement(product_type="plaid shirt", quantity=5000, destination="Singapore", delivery_days=45),
+        RFQStrategy(),
+        {"name": "Supplier A"},
+        type("GLTG", (), {"model_dump": lambda self: {}})(),
+    )
+
+    assert "Dear Supplier A" in message
+    assert "Destination: Singapore" in message
+    assert "buyer review and final approval" in message
