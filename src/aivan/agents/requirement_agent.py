@@ -4,6 +4,7 @@ import json
 from pydantic import BaseModel
 from aivan.schemas.requirement import BuyerRequirement, MissingField
 from aivan.llm.gateway import llm_complete_json
+from aivan.llm.policy import ExternalModelApiRequiresApprovalError
 from aivan.llm.prompts import REQUIREMENT_STRUCTURING_SYSTEM
 from aivan.utils.language import detect_language
 from aivan.integrations.language_skill import apply_to_requirement, canonicalize_rfq
@@ -69,58 +70,26 @@ CNC_REQUIRED_FIELDS = [
     ("delivery_days", "Delivery deadline", "需要多少天内交货？"),
 ]
 
-# Deterministic destination aliases (surface form -> canonical English city).
-# The giraffe-language-skill overlay is authoritative when enabled; these keep
-# the local fallback able to recognize common destinations — including Tokyo /
-# Osaka — when the service is disabled or the LLM drops the field.
-CITY_ALIASES = [
-    ("Vancouver", "Vancouver"),
-    ("温哥华", "Vancouver"),
-    ("Los Angeles", "Los Angeles"),
-    ("洛杉矶", "Los Angeles"),
-    ("New York", "New York"),
-    ("纽约", "New York"),
-    ("London", "London"),
-    ("伦敦", "London"),
-    ("Shanghai", "Shanghai"),
-    ("上海", "Shanghai"),
-    ("Tokyo", "Tokyo"),
-    ("东京", "Tokyo"),
-    ("Osaka", "Osaka"),
-    ("大阪", "Osaka"),
-]
-
 def _deterministic_parse(raw_text: str) -> dict:
-    """Fallback: detect basic fields from raw text without LLM."""
+    """Fallback: extract only numeric/enumerable RAW EVIDENCE without any LLM.
+
+    This deliberately does NOT canonicalize business semantics. It never maps a
+    product surface form to a canonical SKU/category, and it never maps a place
+    surface form to a canonical destination (no city/port alias tables). Those
+    canonical facts require an authoritative source (language-skill, resolvers,
+    giraffe-db, or human confirmation) — raw text alone is not authority.
+    """
     import re
-    result = {}
+    result: dict = {}
     text_lower = raw_text.lower()
 
     qty_match = re.search(r'(\d[\d,]*)\s*(?:件|pcs|pieces|units)', raw_text)
     if qty_match:
         result["quantity"] = int(qty_match.group(1).replace(",", ""))
 
-    if any(w in text_lower for w in ["shirt", "衬衣", "衬衫", "t-shirt", "polo"]):
-        result["category"] = "apparel"
-        result["product_type"] = "shirt"
-    elif any(w in text_lower for w in ["cnc", "machining", "mill", "lathe"]):
-        result["category"] = "cnc"
-
     gsm_match = re.search(r'(\d+)\s*gsm', text_lower)
     if gsm_match:
         result["gsm"] = int(gsm_match.group(1))
-
-    if "cotton" in text_lower or "纯棉" in text_lower:
-        result["fabric_material"] = "100% cotton"
-    if "white" in text_lower or "白色" in text_lower:
-        result["color"] = "white"
-    if "plaid" in text_lower or "checkered" in text_lower or "格子" in raw_text:
-        result["notes"] = "plaid/checkered pattern"
-
-    for alias, destination in CITY_ALIASES:
-        if alias.lower() in text_lower or alias in raw_text:
-            result["destination"] = destination
-            break
 
     day_match = re.search(r'(\d+)\s*(?:days?|天|日)', text_lower)
     if day_match:
@@ -191,8 +160,13 @@ def structure_customer_requirement_with_llm(
 
     user_prompt = f"Customer message:\n{raw_text}{attach_note}{existing_note}\n\nExtract and structure all requirement fields. Language: {language}"
 
+    llm_used = True
     try:
         result = llm_complete_json("requirement_structuring", REQUIREMENT_STRUCTURING_SYSTEM, user_prompt)
+    except ExternalModelApiRequiresApprovalError:
+        # External model disabled without approval: continue in private-domain
+        # baseline (reduced strength), never a silent cloud fallback.
+        result = {}
     except Exception:
         result = {}
 
@@ -200,6 +174,7 @@ def structure_customer_requirement_with_llm(
         result = _deterministic_parse(raw_text)
         result["language"] = language
         result["confidence"] = 0.5
+        llm_used = False
 
     if existing_requirement:
         for field in BuyerRequirement.model_fields:
@@ -215,21 +190,64 @@ def structure_customer_requirement_with_llm(
     safe_data = _coerce_field_shapes(safe_data, BuyerRequirement)
     req = BuyerRequirement(project_id=project_id, raw_text=raw_text, **safe_data)
 
+    # Record provenance for the fields the structuring layer produced. The RFQ
+    # structuring model's *structured* output is provisional canonical evidence
+    # (llm_structured); a pure deterministic-regex fallback is raw_text_only and
+    # is NOT authoritative for canonical product/destination.
+    field_source = "llm_structured" if llm_used else "raw_text_only"
+    sources: dict[str, str] = {}
+    for field in ("product_type", "category", "destination", "quantity",
+                  "delivery_days", "color", "fabric_material"):
+        if safe_data.get(field) not in (None, "", []):
+            sources[field] = field_source
+    req.extra["field_sources"] = sources
+
     # Overlay the language-skill canonicalization (authoritative for explicit
     # business facts) before computing missing fields, so clarification only
     # asks for what is genuinely absent.
     if canonicalization:
         apply_to_requirement(req, canonicalization)
+        _record_language_skill_sources(req, canonicalization)
 
     req.missing_fields = _detect_missing_fields(req)
 
+    # Category selects which required-field template applies. It is inferred only
+    # from an authoritative structured category, never from hardcoded keyword ->
+    # category business-semantic mappings.
     if not req.category:
-        text_lower = raw_text.lower()
-        if any(w in text_lower for w in ["shirt", "衬衣", "衬衫", "apparel", "garment", "textile", "fabric"]):
-            req.category = "apparel"
-        elif any(w in text_lower for w in ["cnc", "machining", "mill", "lathe", "metal"]):
-            req.category = "cnc"
-        else:
-            req.category = "general"
+        req.category = "general"
 
     return req
+
+
+def _record_language_skill_sources(req: BuyerRequirement, canonicalization: dict) -> None:
+    """Mark language-skill-provided fields as authoritative in field_sources."""
+    structure_data = (canonicalization or {}).get("structure") or {}
+    structured = structure_data.get("structured") or {}
+    sources = req.extra.setdefault("field_sources", {})
+    for src_field, req_attr in {
+        "product_name": "product_type",
+        "product_category": "category",
+        "destination": "destination",
+        "quantity": "quantity",
+        "lead_time_days": "delivery_days",
+    }.items():
+        value = structured.get(src_field)
+        if value not in (None, "", []):
+            sources[req_attr] = "language_skill"
+    # Preserve raw evidence spans for confirmation prompts.
+    normalize_data = (canonicalization or {}).get("normalize") or {}
+    evidence = normalize_data.get("field_evidence") or {}
+    if isinstance(evidence, dict):
+        if evidence.get("destination"):
+            req.extra.setdefault("destination_raw", _evidence_text(evidence["destination"]))
+        if evidence.get("product") or evidence.get("product_name"):
+            req.extra.setdefault("product_raw", _evidence_text(evidence.get("product") or evidence.get("product_name")))
+
+
+def _evidence_text(value) -> str:
+    if isinstance(value, dict):
+        return str(value.get("raw") or value.get("text") or value.get("span") or "")
+    if isinstance(value, list) and value:
+        return _evidence_text(value[0])
+    return str(value or "")

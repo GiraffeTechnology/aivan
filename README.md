@@ -386,6 +386,82 @@ uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
 
 ---
 
+## Small Local Model Boundary Benchmark
+
+Measures the production capability boundary of the CTYUN local-only model
+(`qwen3.5:0.8b`) with external provider APIs OFF. The harness reads real provider
+telemetry (not env guesses): modes C/D fail unless a real Ollama call with the
+expected model is recorded for every case, with zero external API calls and zero
+mock fallback.
+
+Developer ergonomics:
+
+| Flag | Effect |
+|---|---|
+| `--max-cases N` | Run only the first N (post-filter) cases. |
+| `--case-id ID` | Run only this case id (repeatable). |
+| `--progress` | Print a live per-case line (mode, case_id, tier, start, elapsed, provider, model, tokens, PASS/FAIL). |
+| `--per-case-timeout S` | Mark any case exceeding S seconds as a failed timeout and continue (unless `--fail-fast`). |
+| `--fail-fast` | Stop at the first failing case. |
+| `--fail-on-threshold` | Exit non-zero if any hard threshold fails. |
+| `--max-local-failure-rate F` | C/D only: fail if the local-model call-failure rate exceeds F (default off). |
+
+Incremental per-case results are always streamed to
+`artifacts/benchmark_events.jsonl` so a long CTYUN run is inspectable before it
+finishes. Passing no filters preserves the original full-run behavior.
+
+### Integrity vs capability (Mode C/D)
+
+Each case records its real provider telemetry (`configured_provider`,
+`used_provider`, `model`, `ok`, `provider_error`, `fell_back_to_mock`,
+`external_api_called`) and a `local_call_status`, read from the gateway — never
+inferred from env:
+
+| `local_call_status` | Meaning | Hard threshold |
+|---|---|---|
+| `real_local_call` | qwen3.5:0.8b called and returned OK | pass |
+| `local_call_failed` | qwen3.5:0.8b called but couldn't produce valid output | **reported, not a hard fail** (measured capability; gate with `--max-local-failure-rate`) |
+| `expected_local_call_missing` | model-required case never attempted a local call | **hard fail** |
+| `intentionally_skipped` | fixture set `llm_required: false` (deterministic/no-model case) | pass |
+| `mock_fallback` / `wrong_provider` / `unexpected_local_model` | silent substitution | **hard fail** |
+
+Integrity hard-fails: silent mock fallback, any external API call, a
+model-required case that never attempted the local model, wrong provider/model,
+or Ollama never once succeeding (0 successful calls = effectively dead). A
+called-but-failed 0.8b is a capability datapoint, not an integrity violation —
+so a run like "21 real / 10 failed" passes integrity and reports a 32% local
+failure rate for the accuracy discussion.
+
+Smoke command (fast local check against CTYUN `qwen3.5:0.8b`):
+
+```bash
+uv run python scripts/benchmark_small_model_boundary.py --modes C --max-cases 3 --progress --fail-on-threshold
+```
+
+### Recommended profiles
+
+**Integrity profile** — the private-domain safety gate. Use this as the **PR/merge
+gate**: it blocks on external API calls, mock fallback, outbound-before-approval,
+false-ready, backend errors, and (C/D) missing/wrong local calls or a dead Ollama.
+It does NOT block on `local_call_failed` (model capability).
+
+```bash
+uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold
+```
+
+**Capability profile** — for model-selection decisions (not for blocking this
+architecture PR). Adds a call-failure-rate ceiling on top of the integrity gate.
+
+```bash
+uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold --max-local-failure-rate 0.20
+```
+
+The report separates `integrity_status` (pass/fail — the merge gate),
+`capability_status` (`report_only` unless `--max-local-failure-rate` is passed,
+otherwise pass/fail), `local_call_failure_rate`, and the failing case IDs/tiers.
+
+---
+
 ## Release / Live Acceptance Checklist
 
 Before production publication or ClawHub release:

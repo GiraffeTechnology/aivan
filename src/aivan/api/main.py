@@ -23,14 +23,42 @@ logger = logging.getLogger("aivan.api")
 
 
 def _require_api_key(request: Request) -> None:
-    """Enforce X-AIVAN-API-Key when AIVAN_API_KEY is configured."""
-    configured = os.environ.get("AIVAN_API_KEY", "").strip()
+    """Enforce auth on protected routes; fail closed in production.
+
+    * production (AIVAN_ENV=production) with neither AIVAN_API_KEY nor
+      AIVAN_AUTH_SECRET configured -> reject every protected call (503). AIVAN
+      must never serve tenant/business data unauthenticated in production.
+    * a secret configured -> require a matching X-AIVAN-API-Key header or
+      Authorization: Bearer token.
+    * local/dev with no secret -> open (unauthenticated dev mode).
+    """
+    env = os.environ.get("AIVAN_ENV", "local").strip().lower()
+    api_key = os.environ.get("AIVAN_API_KEY", "").strip()
+    auth_secret = os.environ.get("AIVAN_AUTH_SECRET", "").strip()
+    configured = api_key or auth_secret
+
+    if env == "production" and not configured:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Server auth misconfigured: production requires AIVAN_API_KEY or "
+                "AIVAN_AUTH_SECRET"
+            ),
+        )
     if not configured:
-        return  # auth not enabled
+        return  # local/dev open mode
+
     provided = request.headers.get("X-AIVAN-API-Key", "").strip()
     if not provided:
+        auth_header = request.headers.get("Authorization", "").strip()
+        if auth_header.lower().startswith("bearer "):
+            provided = auth_header[7:].strip()
+    if not provided:
         raise HTTPException(status_code=401, detail="Missing X-AIVAN-API-Key header")
-    if not secrets.compare_digest(provided, configured):
+    if not (
+        (api_key and secrets.compare_digest(provided, api_key))
+        or (auth_secret and secrets.compare_digest(provided, auth_secret))
+    ):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 @asynccontextmanager
@@ -417,7 +445,7 @@ def get_project_state(project_id: str, db: Session = Depends(get_db), _: None = 
     }
 
 @app.post("/api/suppliers/import")
-def import_suppliers(body: dict, db: Session = Depends(get_db)):
+def import_suppliers(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     csv_content = body.get("csv_content", "")
     if not csv_content:
         raise HTTPException(status_code=400, detail="csv_content required")
@@ -427,13 +455,13 @@ def import_suppliers(body: dict, db: Session = Depends(get_db)):
     return {"imported": count, "errors": errors}
 
 @app.get("/api/suppliers")
-def list_suppliers(db: Session = Depends(get_db)):
+def list_suppliers(db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.sourcing.supplier_registry import list_active
     suppliers = list_active()
     return {"suppliers": [s.model_dump() for s in suppliers], "total": len(suppliers)}
 
 @app.post("/api/suppliers/match")
-def match_suppliers(body: dict, db: Session = Depends(get_db)):
+def match_suppliers(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.schemas.requirement import BuyerRequirement
     from aivan.sourcing.supplier_matcher import match_suppliers_for_requirement
     req = BuyerRequirement(**body)
@@ -453,7 +481,7 @@ def list_whitelist():
     return {"trusted_platforms": [p.model_dump() for p in platforms]}
 
 @app.post("/api/platforms/whitelist")
-def add_platform_to_whitelist(body: dict, db: Session = Depends(get_db)):
+def add_platform_to_whitelist(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     from aivan.platforms.models import TrustedPlatform
     from aivan.platforms.platform_registry import add_platform
     from aivan.utils.time_utils import utcnow_iso
@@ -500,7 +528,7 @@ def block_platform_suggestion(suggestion_id: str):
     return {"suggestion_id": suggestion_id, "status": "blocked"}
 
 @app.get("/api/projects")
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
     repo = ProjectRepository(db)
     projects = repo.list_all(limit=50)
     return {"projects": [

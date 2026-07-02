@@ -1,65 +1,51 @@
 from __future__ import annotations
 
+import json
 import os
+from functools import lru_cache
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.rfq import GiraffeContext
 from aivan.sourcing.supplier_models import SupplierProfile
+from aivan.utils.tenant import resolve_service_tenant_id
+
+# Demo stub suppliers live in data/demo (never in production src) and load only
+# when explicitly enabled. Production must not fabricate supplier candidates.
+_STUB_SUPPLIERS_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "demo" / "stub_suppliers.json"
+)
+
+
+def stub_suppliers_allowed() -> bool:
+    """Whether demo stub suppliers may be used.
+
+    Never in production. Otherwise honor ``AIVAN_ALLOW_STUB_SUPPLIERS`` when set;
+    default to allowed in local/dev so offline flows keep working.
+    """
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        return False
+    raw = os.environ.get("AIVAN_ALLOW_STUB_SUPPLIERS")
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@lru_cache(maxsize=1)
+def _load_stub_supplier_data() -> tuple[dict, ...]:
+    try:
+        with open(_STUB_SUPPLIERS_PATH, encoding="utf-8") as fh:
+            return tuple(json.load(fh))
+    except (OSError, ValueError):
+        return ()
 
 
 def _default_known_suppliers() -> list[SupplierProfile]:
-    return [
-        SupplierProfile(
-            supplier_id="known_sup_shenzhen_apparel",
-            name="Shenzhen Reliable Apparel Co.",
-            company_type="factory",
-            categories=["apparel"],
-            capabilities=["shirts", "woven garments", "export packaging"],
-            materials=["100% cotton", "cotton"],
-            moq_min=1000,
-            moq_max=50000,
-            daily_capacity=1200,
-            region="Guangdong",
-            country="CN",
-            languages=["zh", "en"],
-            channels=["email"],
-            email="rfq@shenzhen-reliable.example",
-            payment_terms="30% deposit, 70% before shipment",
-            incoterms_supported=["FOB", "DDP"],
-            logistics_modes=["air", "sea"],
-            quality_score=0.88,
-            delivery_score=0.9,
-            price_score=0.72,
-            past_performance_score=0.92,
-            notes="Known supplier stub from Giraffe DB facade.",
-        ),
-        SupplierProfile(
-            supplier_id="known_sup_guangzhou_textile",
-            name="Guangzhou Cotton Textile Works",
-            company_type="factory",
-            categories=["apparel", "textile"],
-            capabilities=["shirts", "cotton fabric sourcing"],
-            materials=["100% cotton", "organic cotton"],
-            moq_min=3000,
-            moq_max=80000,
-            daily_capacity=900,
-            region="Guangdong",
-            country="CN",
-            languages=["zh", "en"],
-            channels=["email"],
-            email="sales@guangzhou-cotton.example",
-            payment_terms="TT",
-            incoterms_supported=["FOB"],
-            logistics_modes=["air", "sea"],
-            quality_score=0.82,
-            delivery_score=0.84,
-            price_score=0.81,
-            past_performance_score=0.86,
-            notes="Known supplier stub from Giraffe DB facade.",
-        ),
-    ]
+    if not stub_suppliers_allowed():
+        return []
+    return [SupplierProfile(**dict(record)) for record in _load_stub_supplier_data()]
 
 
 class GiraffeDBClient:
@@ -181,12 +167,33 @@ class GiraffeDBClient:
         return flags
 
 
-def _giraffe_db_service_headers(tenant_id: str) -> dict[str, str]:
+def _giraffe_db_service_headers(tenant_id: str, idempotency_key: str = "") -> dict[str, str]:
     headers = {"X-Service-Tenant-ID": tenant_id}
     service_auth = os.environ.get("GIRAFFE_DB_SERVICE_AUTH_SECRET")
     if service_auth:
         headers["X-Service-Auth"] = service_auth
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     return headers
+
+
+def build_graph_trace_metadata(event, project_id: str) -> dict:
+    """Deterministic trace + idempotency metadata for giraffe-db graph payloads.
+
+    A stable ``source_trace_id`` / ``idempotency_key`` lets giraffe-db deduplicate
+    if the multi-POST persistence is retried, instead of leaving partial duplicate
+    graph records.
+    """
+    message_ref = getattr(event, "message_id", None) or getattr(event, "conversation_id", None) or "unknown"
+    source_event_id = getattr(event, "message_id", None) or ""
+    trace_id = f"aivan:{project_id}:{message_ref}"
+    return {
+        "source_system": "aivan",
+        "source_trace_id": trace_id,
+        "source_event_id": source_event_id,
+        "aivan_project_id": project_id,
+        "idempotency_key": trace_id,
+    }
 
 
 def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, gltg) -> dict:
@@ -204,12 +211,16 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
     if not base_url:
         return {}
 
-    tenant_id = os.environ.get("AIVAN_TENANT_ID") or os.environ.get("GIRAFFE_DB_TENANT_ID") or "server_e2e"
-    headers = _giraffe_db_service_headers(tenant_id)
+    tenant_id = resolve_service_tenant_id()
+    trace = build_graph_trace_metadata(event, project_id)
+    headers = _giraffe_db_service_headers(tenant_id, idempotency_key=trace["idempotency_key"])
     timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
 
     def post(client: httpx.Client, path: str, payload: dict) -> dict:
-        response = client.post(f"{base_url}{path}", json=payload, headers=headers)
+        # Every payload carries the same trace/idempotency metadata so giraffe-db
+        # can deduplicate a retried multi-step persistence.
+        enriched = {**payload, **trace}
+        response = client.post(f"{base_url}{path}", json=enriched, headers=headers)
         response.raise_for_status()
         return response.json()
 
@@ -320,6 +331,8 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
 
     return {
         "tenant_id": tenant_id,
+        "source_trace_id": trace["source_trace_id"],
+        "idempotency_key": trace["idempotency_key"],
         "procurement_case_id": procurement_case_id,
         "rfq_id": rfq_id,
         "gltg_run_id": gltg_run_id,

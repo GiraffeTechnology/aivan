@@ -67,3 +67,6 @@ logs/
 Thumbs.db
 
 .venv/
+
+# Generated benchmark reports
+artifacts/
