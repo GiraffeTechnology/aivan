@@ -206,3 +206,76 @@ def test_fail_soft_returns_none_on_error(monkeypatch):
 
     client = LanguageSkillClient(transport=httpx.MockTransport(_boom))
     assert canonicalize_rfq(ZH_RFQ, client=client) is None
+
+
+
+def test_english_singapore_not_overwritten_by_local_llm_when_language_skill_missing_destination(monkeypatch):
+    """A local LLM candidate must not become authoritative when language-skill lacks destination."""
+    from aivan.agents import requirement_agent
+    from aivan.execution.safety import evaluate_requirement_readiness
+    from aivan.rfq import semantic_sources
+
+    monkeypatch.setattr(
+        requirement_agent,
+        "canonicalize_rfq",
+        lambda *a, **k: {
+            "normalize": {
+                "field_evidence": {
+                    "quantity": {"value": 5000, "source": "raw_rule"},
+                    "lead_time_days": {"value": 45, "source": "raw_rule"},
+                    "product_category": {"value": "apparel", "source": "canonical_parser"},
+                    "product_modifier": {"value": ["plaid"], "source": "canonical_parser"},
+                }
+            },
+            "structure": {
+                "structured": {
+                    "quantity": 5000,
+                    "quantity_unit": "pcs",
+                    "product_name": "plaid shirt",
+                    "product_category": "apparel",
+                    "product_modifier": ["plaid"],
+                    "destination": None,
+                    "lead_time_days": 45,
+                    "intent": "inquiry",
+                },
+                "field_sources": {
+                    "quantity": "raw_rule",
+                    "product_name": "canonical_parser+glossary",
+                    "product_category": "canonical_parser",
+                    "product_modifier": "canonical_parser",
+                    "lead_time_days": "raw_rule",
+                },
+                "missing_fields": ["destination"],
+                "validation_status": "needs_confirmation",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        requirement_agent,
+        "llm_complete_json",
+        lambda *a, **k: {
+            "category": "apparel",
+            "product_type": "plaid shirt",
+            "quantity": 5000,
+            "quantity_unit": "pcs",
+            "destination": "Vancouver",
+            "color": "white",
+            "fabric_material": "100% cotton",
+            "delivery_days": 45,
+            "confidence": 0.95,
+            "language": "en",
+        },
+    )
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text="Inquiry: Order 5000 plaid shirts, to be shipped to Singapore within 45 days.",
+        project_id="p-singapore",
+        source_channel="wechat",
+    )
+
+    assert req.destination == "Vancouver"  # preserved only as provisional LLM evidence
+    assert semantic_sources.source_of(req, "destination") == "llm_structured"
+    gate = evaluate_requirement_readiness(req)
+    assert gate.ready is False
+    assert gate.next_action == "pending_destination_confirmation"
+    assert "destination" in gate.missing_fields
