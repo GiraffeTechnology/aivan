@@ -89,6 +89,13 @@ def test_partial_local_failures_keep_integrity_thresholds_passing(monkeypatch):
     assert agg["expected_local_call_missing_count"] == 0
     assert agg["external_api_call_count"] == 0
     assert report["hard_thresholds_passed"] is True  # integrity intact
+    # Report explicitly separates integrity from capability.
+    assert report["integrity_status"] == "pass"
+    assert report["capability_status"] == "report_only"  # no --max-local-failure-rate
+    assert report["local_call_failure_rate"] > 0
+    # Failed case IDs + tiers are surfaced for diagnosis.
+    assert report["local_call_failed_cases"]
+    assert all("case_id" in c and "tier" in c for c in report["local_call_failed_cases"])
     # local_call_failed cases carry their provider error for diagnosis.
     failed = [r for r in report["results"] if r["local_call_status"] == "local_call_failed"]
     assert failed and all(r["provider_error"] for r in failed)
@@ -110,11 +117,14 @@ def test_max_local_failure_rate_gate(monkeypatch):
 
     strict = benchmark.run_benchmark(cases, "C", max_local_failure_rate=0.3)
     assert strict["hard_thresholds_passed"] is False
-    assert any("local_call_failure_rate" in f for f in strict["hard_threshold_failures"])
+    assert strict["capability_status"] == "fail"
+    assert strict["integrity_status"] == "pass"  # capability gate only, integrity intact
+    assert any("local_call_failure_rate" in f for f in strict["capability_failures"])
 
     calls["n"] = 0
     lenient = benchmark.run_benchmark(cases, "C", max_local_failure_rate=0.9)
     assert lenient["hard_thresholds_passed"] is True
+    assert lenient["capability_status"] == "pass"
 
 
 def _patch_no_llm_structuring(monkeypatch):

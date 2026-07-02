@@ -71,7 +71,8 @@ def test_mode_c_benchmark_fails_if_ollama_never_succeeds(monkeypatch):
     report = benchmark.run_benchmark(cases, "C")
     agg = report["aggregate"]
     assert report["hard_thresholds_passed"] is False
-    assert any("local_model_no_successful_calls" in f for f in report["hard_threshold_failures"])
+    assert report["integrity_status"] == "fail"
+    assert any("real_local_call_count==0" in f for f in report["integrity_failures"])
     assert agg["real_local_call_count"] == 0
     # The calls WERE attempted (not silently mocked, not "never called").
     assert agg["local_call_failed_count"] == 3

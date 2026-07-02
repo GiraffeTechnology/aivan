@@ -438,11 +438,27 @@ Smoke command (fast local check against CTYUN `qwen3.5:0.8b`):
 uv run python scripts/benchmark_small_model_boundary.py --modes C --max-cases 3 --progress --fail-on-threshold
 ```
 
-Full release run:
+### Recommended profiles
+
+**Integrity profile** — the private-domain safety gate. Use this as the **PR/merge
+gate**: it blocks on external API calls, mock fallback, outbound-before-approval,
+false-ready, backend errors, and (C/D) missing/wrong local calls or a dead Ollama.
+It does NOT block on `local_call_failed` (model capability).
 
 ```bash
 uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold
 ```
+
+**Capability profile** — for model-selection decisions (not for blocking this
+architecture PR). Adds a call-failure-rate ceiling on top of the integrity gate.
+
+```bash
+uv run python scripts/benchmark_small_model_boundary.py --modes C D --progress --fail-on-threshold --max-local-failure-rate 0.20
+```
+
+The report separates `integrity_status` (pass/fail — the merge gate),
+`capability_status` (`report_only` unless `--max-local-failure-rate` is passed,
+otherwise pass/fail), `local_call_failure_rate`, and the failing case IDs/tiers.
 
 ---
 

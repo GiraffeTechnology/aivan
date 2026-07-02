@@ -448,60 +448,83 @@ def run_benchmark(
         + wrong_provider + mock_fallbacks
     )
 
-    thresholds: list[str] = []
+    # ── INTEGRITY gate (private-domain safety; always blocks --fail-on-threshold)
+    # These are breaches of the private-domain contract, never model quality:
+    #   external API, silent mock fallback, outbound-before-approval, false-ready,
+    #   generic backend error, timeout, and (C/D) a model-required case that never
+    #   attempted the local call, the wrong provider/model, or Ollama never once
+    #   succeeding (0 successful calls = effectively dead).
+    integrity_failures: list[str] = []
     if external:
-        thresholds.append(f"external_api_called on {len(external)} case(s)")
+        integrity_failures.append(f"external_api_call_count>0 ({len(external)} case(s))")
     if outbound:
-        thresholds.append(f"outbound_before_approval on {len(outbound)} case(s)")
+        integrity_failures.append(f"outbound_before_approval_count>0 ({len(outbound)} case(s))")
     if false_ready:
-        thresholds.append(f"false_ready on {len(false_ready)} case(s)")
+        integrity_failures.append(f"false_ready_count>0 ({len(false_ready)} case(s))")
     if errors:
-        thresholds.append(f"generic_backend_error on {len(errors)} case(s)")
+        integrity_failures.append(f"generic_backend_error>0 ({len(errors)} case(s))")
     if timeouts:
-        thresholds.append(f"timeout on {len(timeouts)} case(s)")
-
-    # Local-LLM modes (C/D): integrity vs capability are separated.
-    #   INTEGRITY failures (block merge): silent mock fallback, external API,
-    #   a model-required case that never even attempted the local call, the wrong
-    #   provider/model, or Ollama effectively dead (0 successful calls).
-    #   CAPABILITY (reported, not a hard fail by default): local_call_failed —
-    #   the qwen3.5:0.8b model was genuinely exercised but could not produce
-    #   valid output for that input. Gate it explicitly via max_local_failure_rate.
+        integrity_failures.append(f"timeout>0 ({len(timeouts)} case(s))")
     if mode_key in LOCAL_LLM_MODES:
         if mock_fallbacks:
-            thresholds.append(
-                f"mock_fallback on {len(mock_fallbacks)} case(s) (local model silently replaced by mock)"
+            integrity_failures.append(
+                f"mock_fallback_count>0 ({len(mock_fallbacks)} case(s); local model silently replaced by mock)"
             )
-        if external:
-            pass  # already recorded above
         if expected_missing:
-            thresholds.append(
-                f"expected_local_call_missing on {len(expected_missing)} case(s) "
-                f"(model-required case never attempted a {EXPECTED_LOCAL_PROVIDER} call)"
+            integrity_failures.append(
+                f"expected_local_call_missing>0 ({len(expected_missing)} case(s); "
+                f"model-required case never attempted a {EXPECTED_LOCAL_PROVIDER} call)"
             )
         if wrong_provider:
-            thresholds.append(f"wrong_provider on {len(wrong_provider)} case(s) (expected {EXPECTED_LOCAL_PROVIDER})")
+            integrity_failures.append(
+                f"wrong_provider>0 ({len(wrong_provider)} case(s); expected {EXPECTED_LOCAL_PROVIDER})"
+            )
         if unexpected_model:
-            thresholds.append(
-                f"unexpected_local_model on {len(unexpected_model)} case(s) (expected {EXPECTED_LOCAL_MODEL})"
+            integrity_failures.append(
+                f"unexpected_local_model>0 ({len(unexpected_model)} case(s); expected {EXPECTED_LOCAL_MODEL})"
             )
         if model_required and not real_local:
-            # Ollama never once succeeded -> effectively dead. This is the
-            # "dead Ollama must not look like success" guard.
-            thresholds.append(
-                f"local_model_no_successful_calls (0/{len(model_required)} real "
-                f"{EXPECTED_LOCAL_PROVIDER} calls succeeded; check the endpoint/model)"
+            integrity_failures.append(
+                f"real_local_call_count==0 in Mode {mode_key} "
+                f"(0/{len(model_required)} real {EXPECTED_LOCAL_PROVIDER} calls; check endpoint/model)"
             )
-        if max_local_failure_rate is not None and local_failure_rate > max_local_failure_rate:
-            thresholds.append(
-                f"local_call_failure_rate {local_failure_rate:.2%} exceeds "
-                f"max {max_local_failure_rate:.2%} ({len(local_failed)}/{attempts} calls failed)"
-            )
+
+    # ── CAPABILITY gate (model quality; report-only unless --max-local-failure-rate)
+    # local_call_failed = qwen3.5:0.8b was genuinely attempted but returned
+    # unparseable output. This is a measured capability limitation, NOT a
+    # private-domain integrity breach, so it never fails the default gate.
+    local_call_failed_cases = [
+        {"case_id": r.get("case_id"), "tier": r.get("tier"),
+         "error": (r.get("provider_error") or "")[:120]}
+        for r in local_failed
+    ]
+    capability_failures: list[str] = []
+    if mode_key not in LOCAL_LLM_MODES:
+        capability_status = "n/a"
+    elif max_local_failure_rate is None:
+        capability_status = "report_only"
+    elif local_failure_rate > max_local_failure_rate:
+        capability_status = "fail"
+        capability_failures.append(
+            f"local_call_failure_rate {local_failure_rate:.2%} exceeds "
+            f"max {max_local_failure_rate:.2%} ({len(local_failed)}/{attempts} calls failed)"
+        )
+    else:
+        capability_status = "pass"
+
+    integrity_status = "pass" if not integrity_failures else "fail"
+    all_failures = integrity_failures + capability_failures
 
     return {
         "mode": mode_key,
         "mode_env": MODES[mode_key],
         "case_count": len(results),
+        "integrity_status": integrity_status,
+        "integrity_failures": integrity_failures,
+        "capability_status": capability_status,
+        "capability_failures": capability_failures,
+        "local_call_failure_rate": local_failure_rate,
+        "local_call_failed_cases": local_call_failed_cases,
         "aggregate": {
             "ready_count": len(ready),
             "blocked_count": len(results) - len(ready) - len(errors),
@@ -528,8 +551,8 @@ def run_benchmark(
             "expected_local_provider": EXPECTED_LOCAL_PROVIDER if mode_key in LOCAL_LLM_MODES else None,
             "expected_local_model": EXPECTED_LOCAL_MODEL if mode_key in LOCAL_LLM_MODES else None,
         },
-        "hard_thresholds_passed": not thresholds,
-        "hard_threshold_failures": thresholds,
+        "hard_thresholds_passed": not all_failures,
+        "hard_threshold_failures": all_failures,
         "stopped_early": stopped_early,
         "results": results,
     }
@@ -556,6 +579,9 @@ def recommended_config(reports: dict[str, dict]) -> dict:
                 "false_ready_count": rep["aggregate"]["false_ready_count"],
                 "external_api_call_count": rep["aggregate"]["external_api_call_count"],
                 "tokens_per_case": rep["aggregate"]["tokens_per_case"],
+                "integrity_status": rep.get("integrity_status"),
+                "capability_status": rep.get("capability_status"),
+                "local_call_failure_rate": rep.get("local_call_failure_rate"),
                 "hard_thresholds_passed": rep["hard_thresholds_passed"],
             }
             for mode, rep in reports.items()
@@ -578,6 +604,22 @@ def to_markdown(reports: dict[str, dict]) -> str:
     lines.append("Hard thresholds: 0 automatic external API calls, 0 outbound-before-approval, ")
     lines.append("0 false-ready, 0 generic backend errors on valid RFQ input.")
 
+    # Integrity vs capability status per mode (explicitly separated).
+    lines.append("")
+    lines.append("## Integrity vs capability")
+    lines.append("| Mode | integrity_status | capability_status | local_call_failure_rate |")
+    lines.append("|---|---|---|---|")
+    for mode, rep in reports.items():
+        lines.append(
+            f"| {mode} | {rep.get('integrity_status')} | {rep.get('capability_status')} | "
+            f"{rep.get('local_call_failure_rate', 0.0):.2%} |"
+        )
+    lines.append("")
+    lines.append("integrity_status gates the merge (--fail-on-threshold). capability_status is")
+    lines.append("report-only unless --max-local-failure-rate is passed; local_call_failed means")
+    lines.append("qwen3.5:0.8b was attempted but returned unparseable output (model capability),")
+    lines.append("not a private-domain integrity breach.")
+
     # Local-model outcome breakdown + per-case provider telemetry for C/D.
     for mode, rep in reports.items():
         if mode not in LOCAL_LLM_MODES:
@@ -586,6 +628,8 @@ def to_markdown(reports: dict[str, dict]) -> str:
         lines.append("")
         lines.append(f"## Mode {mode} — local model outcome breakdown")
         lines.append(
+            f"integrity_status={rep.get('integrity_status')}, "
+            f"capability_status={rep.get('capability_status')}, "
             f"real_local_call={agg['real_local_call_count']}, "
             f"local_call_failed={agg['local_call_failed_count']} "
             f"(rate {agg['local_call_failure_rate']:.2%}), "
@@ -594,8 +638,14 @@ def to_markdown(reports: dict[str, dict]) -> str:
             f"mock_fallback={agg['mock_fallback_count']}, "
             f"unexpected_model={agg['unexpected_local_model_count']}"
         )
-        if rep["hard_threshold_failures"]:
-            lines.append("Threshold failures: " + "; ".join(rep["hard_threshold_failures"]))
+        if rep.get("integrity_failures"):
+            lines.append("Integrity failures: " + "; ".join(rep["integrity_failures"]))
+        if rep.get("capability_failures"):
+            lines.append("Capability failures: " + "; ".join(rep["capability_failures"]))
+        failed_cases = rep.get("local_call_failed_cases") or []
+        if failed_cases:
+            listed = ", ".join(f"{c['case_id']}({c['tier']})" for c in failed_cases)
+            lines.append(f"local_call_failed case IDs: {listed}")
         lines.append("")
         lines.append("### Per-case provider telemetry")
         lines.append(
