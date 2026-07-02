@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.rfq import GiraffeContext
 from aivan.sourcing.supplier_models import SupplierProfile
-from aivan.utils.tenant import resolve_service_tenant_id
+from aivan.utils.tenant import resolve_service_tenant
 
 # Demo stub suppliers live in data/demo (never in production src) and load only
 # when explicitly enabled. Production must not fabricate supplier candidates.
@@ -211,7 +211,8 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
     if not base_url:
         return {}
 
-    tenant_id = resolve_service_tenant_id()
+    # Fail closed: never stamp giraffe-db business facts under a guessed tenant.
+    tenant_id = resolve_service_tenant(context="giraffe_db_rfq_graph_write")
     trace = build_graph_trace_metadata(event, project_id)
     headers = _giraffe_db_service_headers(tenant_id, idempotency_key=trace["idempotency_key"])
     timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
