@@ -13,7 +13,7 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self):
         self.base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-        self.model = os.environ.get("OLLAMA_MODEL", "qwen3.5:0.8b")
+        self.model = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b")
         self.timeout = get_llm_timeout()
         self.max_retries = get_llm_max_retries()
 
