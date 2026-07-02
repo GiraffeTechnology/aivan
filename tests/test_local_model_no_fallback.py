@@ -75,6 +75,7 @@ def test_mode_c_benchmark_fails_if_ollama_never_succeeds(monkeypatch):
     assert any("real_local_call_count==0" in f for f in report["integrity_failures"])
     assert agg["real_local_call_count"] == 0
     # The calls WERE attempted (not silently mocked, not "never called").
-    assert agg["local_call_failed_count"] == 3
+    assert agg["local_call_failed_count"] == 2
+    assert agg["language_skill_required_count"] == 1
     assert agg["mock_fallback_count"] == 0
     assert agg["expected_local_call_missing_count"] == 0

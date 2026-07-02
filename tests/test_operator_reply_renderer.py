@@ -55,6 +55,29 @@ def test_chinese_input_gets_chinese_reply_no_debug_fields():
     assert "Tokyo" in reply
 
 
+def test_language_skill_output_language_metadata_localizes_reply():
+    req = {
+        "raw_text": "Inquiry: Order 5000 plaid shirts to Tokyo within 45 days.",
+        "language": "en",
+        "product_type": "plaid shirt",
+        "quantity": 5000,
+        "quantity_unit": "pcs",
+        "destination": "Tokyo",
+        "delivery_days": 45,
+        "extra": {
+            "requested_output_language": "zh",
+            "final_output_language": "zh",
+            "quality_level": "high",
+        },
+    }
+    result = _result("pending_email_approval", req, ["draft_abc"])
+    reply = render_operator_reply(result)
+
+    assert "RFQ 已创建" in reply
+    assert "等待人工审批" in reply or "仍需人工审批" in reply
+    assert "draft_abc" not in reply
+
+
 def test_reply_does_not_claim_drafts_when_none_created():
     req = _chinese_requirement()
     result = _result("pending_email_approval", req, [])

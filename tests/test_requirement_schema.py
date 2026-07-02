@@ -106,12 +106,16 @@ def test_deterministic_parse_keeps_numeric_raw_evidence():
     assert parsed["delivery_days"] == 45
 
 
-def test_deterministic_fallback_chinese_rfq_blocks_on_destination(monkeypatch):
-    # With language-skill disabled and the LLM returning nothing, the fallback
-    # keeps numeric evidence but leaves destination non-authoritative, so the
-    # readiness gate must block rather than canonicalize "东京" locally.
+def test_non_english_rfq_without_language_skill_blocks_all_local_extraction(monkeypatch):
+    # P0 internal-language rule: product workflow must not extract business
+    # fields from raw non-English text. language-skill must translate to
+    # canonical English and structure the RFQ first.
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
-    monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
+    monkeypatch.setattr(
+        requirement_agent,
+        "llm_complete_json",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("unexpected AIVAN LLM call")),
+    )
 
     req = structure_customer_requirement_with_llm(
         "询价 5000 件格子衬衫，45天交东京，高品质，请给我一个初步报价"
@@ -120,9 +124,11 @@ def test_deterministic_fallback_chinese_rfq_blocks_on_destination(monkeypatch):
     from aivan.execution.safety import evaluate_requirement_readiness
 
     assert req.language == "zh"
-    assert req.quantity == 5000
-    assert req.delivery_days == 45
+    assert req.quantity is None
+    assert req.delivery_days is None
+    assert req.product_type == ""
     assert req.destination == ""  # never guessed from raw text
+    assert req.extra["non_english_local_extraction_blocked"] == "language_skill_required"
     gate = evaluate_requirement_readiness(req)
     assert not gate.ready
     assert "destination" in gate.missing_fields

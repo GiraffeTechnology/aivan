@@ -28,8 +28,53 @@ def _language_skill_resolves_canonical_fields(monkeypatch):
     canonical product/destination (marking those fields authoritative).
     """
     import aivan.execution.rfq_execution as rfqe
+    from aivan.agents import requirement_agent
 
     real = rfqe.structure_customer_requirement_with_llm
+
+    def canonicalize(raw_text: str, **kwargs):
+        if "白色纯棉衬衣" not in raw_text and "温哥华" not in raw_text:
+            return None
+        return {
+            "normalize": {
+                "raw_text": raw_text,
+                "language": {"detected": "zh", "confidence": 0.99},
+                "canonical_language": "en",
+                "canonical_text": (
+                    "Urgent RFQ: 10000 pcs high quality white cotton shirts, "
+                    "deliver to Vancouver within 45 days; ask familiar suppliers first."
+                ),
+                "requested_output_language": "zh",
+                "field_evidence": {
+                    "quantity": {"raw": "10000 件", "value": 10000},
+                    "product_name": {"raw": "白色纯棉衬衣", "value": "white cotton shirt"},
+                    "destination": {"raw": "温哥华", "value": "Vancouver"},
+                    "lead_time_days": {"raw": "45 天", "value": 45},
+                },
+            },
+            "structure": {
+                "schema": "trade_rfq.v1",
+                "validation_status": "valid",
+                "structured": {
+                    "quantity": 10000,
+                    "quantity_unit": "pcs",
+                    "product_name": "white cotton shirt",
+                    "product_category": "apparel",
+                    "destination": "Vancouver",
+                    "lead_time_days": 45,
+                    "quality_level": "high",
+                    "intent": "supplier_rfq",
+                },
+                "missing_fields": [],
+                "confidence_score": 0.95,
+                "field_sources": {
+                    "quantity": "language_skill",
+                    "product_name": "language_skill",
+                    "destination": "language_skill",
+                    "lead_time_days": "language_skill",
+                },
+            },
+        }
 
     def wrapped(**kwargs):
         req = real(**kwargs)
@@ -40,6 +85,7 @@ def _language_skill_resolves_canonical_fields(monkeypatch):
             sources["product_type"] = "language_skill"
         return req
 
+    monkeypatch.setattr(requirement_agent, "canonicalize_rfq", canonicalize)
     monkeypatch.setattr(rfqe, "structure_customer_requirement_with_llm", wrapped)
     yield
 

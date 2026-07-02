@@ -103,39 +103,50 @@ def test_apply_overlays_authoritative_fields(enabled_service):
 
     ls = req.extra["language_skill"]
     assert ls["validation_status"] == "valid"
+    assert ls["canonical_english_text"].startswith("inquiry")
     assert ls["canonical_text"].startswith("inquiry")
+    assert req.extra["canonical_english_text"].startswith("inquiry")
+    assert req.extra["requested_output_language"] == "zh"
+    assert req.extra["final_output_language"] == "zh"
     assert ls["structured"]["quality_level"] == "high"
     assert ls["translation"]["glossary_version"] == "2026-07-01"
     assert req.extra["quality_level"] == "high"
     assert req.extra["product_modifier"] == ["plaid"]
 
 
-def test_requirement_agent_uses_language_skill(enabled_service, monkeypatch):
-    # Force the LLM path to return nothing so the deterministic + language-skill
-    # overlay is what fills the requirement.
+def test_requirement_agent_uses_language_skill_before_aivan_llm(enabled_service, monkeypatch):
+    # P0 language rule: valid non-English RFQ packets are extracted by the
+    # shared language-skill layer, not by an AIVAN-local multilingual parser.
     from aivan.agents import requirement_agent
 
-    monkeypatch.setattr(
-        requirement_agent, "llm_complete_json", lambda *a, **k: {}
-    )
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("AIVAN LLM must not receive raw non-English RFQ text")
+
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", fail_if_called)
     req = requirement_agent.structure_customer_requirement_with_llm(
         raw_text=ZH_RFQ, project_id="p1", source_channel="wechat"
     )
+    assert enabled_service["paths"] == ["/v1/inbound/normalize", "/v1/structure/rfq"]
     assert req.quantity == 5000
     assert req.destination == "Tokyo"
     assert req.product_type == "plaid shirt"
     assert req.delivery_days == 45
+    assert req.extra["non_english_extracted_by"] == "language_skill"
+    assert req.extra["canonical_english_text"].startswith("inquiry 5000 pcs")
     assert req.extra["language_skill"]["validation_status"] == "valid"
 
 
 def test_chinese_rfq_language_skill_keeps_tokyo_plaid_and_quality(enabled_service, monkeypatch):
     # Canonical non-English path: the language skill (not an AIVAN-internal
     # translation layer) supplies Tokyo, the plaid modifier, and the high
-    # quality level. Force the local LLM to return nothing so the overlay is the
-    # authoritative source.
+    # quality level. The local AIVAN LLM must not run on raw Chinese.
     from aivan.agents import requirement_agent
 
-    monkeypatch.setattr(requirement_agent, "llm_complete_json", lambda *a, **k: {})
+    monkeypatch.setattr(
+        requirement_agent,
+        "llm_complete_json",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("unexpected AIVAN LLM call")),
+    )
 
     req = requirement_agent.structure_customer_requirement_with_llm(
         raw_text=ZH_RFQ, project_id="p1", source_channel="wechat"
@@ -146,6 +157,114 @@ def test_chinese_rfq_language_skill_keeps_tokyo_plaid_and_quality(enabled_servic
     assert req.extra["product_modifier"] == ["plaid"]
     assert req.extra["quality_level"] == "high"
     assert req.extra["language_skill"]["structured"]["quality_level"] == "high"
+
+
+def test_non_english_without_language_skill_blocks_local_extraction(monkeypatch):
+    from aivan.agents import requirement_agent
+
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("AIVAN LLM must not parse raw non-English input")
+
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", fail_if_called)
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text=ZH_RFQ, project_id="p1", source_channel="wechat"
+    )
+
+    assert req.language == "zh"
+    assert req.quantity is None
+    assert req.delivery_days is None
+    assert req.destination == ""
+    assert req.product_type == ""
+    assert req.extra["non_english_local_extraction_blocked"] == "language_skill_required"
+
+
+def test_non_english_aivan_llm_receives_only_canonical_english_with_attachments(
+    enabled_service, monkeypatch
+):
+    # Attachments may still require AIVAN enrichment, but the prompt must use
+    # the language-skill canonical English text, never the raw Chinese message.
+    from aivan.agents import requirement_agent
+
+    captured: dict[str, str] = {}
+
+    def capture_prompt(task, system_prompt, user_prompt):
+        captured["prompt"] = user_prompt
+        return {
+            "category": "apparel",
+            "product_type": "plaid shirt",
+            "quantity": 5000,
+            "quantity_unit": "pcs",
+            "destination": "Tokyo",
+            "delivery_days": 45,
+            "confidence": 0.9,
+            "language": "en",
+        }
+
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", capture_prompt)
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text=ZH_RFQ,
+        attachments=[{"filename": "spec.jpg", "type": "image/jpeg"}],
+        project_id="p1",
+        source_channel="wechat",
+    )
+
+    assert "inquiry 5000 pcs high quality plaid shirt" in captured["prompt"]
+    assert "询价" not in captured["prompt"]
+    assert "交东京" not in captured["prompt"]
+    assert "Language: en" in captured["prompt"]
+    assert req.extra["non_english_extracted_by"] == "language_skill"
+
+
+def test_english_rfq_still_uses_normalized_english_text(monkeypatch):
+    from aivan.agents import requirement_agent
+
+    english_canon = {
+        "normalize": {
+            "raw_text": "Order 5000 plaid shirts to Osaka within 45 days.",
+            "language": {"detected": "en", "confidence": 1.0},
+            "canonical_language": "en",
+            "canonical_text": "Inquiry: 5000 pcs plaid shirts to Osaka within 45 days.",
+            "requested_output_language": "en",
+            "field_evidence": {},
+        },
+        "structure": {
+            "schema": "trade_rfq.v1",
+            "validation_status": "valid",
+            "structured": {
+                "quantity": 5000,
+                "quantity_unit": "pcs",
+                "product_name": "plaid shirt",
+                "product_category": "apparel",
+                "destination": "Osaka",
+                "lead_time_days": 45,
+            },
+            "missing_fields": [],
+            "confidence_score": 0.95,
+            "field_sources": {"destination": "language_skill"},
+        },
+    }
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(requirement_agent, "canonicalize_rfq", lambda *a, **k: english_canon)
+
+    def capture_prompt(task, system_prompt, user_prompt):
+        captured["prompt"] = user_prompt
+        return {"confidence": 0.1, "language": "en"}
+
+    monkeypatch.setattr(requirement_agent, "llm_complete_json", capture_prompt)
+
+    req = requirement_agent.structure_customer_requirement_with_llm(
+        raw_text="Order 5000 plaid shirts to Osaka within 45 days.",
+        project_id="p1",
+        source_channel="email",
+    )
+
+    assert "Inquiry: 5000 pcs plaid shirts to Osaka within 45 days." in captured["prompt"]
+    assert req.destination == "Osaka"
+    assert req.extra["final_output_language"] == "en"
 
 
 def test_requirement_agent_coerces_malformed_llm_string_fields(monkeypatch):

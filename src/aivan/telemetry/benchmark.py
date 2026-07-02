@@ -99,10 +99,11 @@ class BenchmarkCase:
     input_language: str
     raw_text: str
     expects: dict = field(default_factory=dict)
-    # In modes C/D the RFQ structuring step is model-required, so every case is
-    # expected to attempt a local qwen3.5:2b call. A fixture may set
-    # ``llm_required: false`` to declare a deterministic/no-model-needed case;
-    # then an absent local call is intentionally_skipped, not a missing call.
+    # In modes C/D the RFQ structuring step is model-required only after the
+    # internal-language boundary allows AIVAN-local extraction. Non-English
+    # inputs must be normalized/structured by giraffe-language-skill first; if
+    # that boundary blocks an AIVAN LLM call, the status is
+    # language_skill_required, not expected_local_call_missing.
     llm_required: bool = True
 
     @classmethod
@@ -247,6 +248,11 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
     )
 
     # Classify the local-model outcome for modes C/D (n/a for A/B/E).
+    non_english_policy_skip = (
+        mode_key in LOCAL_LLM_MODES
+        and case.input_language not in ("en", "english")
+        and not llm_invoked
+    )
     real_local_call = bool(
         llm_invoked and used_provider == EXPECTED_LOCAL_PROVIDER and provider_ok
     )
@@ -257,7 +263,10 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
         # No local call fired at all. Distinguish an intentional deterministic
         # skip from a model-required call that went missing.
         llm_skipped_reason = provider_error or ("no_llm_invoked" if primary is None else "")
-        if not case.llm_required:
+        if non_english_policy_skip:
+            local_call_status = "language_skill_required"
+            llm_skipped_reason = "non_english_requires_language_skill"
+        elif not case.llm_required:
             local_call_status = "intentionally_skipped"
         else:
             local_call_status = "expected_local_call_missing"
@@ -452,6 +461,7 @@ def run_benchmark(
     local_failed = by_status.get("local_call_failed", [])
     expected_missing = by_status.get("expected_local_call_missing", [])
     intentionally_skipped = by_status.get("intentionally_skipped", [])
+    language_skill_required = by_status.get("language_skill_required", [])
     unexpected_model = by_status.get("unexpected_local_model", [])
     wrong_provider = by_status.get("wrong_provider", [])
     mock_fallbacks = [r for r in results if r.get("mock_fallback")]
@@ -555,6 +565,7 @@ def run_benchmark(
             "local_call_failed_count": len(local_failed),
             "expected_local_call_missing_count": len(expected_missing),
             "intentionally_skipped_local_call_count": len(intentionally_skipped),
+            "language_skill_required_count": len(language_skill_required),
             "unexpected_local_model_count": len(unexpected_model),
             "wrong_provider_count": len(wrong_provider),
             "mock_fallback_count": len(mock_fallbacks),
@@ -650,6 +661,7 @@ def to_markdown(reports: dict[str, dict]) -> str:
             f"(rate {agg['local_call_failure_rate']:.2%}), "
             f"expected_local_call_missing={agg['expected_local_call_missing_count']}, "
             f"intentionally_skipped={agg['intentionally_skipped_local_call_count']}, "
+            f"language_skill_required={agg.get('language_skill_required_count', 0)}, "
             f"mock_fallback={agg['mock_fallback_count']}, "
             f"unexpected_model={agg['unexpected_local_model_count']}"
         )

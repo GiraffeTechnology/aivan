@@ -99,12 +99,25 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
     if detected:
         req.language = detected
 
+    canonical_text = normalize_data.get("canonical_text")
+    requested_output_language = (
+        normalize_data.get("requested_output_language")
+        or detected
+        or "en"
+    )
     ls_meta: dict[str, Any] = {
         "raw_text": normalize_data.get("raw_text"),
+        "detected_language": detected,
         "source_language": detected,
-        "canonical_text": normalize_data.get("canonical_text"),
+        "canonical_english_text": canonical_text,
+        "canonical_text": canonical_text,
+        "canonical_packet": normalize_data.get("canonical_packet"),
+        "language_skill_trace_id": normalize_data.get("trace_id"),
+        "requested_output_language": requested_output_language,
+        "final_output_language": requested_output_language,
         "translation": normalize_data.get("translation"),
         "field_evidence": normalize_data.get("field_evidence"),
+        "field_sources": normalize_data.get("field_sources"),
         "warnings": normalize_data.get("warnings", []),
     }
 
@@ -123,6 +136,14 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
         )
 
     req.extra["language_skill"] = ls_meta
+    req.extra.setdefault("canonical_english_text", canonical_text)
+    req.extra.setdefault("canonical_packet", ls_meta.get("canonical_packet") or ls_meta.get("structured"))
+    req.extra.setdefault("field_evidence", ls_meta.get("field_evidence"))
+    if isinstance(ls_meta.get("field_sources"), dict):
+        req.extra.setdefault("field_sources", ls_meta.get("field_sources"))
+    req.extra.setdefault("language_skill_trace_id", ls_meta.get("language_skill_trace_id"))
+    req.extra.setdefault("requested_output_language", requested_output_language)
+    req.extra.setdefault("final_output_language", requested_output_language)
     return req
 
 

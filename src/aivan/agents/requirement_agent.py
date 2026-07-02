@@ -124,6 +124,19 @@ def _detect_missing_fields(req: BuyerRequirement) -> list[MissingField]:
 
     return missing
 
+
+def _has_valid_language_skill_rfq(canonicalization: dict | None) -> bool:
+    """Return true only when language-skill produced a complete RFQ packet."""
+    structure = (canonicalization or {}).get("structure") or {}
+    if structure.get("validation_status") != "valid":
+        return False
+    structured = structure.get("structured") or {}
+    return all(
+        structured.get(field) not in (None, "", [])
+        for field in ("quantity", "product_name", "destination", "lead_time_days")
+    )
+
+
 def structure_customer_requirement_with_llm(
     raw_text: str,
     attachments: list | None = None,
@@ -158,23 +171,43 @@ def structure_customer_requirement_with_llm(
     if existing_requirement:
         existing_note = f"\n\nPrevious requirement context: category={existing_requirement.category}, product={existing_requirement.product_type}"
 
-    user_prompt = f"Customer message:\n{raw_text}{attach_note}{existing_note}\n\nExtract and structure all requirement fields. Language: {language}"
+    normalize_data = (canonicalization or {}).get("normalize") or {}
+    canonical_text = normalize_data.get("canonical_text") or None
+    has_valid_language_skill = _has_valid_language_skill_rfq(canonicalization)
+    non_english = language != "en"
+    block_non_english_local_extraction = non_english and not has_valid_language_skill
 
-    llm_used = True
-    try:
-        result = llm_complete_json("requirement_structuring", REQUIREMENT_STRUCTURING_SYSTEM, user_prompt)
-    except ExternalModelApiRequiresApprovalError:
-        # External model disabled without approval: continue in private-domain
-        # baseline (reduced strength), never a silent cloud fallback.
-        result = {}
-    except Exception:
-        result = {}
-
-    if not result or result.get("confidence", 0) < 0.3:
-        result = _deterministic_parse(raw_text)
-        result["language"] = language
-        result["confidence"] = 0.5
+    if has_valid_language_skill and non_english and not attachments and existing_requirement is None:
+        # For non-English RFQs, language-skill owns translation and structured
+        # extraction. AIVAN must not run another extractor over multilingual raw text.
+        result = {"language": language, "confidence": 0.0}
         llm_used = False
+    elif block_non_english_local_extraction:
+        # Without a valid language-skill RFQ packet, non-English raw input is
+        # unsafe for AIVAN-local extraction. Keep the raw message and ask for
+        # canonicalization instead of inferring business fields here.
+        result = {"language": language, "confidence": 0.0}
+        llm_used = False
+    else:
+        processing_text = canonical_text or raw_text
+        prompt_language = "en" if canonical_text else language
+        user_prompt = f"Customer message:\n{processing_text}{attach_note}{existing_note}\n\nExtract and structure all requirement fields. Language: {prompt_language}"
+
+        llm_used = True
+        try:
+            result = llm_complete_json("requirement_structuring", REQUIREMENT_STRUCTURING_SYSTEM, user_prompt)
+        except ExternalModelApiRequiresApprovalError:
+            # External model disabled without approval: continue in private-domain
+            # baseline (reduced strength), never a silent cloud fallback.
+            result = {}
+        except Exception:
+            result = {}
+
+        if not result or result.get("confidence", 0) < 0.3:
+            result = _deterministic_parse(processing_text)
+            result["language"] = prompt_language
+            result["confidence"] = 0.5
+            llm_used = False
 
     if existing_requirement:
         for field in BuyerRequirement.model_fields:
@@ -208,6 +241,10 @@ def structure_customer_requirement_with_llm(
     if canonicalization:
         apply_to_requirement(req, canonicalization)
         _record_language_skill_sources(req, canonicalization)
+    if block_non_english_local_extraction:
+        req.extra["non_english_local_extraction_blocked"] = "language_skill_required"
+    if non_english and has_valid_language_skill:
+        req.extra["non_english_extracted_by"] = "language_skill"
 
     req.missing_fields = _detect_missing_fields(req)
 

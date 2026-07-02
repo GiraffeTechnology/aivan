@@ -43,15 +43,21 @@ def test_benchmark_mode_c_records_real_ollama_call(monkeypatch, _cases):
 
     report = benchmark.run_benchmark(_cases, "C")
     agg = report["aggregate"]
+    model_required = [c for c in _cases if c.input_language == "en"]
+    non_english = [c for c in _cases if c.input_language != "en"]
 
-    assert agg["real_local_call_count"] == len(_cases)
+    assert agg["real_local_call_count"] == len(model_required)
+    assert agg["language_skill_required_count"] == len(non_english)
     assert agg["mock_fallback_count"] == 0
     assert agg["external_api_call_count"] == 0
     assert agg["expected_local_provider"] == "ollama"
     assert agg["expected_local_model"] == "qwen3.5:2b"
     for r in report["results"]:
-        assert r["real_local_call"] is True
-        assert r["local_llm_model"] == "qwen3.5:2b"
+        if r["input_language"] == "en":
+            assert r["real_local_call"] is True
+            assert r["local_llm_model"] == "qwen3.5:2b"
+        else:
+            assert r["local_call_status"] == "language_skill_required"
         assert r["external_api_called"] is False
     assert report["hard_thresholds_passed"] is True
 
@@ -94,6 +100,7 @@ def test_partial_local_failures_keep_integrity_thresholds_passing(monkeypatch):
     assert agg["local_call_failed_count"] >= 1
     assert agg["mock_fallback_count"] == 0
     assert agg["expected_local_call_missing_count"] == 0
+    assert agg["language_skill_required_count"] >= 1
     assert agg["external_api_call_count"] == 0
     assert report["hard_thresholds_passed"] is True  # integrity intact
     # Report explicitly separates integrity from capability.

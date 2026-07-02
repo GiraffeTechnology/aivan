@@ -19,6 +19,14 @@ def _is_chinese(result: RFQExecutionResult, language: str) -> bool:
     if lang.startswith("en"):
         return False
     req = result.requirement or {}
+    extra = req.get("extra") or {}
+    if isinstance(extra, dict):
+        for key in ("final_output_language", "requested_output_language"):
+            out_lang = str(extra.get(key) or "").lower()
+            if out_lang.startswith("zh"):
+                return True
+            if out_lang.startswith("en"):
+                return False
     if req.get("language") == "zh":
         return True
     raw = req.get("raw_text", "") or ""
