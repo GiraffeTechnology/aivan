@@ -45,7 +45,7 @@ def test_ollama_provider_uses_native_chat_without_qwen_key(monkeypatch):
         )
 
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:0.8b")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:2b")
     monkeypatch.delenv("QWEN_API_KEY", raising=False)
     monkeypatch.setattr("aivan.llm.providers.ollama_provider.httpx.post", fake_post)
 
@@ -60,14 +60,14 @@ def test_ollama_provider_uses_native_chat_without_qwen_key(monkeypatch):
     assert result == {"ok": True, "provider": "ollama"}
     assert len(calls) == 1
     assert calls[0]["url"] == "http://127.0.0.1:11434/api/chat"
-    assert calls[0]["json"]["model"] == "qwen3.5:0.8b"
+    assert calls[0]["json"]["model"] == "qwen3.5:2b"
     assert calls[0]["json"]["stream"] is False
     assert calls[0]["json"]["think"] is False
     assert calls[0]["json"]["format"] == "json"
 
 
 def test_ollama_provider_retries_and_hides_payload(monkeypatch):
-    monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:0.8b")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:2b")
     monkeypatch.setenv("AIVAN_LLM_MAX_RETRIES", "0")
     monkeypatch.setattr(
         "aivan.llm.providers.ollama_provider.httpx.post",
@@ -77,5 +77,5 @@ def test_ollama_provider_retries_and_hides_payload(monkeypatch):
     with pytest.raises(RuntimeError) as exc:
         OllamaProvider().complete_json("task", "system", "user", {})
 
-    assert "qwen3.5:0.8b" not in str(exc.value)
+    assert "qwen3.5:2b" not in str(exc.value)
     assert "user" not in str(exc.value)

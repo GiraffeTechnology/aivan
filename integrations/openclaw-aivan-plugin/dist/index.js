@@ -80,7 +80,7 @@ export async function health() {
  * send any message without human approval.
  */
 export async function forwardEvent(event) {
-    const result = await safeFetch("/api/openclaw/events", {
+    const result = await safeFetch("/invoke", {
         method: "POST",
         body: JSON.stringify(event),
     });

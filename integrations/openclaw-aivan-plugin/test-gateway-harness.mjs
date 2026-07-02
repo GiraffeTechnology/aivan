@@ -33,7 +33,7 @@ const mockServer = createServer((req, res) => {
       return;
     }
 
-    if (req.url === "/api/openclaw/events" && req.method === "POST") {
+    if (req.url === "/invoke" && req.method === "POST") {
       try {
         lastReceivedEvent = JSON.parse(body);
       } catch {

@@ -25,7 +25,7 @@ AIVAN runs entirely on your machine. No buyer data, supplier data, or conversati
 This plugin is a **thin HTTP bridge** between OpenClaw and your local AIVAN server. It:
 
 - Receives normalised OpenClaw events (buyer messages, supplier replies)
-- Forwards them to your local AIVAN server at `POST ${AIVAN_BASE_URL}/api/openclaw/events`
+- Forwards them to your local AIVAN server at `POST ${AIVAN_BASE_URL}/invoke`
 - Exposes helper commands to check AIVAN health and open the local dashboard
 - Lets OpenClaw operators view, approve, or reject pending outbound drafts
 
@@ -42,7 +42,7 @@ OpenClaw platform
        ▼
 @giraffetechnology/openclaw-aivan  (this plugin)
        │
-       │  POST /api/openclaw/events
+       │  POST /invoke
        ▼
 AIVAN local server  (http://127.0.0.1:8765)
        │

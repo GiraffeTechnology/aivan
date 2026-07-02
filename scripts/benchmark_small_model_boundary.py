@@ -13,7 +13,7 @@ Daily-development / CTYUN local-only ergonomics:
     --fail-fast            stop at the first failing case
     incremental results are always streamed to artifacts/benchmark_events.jsonl
 
-Smoke (fast local check against CTYUN qwen3.5:0.8b):
+Smoke (fast local check against CTYUN qwen3.5:2b):
     uv run python scripts/benchmark_small_model_boundary.py \
         --modes C --max-cases 3 --progress --fail-on-threshold
 
@@ -36,6 +36,7 @@ from aivan.telemetry.benchmark import (  # noqa: E402
     filter_cases,
     format_progress_line,
     load_cases,
+    configure_expected_local_model,
     recommended_config,
     run_benchmark,
     to_markdown,
@@ -63,9 +64,15 @@ def main() -> int:
                         help="Stop at the first failing case")
     parser.add_argument("--max-local-failure-rate", type=float, default=None,
                         help="C/D only: fail if the local-model call-failure rate exceeds this "
-                             "fraction (default off — a called-but-failed 0.8b is measured capability, "
+                             "fraction (default off — a called-but-failed 2b is measured capability, "
                              "not an integrity violation)")
+    parser.add_argument("--expected-local-provider", default=os.environ.get("EXPECTED_LOCAL_PROVIDER", "ollama"),
+                        help="Expected local provider for C/D integrity checks")
+    parser.add_argument("--expected-local-model", default=os.environ.get("EXPECTED_LOCAL_MODEL", "qwen3.5:2b"),
+                        help="Expected local model for C/D integrity checks; also sets C/D OLLAMA_MODEL")
     args = parser.parse_args()
+
+    configure_expected_local_model(args.expected_local_provider, args.expected_local_model)
 
     all_cases = load_cases(args.cases)
     cases = filter_cases(all_cases, case_ids=args.case_ids, max_cases=args.max_cases)

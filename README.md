@@ -24,7 +24,7 @@ Status snapshot: **2026-07-01**.
 | Local state DB | PASS | SQLite for local development; PostgreSQL can be used through `AIVAN_DB_URL` in server deployment. |
 | OpenClaw plugin package | PASS | `@giraffetechnology/openclaw-aivan` builds and typechecks as a Gateway plugin. |
 | OpenClaw → AIVAN live IM invocation | PASS | A live WeChat message reached the AIVAN/OpenClaw invocation path. |
-| Local Ollama provider | PASS | Native Ollama `/api/chat` provider is available for server-local models such as `qwen3.5:0.8b`. |
+| Local Ollama provider | PASS | Native Ollama `/api/chat` provider is available for server-local models such as `qwen3.5:2b`. |
 | Live RFQ business-flow acceptance | IN PROGRESS | AIVAN must complete one live simple RFQ/quote workflow with local model and GLTG dependencies available. |
 | ClawHub production publication | NOT READY | Requires both Gateway P0 acceptance and live business-flow acceptance. |
 
@@ -288,7 +288,7 @@ All variables are loaded from `.env`. Start from `.env.example`.
 | `QWEN_BASE_URL` | empty | Qwen / DashScope compatible-mode base URL. |
 | `QWEN_MODEL` | empty | Qwen model name. |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Local Ollama native API base URL. Do not include `/v1`. |
-| `OLLAMA_MODEL` | `qwen3.5:0.8b` | Local Ollama model name. Must exactly match `ollama list`. |
+| `OLLAMA_MODEL` | `qwen3.5:2b` | Local Ollama model name. Must exactly match `ollama list`. |
 | `AIVAN_LLM_TIMEOUT_SECONDS` | `30` | LLM request timeout. |
 | `AIVAN_LLM_MAX_RETRIES` | `2` | Maximum LLM retries. |
 | `AIVAN_LLM_TEMPERATURE` | `0` | Deterministic default. |
@@ -389,7 +389,7 @@ uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
 ## Small Local Model Boundary Benchmark
 
 Measures the production capability boundary of the CTYUN local-only model
-(`qwen3.5:0.8b`) with external provider APIs OFF. The harness reads real provider
+(`qwen3.5:2b`) with external provider APIs OFF. The harness reads real provider
 telemetry (not env guesses): modes C/D fail unless a real Ollama call with the
 expected model is recorded for every case, with zero external API calls and zero
 mock fallback.
@@ -419,8 +419,8 @@ inferred from env:
 
 | `local_call_status` | Meaning | Hard threshold |
 |---|---|---|
-| `real_local_call` | qwen3.5:0.8b called and returned OK | pass |
-| `local_call_failed` | qwen3.5:0.8b called but couldn't produce valid output | **reported, not a hard fail** (measured capability; gate with `--max-local-failure-rate`) |
+| `real_local_call` | qwen3.5:2b called and returned OK | pass |
+| `local_call_failed` | qwen3.5:2b called but couldn't produce valid output | **reported, not a hard fail** (measured capability; gate with `--max-local-failure-rate`) |
 | `expected_local_call_missing` | model-required case never attempted a local call | **hard fail** |
 | `intentionally_skipped` | fixture set `llm_required: false` (deterministic/no-model case) | pass |
 | `mock_fallback` / `wrong_provider` / `unexpected_local_model` | silent substitution | **hard fail** |
@@ -428,11 +428,11 @@ inferred from env:
 Integrity hard-fails: silent mock fallback, any external API call, a
 model-required case that never attempted the local model, wrong provider/model,
 or Ollama never once succeeding (0 successful calls = effectively dead). A
-called-but-failed 0.8b is a capability datapoint, not an integrity violation —
+called-but-failed 2b is a capability datapoint, not an integrity violation —
 so a run like "21 real / 10 failed" passes integrity and reports a 32% local
 failure rate for the accuracy discussion.
 
-Smoke command (fast local check against CTYUN `qwen3.5:0.8b`):
+Smoke command (fast local check against CTYUN `qwen3.5:2b`):
 
 ```bash
 uv run python scripts/benchmark_small_model_boundary.py --modes C --max-cases 3 --progress --fail-on-threshold

@@ -58,12 +58,12 @@ def test_format_progress_line_contains_fields():
     result = {
         "mode": "C", "case_id": "simple_zh_001", "tier": "simple",
         "started_at": "2026-07-02T00:00:00+00:00", "elapsed_seconds": 1.23,
-        "provider": "ollama", "model": "qwen3.5:0.8b", "local_llm_tokens": 42,
+        "provider": "ollama", "model": "qwen3.5:2b", "local_llm_tokens": 42,
         "failed": False, "fail_reasons": [],
     }
     line = format_progress_line(result)
     for token in ["[C]", "simple_zh_001", "tier=simple", "start=2026-07-02",
-                  "elapsed=1.23s", "provider=ollama", "model=qwen3.5:0.8b", "tokens=42", "PASS"]:
+                  "elapsed=1.23s", "provider=ollama", "model=qwen3.5:2b", "tokens=42", "PASS"]:
         assert token in line
 
     result["failed"] = True
