@@ -61,9 +61,22 @@ def _require_api_key(request: Request) -> None:
     ):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
+def _load_supplier_registry_on_startup() -> int:
+    from aivan.db.session import db_session
+    from aivan.sourcing.supplier_registry import load_from_db
+
+    with db_session() as db:
+        return load_from_db(db)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    try:
+        loaded_suppliers = _load_supplier_registry_on_startup()
+        logger.info("Loaded %s suppliers into the in-memory registry", loaded_suppliers)
+    except Exception:
+        logger.exception("Failed to load supplier registry from the local database")
     from aivan.platforms.platform_registry import _ensure_init
     _ensure_init()
     from aivan.gpm.router import _init_store as _gpm_init_store, get_db_client
