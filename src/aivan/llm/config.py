@@ -1,7 +1,7 @@
 import os
 
 def get_llm_provider_name() -> str:
-    return os.environ.get("AIVAN_LLM_PROVIDER", "mock").lower()
+    return os.environ.get("AIVAN_LLM_PROVIDER", "ollama").lower()
 
 def get_llm_temperature() -> float:
     return float(os.environ.get("AIVAN_LLM_TEMPERATURE", "0"))
