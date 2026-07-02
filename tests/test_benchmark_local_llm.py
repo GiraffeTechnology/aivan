@@ -30,6 +30,13 @@ def _cases():
     return benchmark.load_cases(benchmark.default_cases_path())[:3]
 
 
+def test_benchmark_default_expected_model_is_qwen35_2b():
+    assert benchmark.EXPECTED_LOCAL_PROVIDER == "ollama"
+    assert benchmark.EXPECTED_LOCAL_MODEL == "qwen3.5:2b"
+    assert benchmark.MODES["C"]["OLLAMA_MODEL"] == "qwen3.5:2b"
+    assert benchmark.MODES["D"]["OLLAMA_MODEL"] == "qwen3.5:2b"
+
+
 def test_benchmark_mode_c_records_real_ollama_call(monkeypatch, _cases):
     monkeypatch.setattr(OllamaProvider, "complete_json", lambda self, *a, **k: dict(_CANNED))
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
@@ -41,10 +48,10 @@ def test_benchmark_mode_c_records_real_ollama_call(monkeypatch, _cases):
     assert agg["mock_fallback_count"] == 0
     assert agg["external_api_call_count"] == 0
     assert agg["expected_local_provider"] == "ollama"
-    assert agg["expected_local_model"] == "qwen3.5:0.8b"
+    assert agg["expected_local_model"] == "qwen3.5:2b"
     for r in report["results"]:
         assert r["real_local_call"] is True
-        assert r["local_llm_model"] == "qwen3.5:0.8b"
+        assert r["local_llm_model"] == "qwen3.5:2b"
         assert r["external_api_called"] is False
     assert report["hard_thresholds_passed"] is True
 
@@ -65,7 +72,7 @@ def test_benchmark_mode_c_fails_on_mock_fallback(monkeypatch, _cases):
 
 def test_partial_local_failures_keep_integrity_thresholds_passing(monkeypatch):
     # The real CTYUN scenario: Ollama is alive (some cases succeed) but the tiny
-    # 0.8b model fails structured extraction on others. Those are attempted-but-
+    # 2b model fails structured extraction on others. Those are attempted-but-
     # failed calls (measured capability), NOT integrity violations, so hard
     # thresholds still pass while the failures are reported per case.
     calls = {"n": 0}
@@ -73,7 +80,7 @@ def test_partial_local_failures_keep_integrity_thresholds_passing(monkeypatch):
     def flaky(self, *a, **k):
         calls["n"] += 1
         if calls["n"] % 2 == 0:
-            raise ValueError("qwen3.5:0.8b returned unparseable JSON")
+            raise ValueError("qwen3.5:2b returned unparseable JSON")
         return dict(_CANNED)
 
     monkeypatch.setattr(OllamaProvider, "complete_json", flaky)

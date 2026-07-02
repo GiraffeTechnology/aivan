@@ -54,7 +54,7 @@ def test_report_rendering_and_recommendation():
 
 def test_token_estimator_and_recorder():
     rec = ModelUsageRecorder()
-    rec.record_call(task="t", provider="ollama", model="qwen3.5:0.8b", input_text="hello world", output_text="ok")
+    rec.record_call(task="t", provider="ollama", model="qwen3.5:2b", input_text="hello world", output_text="ok")
     assert rec.llm_call_count == 1
     assert rec.external_api_called is False
     assert rec.total_tokens > 0

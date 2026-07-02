@@ -32,8 +32,8 @@ from aivan.rfq import semantic_sources
 
 # Modes that must actually exercise a private-domain local model.
 LOCAL_LLM_MODES = frozenset({"C", "D"})
-EXPECTED_LOCAL_PROVIDER = "ollama"
-EXPECTED_LOCAL_MODEL = "qwen3.5:0.8b"
+EXPECTED_LOCAL_PROVIDER = os.environ.get("EXPECTED_LOCAL_PROVIDER", "ollama")
+EXPECTED_LOCAL_MODEL = os.environ.get("EXPECTED_LOCAL_MODEL", "qwen3.5:2b")
 
 # Env overrides per benchmark mode (PRD §16.2).
 MODES: dict[str, dict[str, str]] = {
@@ -56,7 +56,7 @@ MODES: dict[str, dict[str, str]] = {
         "AIVAN_LLM_API_ENABLED": "true",
         "AIVAN_LLM_PROVIDER": "ollama",
         "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
-        "OLLAMA_MODEL": "qwen3.5:0.8b",
+        "OLLAMA_MODEL": "qwen3.5:2b",
         "AIVAN_LANGUAGE_SKILL_ENABLED": "true",
         "GLTG_LOCAL_LLM_ENABLED": "true",
     },
@@ -65,7 +65,7 @@ MODES: dict[str, dict[str, str]] = {
         "AIVAN_LLM_API_ENABLED": "true",
         "AIVAN_LLM_PROVIDER": "ollama",
         "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
-        "OLLAMA_MODEL": "qwen3.5:0.8b",
+        "OLLAMA_MODEL": "qwen3.5:2b",
         "AIVAN_LANGUAGE_SKILL_ENABLED": "false",
         "GLTG_LOCAL_LLM_ENABLED": "true",
     },
@@ -77,6 +77,21 @@ MODES: dict[str, dict[str, str]] = {
 }
 
 
+def configure_expected_local_model(provider: str | None = None, model: str | None = None) -> None:
+    """Configure expected local provider/model for benchmark runs."""
+    global EXPECTED_LOCAL_PROVIDER, EXPECTED_LOCAL_MODEL
+    if provider:
+        EXPECTED_LOCAL_PROVIDER = provider
+    if model:
+        EXPECTED_LOCAL_MODEL = model
+        for mode_key in LOCAL_LLM_MODES:
+            MODES[mode_key]["OLLAMA_MODEL"] = model
+
+
+# Keep C/D env defaults aligned with env-overridden expected defaults at import time.
+configure_expected_local_model(EXPECTED_LOCAL_PROVIDER, EXPECTED_LOCAL_MODEL)
+
+
 @dataclass
 class BenchmarkCase:
     case_id: str
@@ -85,7 +100,7 @@ class BenchmarkCase:
     raw_text: str
     expects: dict = field(default_factory=dict)
     # In modes C/D the RFQ structuring step is model-required, so every case is
-    # expected to attempt a local qwen3.5:0.8b call. A fixture may set
+    # expected to attempt a local qwen3.5:2b call. A fixture may set
     # ``llm_required: false`` to declare a deterministic/no-model-needed case;
     # then an absent local call is intentionally_skipped, not a missing call.
     llm_required: bool = True
@@ -115,7 +130,7 @@ def load_cases(path: str | os.PathLike) -> list[BenchmarkCase]:
 # NOTE: tests/fixtures/rfq_benchmark_cases.jsonl is a SEED dataset spanning all
 # six tiers. TODO(bench): expand to >=20 cases per tier (>=120 total) and enable
 # per-tier accuracy threshold gating (e.g. simple-RFQ field accuracy >= 95%) once
-# a live language-skill / qwen3.5:0.8b endpoint is wired into CI.
+# a live language-skill / qwen3.5:2b endpoint is wired into CI.
 IS_SEED_DATASET = True
 
 
@@ -332,7 +347,7 @@ def case_failures(result: dict, mode_key: str) -> list[str]:
     if mode_key in LOCAL_LLM_MODES and not result.get("error"):
         status = result.get("local_call_status", "")
         # Integrity failures (block merge). A local_call_failed (the model was
-        # exercised but the 0.8b model could not produce valid output) is a
+        # exercised but the 2b model could not produce valid output) is a
         # measured capability datapoint, NOT an integrity failure — reported, not
         # a per-case hard fail. intentionally_skipped is allowed by definition.
         if status in {"mock_fallback", "expected_local_call_missing",
@@ -395,7 +410,7 @@ def run_benchmark(
     ``per_case_timeout`` marks any case exceeding it as a failed timeout and
     continues (unless ``fail_fast``). ``fail_fast`` stops at the first failing
     case. ``max_local_failure_rate`` optionally gates the local-model
-    call-failure rate (default off — a called-but-failed 0.8b is measured
+    call-failure rate (default off — a called-but-failed 2b is measured
     capability, not an integrity violation). With no filters/hooks the behavior
     is identical to before.
     """
@@ -490,7 +505,7 @@ def run_benchmark(
             )
 
     # ── CAPABILITY gate (model quality; report-only unless --max-local-failure-rate)
-    # local_call_failed = qwen3.5:0.8b was genuinely attempted but returned
+    # local_call_failed = qwen3.5:2b was genuinely attempted but returned
     # unparseable output. This is a measured capability limitation, NOT a
     # private-domain integrity breach, so it never fails the default gate.
     local_call_failed_cases = [
@@ -617,7 +632,7 @@ def to_markdown(reports: dict[str, dict]) -> str:
     lines.append("")
     lines.append("integrity_status gates the merge (--fail-on-threshold). capability_status is")
     lines.append("report-only unless --max-local-failure-rate is passed; local_call_failed means")
-    lines.append("qwen3.5:0.8b was attempted but returned unparseable output (model capability),")
+    lines.append("qwen3.5:2b was attempted but returned unparseable output (model capability),")
     lines.append("not a private-domain integrity breach.")
 
     # Local-model outcome breakdown + per-case provider telemetry for C/D.
