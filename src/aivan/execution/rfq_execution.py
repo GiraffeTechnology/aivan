@@ -746,7 +746,13 @@ def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, 
             raw = {}
     if raw.get("message_text"):
         return raw["message_text"]
+    subject = (
+        f"RFQ: {requirement.quantity or 'TBD'} {requirement.product_type or requirement.category or 'Products'} "
+        f"for Delivery to {requirement.destination or 'TBD'} Within {requirement.delivery_days or 'TBD'} Days"
+    )
     lines = [
+        f"Subject: {subject}",
+        "",
         f"Dear {supplier.get('name', 'Supplier')},",
         "",
         "We are preparing an RFQ and would like your quotation for the following requirement:",
@@ -758,7 +764,19 @@ def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, 
         f"- Target delivery: {requirement.delivery_days or 'TBD'} days",
         f"- Lead-time confidence requested: {strategy.lead_time_confidence}",
         "",
-        "Please confirm price, lead time, capacity, payment terms, sample timing, and any risks.",
+        "Please include the following in your quotation:",
+        "- Unit price",
+        "- Total price",
+        "- MOQ",
+        "- Production capacity",
+        "- Lead time",
+        "- Earliest shipment date",
+        "- Payment terms",
+        "- Incoterms / trade terms",
+        "- Packaging information",
+        "- Validity period of quotation",
+        "- Any risks or constraints",
+        "",
         "This inquiry is subject to buyer review and final approval.",
         "",
         "Best regards,",

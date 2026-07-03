@@ -23,6 +23,15 @@ def send_if_approved(draft_id: str, db_session) -> OpenClawSendResponse:
     except ValueError as exc:
         return OpenClawSendResponse(success=False, error=str(exc))
 
+    if (draft.channel or "").strip().lower() in {"email", "smtp"}:
+        from aivan.openclaw.email_transport import is_real_test_email_mode, send_real_test_email
+
+        if is_real_test_email_mode():
+            response = send_real_test_email(draft)
+            if response.success:
+                repo.mark_sent(draft_id)
+            return response
+
     client = get_openclaw_client()
     request = OpenClawSendRequest(
         channel=draft.channel or "",
