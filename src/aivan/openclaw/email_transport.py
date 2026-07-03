@@ -22,6 +22,10 @@ def is_real_test_email_mode() -> bool:
     return os.environ.get("AIVAN_EMAIL_SEND_MODE", "").strip().lower() == "real_test"
 
 
+def real_test_email_gateway() -> str:
+    return os.environ.get("AIVAN_EMAIL_GATEWAY", "").strip().lower()
+
+
 def allowed_recipients() -> set[str]:
     raw = os.environ.get("AIVAN_EMAIL_ALLOWED_RECIPIENTS", "")
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
@@ -94,6 +98,8 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     use_tls = _smtp_bool("AIVAN_SMTP_USE_TLS", True)
 
     try:
+        if real_test_email_gateway() != "openclaw_real_test":
+            raise ValueError("AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email sending")
         recipient_address = validate_real_test_recipient(recipient)
         sender_address = _single_email_address(sender)
         username_address = _single_email_address(username)

@@ -29,6 +29,7 @@ def _draft(db, *, target: str, status: str = "approved") -> str:
 
 def _real_test_env(monkeypatch):
     monkeypatch.setenv("AIVAN_EMAIL_SEND_MODE", "real_test")
+    monkeypatch.setenv("AIVAN_EMAIL_GATEWAY", "openclaw_real_test")
     monkeypatch.setenv("AIVAN_EMAIL_ALLOWED_RECIPIENTS", "mich@giraffe.technology")
     monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "giraffetechnology@163.com")
     monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.163.com")
@@ -56,6 +57,25 @@ def test_real_test_email_blocks_unapproved_recipient(db_session, monkeypatch):
     assert "allowlisted" in (result.error or "")
     assert calls["smtp"] == 0
     assert DraftRepository(db_session).get(draft_id).status == "approved"
+
+
+def test_real_test_email_requires_openclaw_gateway_marker(db_session, monkeypatch):
+    _real_test_env(monkeypatch)
+    monkeypatch.delenv("AIVAN_EMAIL_GATEWAY", raising=False)
+    calls = {"smtp": 0}
+
+    class _SMTP:
+        def __init__(self, *args, **kwargs):
+            calls["smtp"] += 1
+
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
+
+    draft_id = _draft(db_session, target="mich@giraffe.technology")
+    result = send_if_approved(draft_id, db_session)
+
+    assert result.success is False
+    assert "AIVAN_EMAIL_GATEWAY" in (result.error or "")
+    assert calls["smtp"] == 0
 
 
 def test_real_test_email_allows_mich_giraffe_technology_only(db_session, monkeypatch):
