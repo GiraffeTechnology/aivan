@@ -245,6 +245,9 @@ def structure_customer_requirement_with_llm(
         req.extra["non_english_local_extraction_blocked"] = "language_skill_required"
     if non_english and has_valid_language_skill:
         req.extra["non_english_extracted_by"] = "language_skill"
+        # The requirement LLM was skipped because language-skill already produced
+        # a valid canonical RFQ packet (observability marker; no behavior change).
+        req.extra["requirement_llm_skipped"] = "language_skill_valid"
 
     req.missing_fields = _detect_missing_fields(req)
 
