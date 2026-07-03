@@ -103,3 +103,37 @@ def test_supplier_profile_fields_preserved():
     assert fetched.region == "Guangdong"
     assert fetched.daily_capacity == 2000
     assert fetched.quality_score == 0.85
+
+
+def test_startup_loader_populates_registry_from_database(db_session, monkeypatch):
+    from contextlib import contextmanager
+
+    from aivan.api.main import _load_supplier_registry_on_startup
+    from aivan.db import session as db_session_module
+    from aivan.db.repositories.supplier_repo import SupplierRepository
+
+    repo = SupplierRepository(db_session)
+    repo.upsert(
+        "sup_startup_001",
+        {
+            "name": "Startup Loaded Supplier",
+            "categories_json": ["apparel"],
+            "materials_json": ["cotton"],
+            "email": "startup@example.test",
+            "active": True,
+        },
+    )
+    db_session.commit()
+    clear_registry()
+
+    @contextmanager
+    def fake_db_session():
+        yield db_session
+
+    monkeypatch.setattr(db_session_module, "db_session", fake_db_session)
+
+    assert _load_supplier_registry_on_startup() == 1
+    loaded = get_supplier("sup_startup_001")
+    assert loaded is not None
+    assert loaded.name == "Startup Loaded Supplier"
+    assert loaded.categories == ["apparel"]
