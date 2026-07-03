@@ -30,11 +30,12 @@ def _draft(db, *, target: str, status: str = "approved") -> str:
 def _real_test_env(monkeypatch):
     monkeypatch.setenv("AIVAN_EMAIL_SEND_MODE", "real_test")
     monkeypatch.setenv("AIVAN_EMAIL_ALLOWED_RECIPIENTS", "mich@giraffe.technology")
-    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "abcdyi2021@gmail.com")
-    monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.gmail.com")
-    monkeypatch.setenv("AIVAN_SMTP_PORT", "587")
-    monkeypatch.setenv("AIVAN_SMTP_USE_TLS", "true")
-    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "abcdyi2021@gmail.com")
+    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "giraffetechnology@163.com")
+    monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.163.com")
+    monkeypatch.setenv("AIVAN_SMTP_PORT", "465")
+    monkeypatch.setenv("AIVAN_SMTP_USE_SSL", "true")
+    monkeypatch.setenv("AIVAN_SMTP_USE_TLS", "false")
+    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "giraffetechnology@163.com")
     monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "super-secret-app-password")
 
 
@@ -46,7 +47,7 @@ def test_real_test_email_blocks_unapproved_recipient(db_session, monkeypatch):
         def __init__(self, *args, **kwargs):
             calls["smtp"] += 1
 
-    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP", _SMTP)
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
     draft_id = _draft(db_session, target="supplier@example.com")
     result = send_if_approved(draft_id, db_session)
@@ -79,24 +80,66 @@ def test_real_test_email_allows_mich_giraffe_technology_only(db_session, monkeyp
             sent["username"] = username
             sent["password_seen"] = bool(password)
 
-        def send_message(self, msg):
+        def send_message(self, msg, from_addr=None, to_addrs=None):
             sent["from"] = msg["From"]
             sent["to"] = msg["To"]
+            sent["envelope_from"] = from_addr
+            sent["envelope_to"] = to_addrs
             sent["subject"] = msg["Subject"]
             sent["body"] = msg.get_content()
             return {}
 
-    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP", _SMTP)
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
-    draft_id = _draft(db_session, target="mich@giraffe.technology")
+    draft_id = _draft(db_session, target="Michael <mich@giraffe.technology>")
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is True
     assert DraftRepository(db_session).get(draft_id).status == "sent"
-    assert sent["from"] == "abcdyi2021@gmail.com"
-    assert sent["to"] == "mich@giraffe.technology"
+    assert sent["from"] == "giraffetechnology@163.com"
+    assert sent["to"] == "Michael <mich@giraffe.technology>"
+    assert sent["envelope_from"] == "giraffetechnology@163.com"
+    assert sent["envelope_to"] == ["mich@giraffe.technology"]
+    assert sent["username"] == "giraffetechnology@163.com"
     assert sent["subject"] == "RFQ: 5,000 High-Quality Plaid Shirts for Delivery to Tokyo Within 45 Days"
     assert "Dear Michael" in sent["body"]
+
+
+def test_real_test_email_blocks_multiple_recipients(db_session, monkeypatch):
+    _real_test_env(monkeypatch)
+    calls = {"smtp": 0}
+
+    class _SMTP:
+        def __init__(self, *args, **kwargs):
+            calls["smtp"] += 1
+
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
+
+    draft_id = _draft(db_session, target="mich@giraffe.technology, other@example.com")
+    result = send_if_approved(draft_id, db_session)
+
+    assert result.success is False
+    assert "exactly one recipient" in (result.error or "")
+    assert calls["smtp"] == 0
+
+
+def test_real_test_email_blocks_sender_username_mismatch(db_session, monkeypatch):
+    _real_test_env(monkeypatch)
+    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "other@example.com")
+    calls = {"smtp": 0}
+
+    class _SMTP:
+        def __init__(self, *args, **kwargs):
+            calls["smtp"] += 1
+
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
+
+    draft_id = _draft(db_session, target="mich@giraffe.technology")
+    result = send_if_approved(draft_id, db_session)
+
+    assert result.success is False
+    assert "sender must match SMTP username" in (result.error or "")
+    assert calls["smtp"] == 0
 
 
 def test_email_secrets_not_logged(monkeypatch):
@@ -114,7 +157,7 @@ def test_no_send_before_approval(db_session, monkeypatch):
         def __init__(self, *args, **kwargs):
             calls["smtp"] += 1
 
-    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP", _SMTP)
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
     draft_id = _draft(db_session, target="mich@giraffe.technology", status="pending_approval")
     result = send_if_approved(draft_id, db_session)

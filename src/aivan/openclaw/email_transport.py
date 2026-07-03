@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import smtplib
 from email.message import EmailMessage
+from email.utils import getaddresses
 
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.openclaw.contracts import OpenClawSendResponse
@@ -44,8 +45,15 @@ def _smtp_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def validate_real_test_recipient(recipient: str) -> None:
-    normalized = (recipient or "").strip().lower()
+def _single_email_address(raw: str) -> str:
+    addresses = [(name, addr) for name, addr in getaddresses([raw or ""]) if addr]
+    if len(addresses) != 1:
+        raise ValueError("real_test email must have exactly one recipient")
+    return addresses[0][1].strip().lower()
+
+
+def validate_real_test_recipient(recipient: str) -> str:
+    normalized = _single_email_address(recipient)
     allowed = allowed_recipients()
     if not normalized:
         raise ValueError("real_test email recipient is empty")
@@ -53,6 +61,7 @@ def validate_real_test_recipient(recipient: str) -> None:
         raise ValueError("AIVAN_EMAIL_ALLOWED_RECIPIENTS is not configured")
     if normalized not in allowed:
         raise ValueError("real_test email recipient is not allowlisted")
+    return normalized
 
 
 def _subject_from_draft(draft: InquiryDraftRecord) -> str:
@@ -81,14 +90,17 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
     host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("AIVAN_SMTP_PORT", "587"))
+    use_ssl = _smtp_bool("AIVAN_SMTP_USE_SSL", port == 465)
     use_tls = _smtp_bool("AIVAN_SMTP_USE_TLS", True)
 
     try:
-        validate_real_test_recipient(recipient)
-        if sender != "abcdyi2021@gmail.com":
-            raise ValueError("real_test sender must be abcdyi2021@gmail.com")
-        if username != "abcdyi2021@gmail.com":
-            raise ValueError("real_test SMTP username must be abcdyi2021@gmail.com")
+        recipient_address = validate_real_test_recipient(recipient)
+        sender_address = _single_email_address(sender)
+        username_address = _single_email_address(username)
+        if not sender_address:
+            raise ValueError("real_test sender is not configured")
+        if sender_address != username_address:
+            raise ValueError("real_test sender must match SMTP username")
         if not password:
             raise ValueError("AIVAN_SMTP_PASSWORD is not configured")
 
@@ -98,11 +110,12 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
         msg["Subject"] = _subject_from_draft(draft)
         msg.set_content(_body_from_draft(draft))
 
-        with smtplib.SMTP(host, port, timeout=30) as smtp:
-            if use_tls:
+        smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_cls(host, port, timeout=30) as smtp:
+            if use_tls and not use_ssl:
                 smtp.starttls()
             smtp.login(username, password)
-            refused = smtp.send_message(msg)
+            refused = smtp.send_message(msg, from_addr=sender_address, to_addrs=[recipient_address])
         if refused:
             return OpenClawSendResponse(
                 success=False,
