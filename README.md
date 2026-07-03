@@ -64,6 +64,38 @@ AIVAN must not silently absorb OpenClaw credentials, language canonicalization r
 
 ---
 
+## Controlled Real-Test Email
+
+Real email sending is disabled by default. For an approved OpenClaw real-test run,
+set `AIVAN_EMAIL_SEND_MODE=real_test` and `AIVAN_EMAIL_GATEWAY=openclaw_real_test`.
+The real-test transport only sends approved drafts, requires
+`AIVAN_EMAIL_ALLOWED_RECIPIENTS`, and preserves the human approval gate.
+
+The CTYUN 163 mailbox configuration uses `giraffetechnology@163.com` with SMTP
+SSL on `smtp.163.com:465` and POP3 SSL on `pop.163.com:995`. 163 requires a
+client authorization code for `AIVAN_SMTP_PASSWORD` / `AIVAN_POP3_PASSWORD`; the
+web login password is not accepted for POP3/SMTP client access.
+
+```bash
+AIVAN_EMAIL_SEND_MODE=real_test
+AIVAN_EMAIL_GATEWAY=openclaw_real_test
+AIVAN_EMAIL_ALLOWED_RECIPIENTS=mich@giraffe.technology
+AIVAN_PRESET_MAILBOX=giraffetechnology@163.com
+AIVAN_SMTP_HOST=smtp.163.com
+AIVAN_SMTP_PORT=465
+AIVAN_SMTP_USE_SSL=true
+AIVAN_SMTP_USE_TLS=false
+AIVAN_SMTP_USERNAME=giraffetechnology@163.com
+AIVAN_SMTP_PASSWORD=<163-client-authorization-code>
+AIVAN_POP3_HOST=pop.163.com
+AIVAN_POP3_PORT=995
+AIVAN_POP3_USE_SSL=true
+AIVAN_POP3_USERNAME=giraffetechnology@163.com
+AIVAN_POP3_PASSWORD=<163-client-authorization-code>
+```
+
+---
+
 ## P0 Language Boundary
 
 Standard English is the only internal working language across Giraffe products.
