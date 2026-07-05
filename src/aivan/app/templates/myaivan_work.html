@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/myaivan.css">
+</head>
+<body class="mv-work-body" data-email-status="{{ email_status }}">
+  <header class="mv-header">
+    <a class="mv-header-brand" href="/myaivan">myaivan</a>
+    <span class="mv-header-sub">AIVAN digital trade assistant · 数字业务员</span>
+    <button id="backup-btn" class="mv-header-action" title="Backup Case · 备份">备份 Backup</button>
+  </header>
+
+  <!-- Top area: conversation stream -->
+  <section id="conversation-stream" class="mv-stream" aria-label="Conversation stream"></section>
+
+  <!-- Middle area: generated outbound review -->
+  <section id="review-area" class="mv-review" aria-label="Generated outbound review">
+    <div class="mv-review-title">Outbound review · 外发审核</div>
+    <div id="draft-cards" class="mv-draft-cards">
+      <div class="mv-review-empty">
+        AIVAN-generated outbound drafts will appear here for your review.
+        生成的外发草稿会出现在这里，需人工确认后再外发。
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom area: input bar -->
+  <footer class="mv-inputbar">
+    <div class="mv-input-actions">
+      <button id="paste-btn" title="Copy for manual paste · 粘贴">粘贴</button>
+      <label class="mv-upload-label" title="Upload file · 上传文件">上传文件
+        <input id="file-input" type="file" hidden>
+      </label>
+      <label class="mv-upload-label" title="Upload image · 上传图片">上传图片
+        <input id="image-input" type="file" accept="image/*" hidden>
+      </label>
+      <button id="voice-btn" title="Voice input coming soon · 语音输入即将上线">语音</button>
+    </div>
+    <div class="mv-input-row">
+      <textarea id="message-input" rows="2"
+        placeholder="粘贴客户询价、供应商回复，或告诉 AIVAN 下一步怎么处理…… / Paste a buyer inquiry, supplier reply, or tell AIVAN what to handle next..."></textarea>
+      <button id="send-btn" class="mv-send-btn">发送 Send</button>
+    </div>
+    <div id="status-line" class="mv-status-line"></div>
+  </footer>
+
+  <!-- Email confirmation modal -->
+  <div id="email-modal" class="mv-modal" hidden>
+    <div class="mv-modal-box">
+      <h3>Send by Email · 通过邮件外发</h3>
+      <p id="email-modal-note" class="mv-modal-note"></p>
+      <label>Recipient · 收件人
+        <input id="email-recipient" type="email" placeholder="partner@example.com">
+      </label>
+      <div class="mv-modal-actions">
+        <button id="email-confirm" class="mv-primary">Confirm send · 确认外发</button>
+        <button id="email-cancel">Cancel · 取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/myaivan.js"></script>
+</body>
+</html>
