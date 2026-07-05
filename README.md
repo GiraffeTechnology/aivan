@@ -37,6 +37,13 @@ uv run aivan demo              # offline core RFQ demo (mock providers)
 
 The local dashboard is served at `http://127.0.0.1:8765/app`.
 
+The myaivan conversation UI (digital trade assistant, myaivan.com) is served at
+`http://127.0.0.1:8765/myaivan`: paste an inquiry, review AIVAN-generated
+outbound drafts, copy them for manual IM paste (WeChat / WhatsApp / LINE /
+Wangwang are never auto-sent), send email through aivan-openclaw with explicit
+confirmation, and export a Markdown case backup. All outbound content requires
+human confirmation.
+
 ## Test
 
 ```bash
