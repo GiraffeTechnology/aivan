@@ -99,6 +99,11 @@ app.add_middleware(
 
 app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 
+# myaivan Web UI (welcome + conversation pages and their JSON API).
+from aivan.web.router import router as _myaivan_router  # noqa: E402
+
+app.include_router(_myaivan_router, tags=["myaivan"])
+
 
 # OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
 SKILL_INVOKE_PATHS = frozenset(
@@ -258,7 +263,7 @@ def health():
 @app.get("/app", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def serve_app(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "title": "AIVAN"})
+    return templates.TemplateResponse(request, "index.html", {"title": "AIVAN"})
 
 
 @app.post("/invoke")

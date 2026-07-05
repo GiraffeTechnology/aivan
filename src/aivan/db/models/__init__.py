@@ -10,6 +10,13 @@ from aivan.db.models.execution import ExecutionEventRecord, ProcessedInboundEven
 from aivan.db.models.platform import PlatformRecord
 from aivan.db.models.account import OpenClawAccountRecord
 from aivan.db.models.preference import UserPreferenceRecord
+from aivan.db.models.web_case import (
+    WebAttachmentRecord,
+    WebAuditLogRecord,
+    WebCaseMessageRecord,
+    WebCaseRecord,
+    WebOutboundDraftRecord,
+)
 
 __all__ = [
     "Base",
@@ -21,4 +28,9 @@ __all__ = [
     "PlatformRecord",
     "OpenClawAccountRecord",
     "UserPreferenceRecord",
+    "WebCaseRecord",
+    "WebCaseMessageRecord",
+    "WebOutboundDraftRecord",
+    "WebAttachmentRecord",
+    "WebAuditLogRecord",
 ]
