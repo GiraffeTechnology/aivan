@@ -44,3 +44,32 @@ def db_session():
     yield session
     session.close()
     engine.dispose()
+
+
+@pytest.fixture
+def api_client():
+    """FastAPI TestClient wired to an isolated in-memory DB (no API key)."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.pool import StaticPool
+
+    from aivan.api.main import app, get_db
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+
+    def override_db():
+        yield db
+
+    os.environ.pop("AIVAN_API_KEY", None)
+    app.dependency_overrides[get_db] = override_db
+    with TestClient(app, raise_server_exceptions=False) as client:
+        yield client
+    app.dependency_overrides.clear()
+    db.close()
+    engine.dispose()
