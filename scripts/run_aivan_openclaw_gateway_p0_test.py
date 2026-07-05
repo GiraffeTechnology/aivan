@@ -352,6 +352,10 @@ else:
             sessionId: 'conv-project-001',
             senderId: 'supplier-weixin-001',
             channel: 'wechat',
+            metadata: {{
+              project_id: 'test-project-001',
+              role_context: 'supplier',
+            }},
           }};
 
           const attempt = await registeredHarness.runAttempt(params);
@@ -369,6 +373,8 @@ else:
             'message_text_forwarded':  (evt.message_text || '').includes('10000 shirts'),
             'sender_id_forwarded':     evt.sender_id === 'supplier-weixin-001',
             'mode_is_auto':            evt.mode === 'auto',
+            'project_id_preserved':    evt.project_id === 'test-project-001',
+            'role_context_preserved':  evt.role_context === 'supplier',
             'reply_surfaced':          Array.isArray(attempt.assistantTexts) && attempt.assistantTexts[0] === 'AIVAN mock reply',
             'session_id_used':         attempt.sessionIdUsed === 'conv-project-001',
           }};
