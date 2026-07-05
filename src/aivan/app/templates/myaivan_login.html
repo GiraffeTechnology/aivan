@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/myaivan.css">
+</head>
+<body class="mv-welcome-body">
+  <main class="mv-welcome">
+    <div class="mv-logo">AIVAN</div>
+    <h1 class="mv-welcome-title">Sign in to myaivan</h1>
+    <p class="mv-tagline">
+      Enter your AIVAN access key to continue. Sessions expire automatically.
+    </p>
+    <form id="login-form" class="mv-login-form">
+      <input id="login-key" type="password" placeholder="AIVAN access key" autocomplete="current-password" required>
+      <button type="submit" class="mv-start-btn">Sign in</button>
+    </form>
+    <p id="login-error" class="mv-login-error" hidden></p>
+  </main>
+  <script>
+    (function () {
+      "use strict";
+      var form = document.getElementById("login-form");
+      var errorLine = document.getElementById("login-error");
+      form.addEventListener("submit", async function (ev) {
+        ev.preventDefault();
+        errorLine.hidden = true;
+        try {
+          var resp = await fetch("/api/myaivan/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: document.getElementById("login-key").value }),
+          });
+          var data = await resp.json().catch(function () { return {}; });
+          if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+          window.location.href = "/myaivan/work";
+        } catch (e) {
+          errorLine.textContent = e.message;
+          errorLine.hidden = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -16,10 +16,15 @@ from sqlalchemy.orm import Session
 
 from aivan.db.session import get_db
 from aivan.utils.ids import new_id
+from aivan.web import auth as web_auth
 from aivan.web import service
 from aivan.web.email_outbound import email_status
 
 router = APIRouter()
+
+# Auth guard applied to every case/draft/upload endpoint. The i18n catalog
+# stays public: it serves UI strings only, never user/case data.
+_PROTECTED = [Depends(web_auth.require_web_api)]
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -46,7 +51,7 @@ def _require_draft(db: Session, case_id: str, draft_id: str):
 
 # ── API ───────────────────────────────────────────────────────────────────────
 
-@router.post("/api/myaivan/cases")
+@router.post("/api/myaivan/cases", dependencies=_PROTECTED)
 def create_case(body: dict | None = None, db: Session = Depends(get_db)):
     body = body or {}
     case = service.create_case(
@@ -57,13 +62,13 @@ def create_case(body: dict | None = None, db: Session = Depends(get_db)):
     return service.case_state(db, case)
 
 
-@router.get("/api/myaivan/cases/{case_id}")
+@router.get("/api/myaivan/cases/{case_id}", dependencies=_PROTECTED)
 def get_case(case_id: str, db: Session = Depends(get_db)):
     case = _require_case(db, case_id)
     return service.case_state(db, case)
 
 
-@router.post("/api/myaivan/cases/{case_id}/messages")
+@router.post("/api/myaivan/cases/{case_id}/messages", dependencies=_PROTECTED)
 def post_message(case_id: str, body: dict, db: Session = Depends(get_db)):
     case = _require_case(db, case_id)
     content = str(body.get("content") or "").strip()
@@ -78,7 +83,7 @@ def post_message(case_id: str, body: dict, db: Session = Depends(get_db)):
     return state
 
 
-@router.post("/api/myaivan/cases/{case_id}/uploads")
+@router.post("/api/myaivan/cases/{case_id}/uploads", dependencies=_PROTECTED)
 async def upload(case_id: str, file: UploadFile, db: Session = Depends(get_db)):
     case = _require_case(db, case_id)
     raw = await file.read()
@@ -101,7 +106,7 @@ async def upload(case_id: str, file: UploadFile, db: Session = Depends(get_db)):
     return state
 
 
-@router.post("/api/myaivan/cases/{case_id}/drafts")
+@router.post("/api/myaivan/cases/{case_id}/drafts", dependencies=_PROTECTED)
 def create_draft(case_id: str, body: dict, db: Session = Depends(get_db)):
     """Explicit draft generation for a chosen channel (review-area regenerate)."""
     from aivan.web import assistant
@@ -132,25 +137,25 @@ def _draft_action(db: Session, case_id: str, draft_id: str, action):
         raise HTTPException(status_code=409, detail=str(exc))
 
 
-@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/copied")
+@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/copied", dependencies=_PROTECTED)
 def draft_copied(case_id: str, draft_id: str, db: Session = Depends(get_db)):
     case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.mark_copied(db, d))
     return service.case_state(db, case)
 
 
-@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/mark-sent")
+@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/mark-sent", dependencies=_PROTECTED)
 def draft_mark_sent(case_id: str, draft_id: str, db: Session = Depends(get_db)):
     case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.mark_manually_sent(db, c, d))
     return service.case_state(db, case)
 
 
-@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/reject")
+@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/reject", dependencies=_PROTECTED)
 def draft_reject(case_id: str, draft_id: str, db: Session = Depends(get_db)):
     case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.reject_draft(db, c, d))
     return service.case_state(db, case)
 
 
-@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/send-email")
+@router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/send-email", dependencies=_PROTECTED)
 def draft_send_email(case_id: str, draft_id: str, body: dict | None = None, db: Session = Depends(get_db)):
     case = _require_case(db, case_id)
     draft = _require_draft(db, case_id, draft_id)
@@ -169,7 +174,7 @@ def draft_send_email(case_id: str, draft_id: str, body: dict | None = None, db: 
     return state
 
 
-@router.get("/api/myaivan/email/status")
+@router.get("/api/myaivan/email/status", dependencies=_PROTECTED)
 def get_email_status():
     return {"status": email_status()}
 
@@ -185,10 +190,53 @@ def get_i18n_catalog(lang: str):
     return catalog
 
 
-@router.get("/api/myaivan/cases/{case_id}/backup.md", response_class=PlainTextResponse)
+@router.get("/api/myaivan/cases/{case_id}/backup.md", response_class=PlainTextResponse, dependencies=_PROTECTED)
 def backup_markdown(case_id: str, db: Session = Depends(get_db)):
     case = _require_case(db, case_id)
     return service.export_markdown(db, case)
+
+
+# ── Auth: login / logout ──────────────────────────────────────────────────────
+
+@router.post("/api/myaivan/login")
+def login(body: dict):
+    """Exchange the AIVAN access key for a session cookie.
+
+    Fails closed in misconfigured production; 401 on a wrong key. The i18n
+    catalog and this endpoint are the only unauthenticated API surface.
+    """
+    from fastapi.responses import JSONResponse
+
+    mode = web_auth.auth_mode()
+    if mode == "misconfigured":
+        raise HTTPException(
+            status_code=503,
+            detail="Server auth misconfigured: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET",
+        )
+    if mode == "open":
+        return JSONResponse({"ok": True, "mode": "open"})
+    key = str((body or {}).get("key") or "")
+    if not web_auth.verify_presented_key(key):
+        raise HTTPException(status_code=401, detail="Invalid access key")
+    response = JSONResponse({"ok": True, "mode": "session"})
+    response.set_cookie(
+        web_auth.SESSION_COOKIE,
+        web_auth.issue_session_token(),
+        max_age=web_auth.session_ttl_seconds(),
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@router.post("/api/myaivan/logout")
+def logout():
+    from fastapi.responses import JSONResponse
+
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(web_auth.SESSION_COOKIE, path="/")
+    return response
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -199,8 +247,39 @@ def _templates():
     return templates
 
 
+def _page_guard(request: Request):
+    """Return a response that preempts the page, or None when access is OK."""
+    from fastapi.responses import PlainTextResponse, RedirectResponse
+
+    decision = web_auth.check_access(request)
+    if decision == "ok":
+        return None
+    if decision == "fail_closed":
+        return PlainTextResponse(
+            "myaivan is unavailable: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET.",
+            status_code=503,
+        )
+    return RedirectResponse("/myaivan/login", status_code=303)
+
+
+@router.get("/myaivan/login", response_class=HTMLResponse)
+def myaivan_login(request: Request):
+    if web_auth.auth_mode() == "open":
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/myaivan", status_code=303)
+    if web_auth.auth_mode() == "misconfigured":
+        return _page_guard(request)
+    return _templates().TemplateResponse(
+        request, "myaivan_login.html", {"title": "myaivan — sign in"}
+    )
+
+
 @router.get("/myaivan", response_class=HTMLResponse)
 def myaivan_welcome(request: Request):
+    guard = _page_guard(request)
+    if guard is not None:
+        return guard
     return _templates().TemplateResponse(
         request, "myaivan_welcome.html", {"title": "myaivan — AIVAN digital trade assistant"}
     )
@@ -208,6 +287,9 @@ def myaivan_welcome(request: Request):
 
 @router.get("/myaivan/work", response_class=HTMLResponse)
 def myaivan_work(request: Request):
+    guard = _page_guard(request)
+    if guard is not None:
+        return guard
     return _templates().TemplateResponse(
         request,
         "myaivan_work.html",

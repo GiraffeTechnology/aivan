@@ -122,3 +122,11 @@ body {
 .mv-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .mv-modal-actions button { border: 1px solid var(--mv-border); background: #fff; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
 .mv-modal-actions .mv-primary { background: var(--mv-accent); border-color: var(--mv-accent); color: #fff; }
+
+/* Login */
+.mv-login-form { display: flex; flex-direction: column; gap: 12px; max-width: 320px; margin: 0 auto; }
+.mv-login-form input {
+  padding: 12px 14px; border: 1px solid var(--mv-border); border-radius: 10px; font-size: 15px;
+}
+.mv-login-form .mv-start-btn { border: none; cursor: pointer; }
+.mv-login-error { color: var(--mv-risk-high); font-size: 13px; margin-top: 12px; }

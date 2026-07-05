@@ -44,6 +44,12 @@ Wangwang are never auto-sent), send email through aivan-openclaw with explicit
 confirmation, and export a Markdown case backup. All outbound content requires
 human confirmation.
 
+Access control: in local/dev with no key configured, myaivan runs in open demo
+mode. In production (`AIVAN_ENV=production`) it fails closed — `AIVAN_API_KEY`
+or `AIVAN_AUTH_SECRET` must be set, browsers sign in at `/myaivan/login`
+(session cookie), and API clients send `X-AIVAN-API-Key` or a Bearer token.
+Only the i18n string catalog (no user/case data) stays public.
+
 ## Test
 
 ```bash

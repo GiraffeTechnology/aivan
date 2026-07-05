@@ -36,6 +36,10 @@
       headers: { "Content-Type": "application/json" },
     }, options));
     const data = await resp.json().catch(() => ({}));
+    if (resp.status === 401) {
+      window.location.href = "/myaivan/login";
+      throw new Error("authentication required");
+    }
     if (!resp.ok) {
       throw new Error((data && data.detail) || ("Request failed: " + resp.status));
     }
