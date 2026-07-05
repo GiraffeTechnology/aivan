@@ -102,6 +102,15 @@ body {
 .mv-send-btn:hover { background: var(--mv-accent-dark); }
 .mv-status-line { min-height: 16px; font-size: 12px; color: var(--mv-muted); margin-top: 4px; }
 
+/* Language switcher */
+.mv-lang-switch { display: inline-flex; align-items: center; gap: 4px; }
+.mv-lang-icon { font-size: 16px; }
+.mv-lang-switch select {
+  border: 1px solid var(--mv-border); border-radius: 8px; background: #fff;
+  padding: 4px 6px; font-size: 13px; cursor: pointer; max-width: 110px;
+}
+.mv-lang-floating { position: fixed; top: 16px; right: 20px; }
+
 /* Modal */
 .mv-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; }
 .mv-modal[hidden] { display: none; }

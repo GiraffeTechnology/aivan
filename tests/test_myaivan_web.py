@@ -52,9 +52,14 @@ def _events(api_client, case_id: str) -> list[str]:
 def test_01_welcome_page_renders(api_client):
     resp = api_client.get("/myaivan")
     assert resp.status_code == 200
+    # English is the canonical/system language in the markup…
     assert "Welcome back. What should your AIVAN handle today?" in resp.text
-    assert "欢迎回来。今天要让你的 AIVAN 处理哪一条询价？" in resp.text
-    assert "Start Working" in resp.text and "开始工作" in resp.text
+    assert "Start Working" in resp.text
+    assert 'data-i18n="welcome.title"' in resp.text
+    # …and the required Chinese copy is served through the zh catalog.
+    zh = api_client.get("/api/myaivan/i18n/zh").json()["strings"]
+    assert zh["welcome.title"] == "欢迎回来。今天要让你的 AIVAN 处理哪一条询价？"
+    assert zh["welcome.start"] == "开始工作"
 
 
 def test_02_start_working_navigates_to_conversation(api_client):
@@ -75,6 +80,7 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert 'id="file-input"' in html and 'id="image-input"' in html
     assert 'id="voice-btn"' in html
     assert 'id="send-btn"' in html
+    assert 'id="lang-select"' in html  # language switcher
 
 
 def test_04_user_messages_align_right():
@@ -293,11 +299,14 @@ def test_19_ui_does_not_describe_aivan_as_generic_chatbot():
 
 
 def test_20_product_copy_keeps_trade_assistant_positioning():
+    from aivan.web import i18n
+
     welcome = (TEMPLATES / "myaivan_welcome.html").read_text()
     work = (TEMPLATES / "myaivan_work.html").read_text()
     assert "digital trade assistant" in welcome
-    assert "数字业务员" in welcome
-    assert "digital trade assistant" in work or "数字业务员" in work
+    assert "digital trade assistant" in work
+    assert "数字业务员" in i18n.CATALOG_ZH["welcome.tagline"]
+    assert "数字业务员" in i18n.CATALOG_ZH["work.brand_sub"]
 
 
 # ── Extra behavior guards ─────────────────────────────────────────────────────

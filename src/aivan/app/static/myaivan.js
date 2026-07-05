@@ -5,6 +5,9 @@
  *  - ✉️ sends email ONLY through the backend adapter (aivan-openclaw or mock),
  *    always behind an explicit confirmation modal.
  *  - Mock email results are labeled as mock, never as real delivery.
+ *
+ * All user-visible strings resolve through MyaivanI18n.t() (English canonical,
+ * other languages served by /api/myaivan/i18n via giraffe-language-skill).
  */
 (function () {
   "use strict";
@@ -20,6 +23,11 @@
 
   let activeCaseId = null;
   let pendingEmailDraftId = null;
+  let lastState = null;
+
+  function t(key, fallback) {
+    return (window.MyaivanI18n && window.MyaivanI18n.t(key, fallback)) || fallback || key;
+  }
 
   function setStatus(text) { statusLine.textContent = text || ""; }
 
@@ -57,8 +65,8 @@
   function riskNoteHtml(draft) {
     if (!draft.riskNotes || !draft.riskNotes.length) return "";
     const cls = draft.riskLevel === "high" ? "mv-risk-high" : "mv-risk-medium";
-    return '<div class="mv-risk-note ' + cls + '">⚠ 风险提示 Risk (' + draft.riskLevel + "): "
-      + draft.riskNotes.join("; ") + "</div>";
+    return '<div class="mv-risk-note ' + cls + '">⚠ ' + t("draft.risk_label", "Risk")
+      + " (" + draft.riskLevel + "): " + draft.riskNotes.join("; ") + "</div>";
   }
 
   function draftCard(draft) {
@@ -75,12 +83,25 @@
       riskNoteHtml(draft) +
       '<div class="mv-draft-body"></div>' +
       '<div class="mv-draft-actions">' +
-        '<button class="mv-act-copy" title="Copy for manual paste · 复制，用于手动粘贴">复制 Copy</button>' +
-        '<button class="mv-act-email" title="Send by Email · 通过邮件外发">✉️ Email</button>' +
-        '<button class="mv-act-sent" title="Mark as manually sent · 已粘贴并发送">✅ 已发送</button>' +
-        '<button class="mv-act-reject" title="Reject draft · 审核不通过">❌ 不通过</button>' +
+        '<button class="mv-act-copy"></button>' +
+        '<button class="mv-act-email"></button>' +
+        '<button class="mv-act-sent"></button>' +
+        '<button class="mv-act-reject"></button>' +
       "</div>";
     card.querySelector(".mv-draft-body").textContent = draft.body;
+
+    const labels = [
+      [".mv-act-copy", t("draft.copy", "Copy"), t("draft.copy_tooltip", "Copy for manual paste")],
+      [".mv-act-email", "✉️ " + t("draft.email", "Email"), t("draft.email_tooltip", "Send by Email")],
+      [".mv-act-sent", "✅ " + t("draft.mark_sent", "Sent"), t("draft.mark_sent_tooltip", "Mark as manually sent")],
+      [".mv-act-reject", "❌ " + t("draft.reject", "Reject"), t("draft.reject_tooltip", "Reject draft")],
+    ];
+    labels.forEach(([sel, label, tooltip]) => {
+      const btn = card.querySelector(sel);
+      btn.textContent = label;
+      btn.title = tooltip;
+    });
+
     if (terminal) {
       card.querySelectorAll(".mv-draft-actions button").forEach((b) => { b.disabled = true; });
     }
@@ -92,6 +113,7 @@
   }
 
   function render(state) {
+    lastState = state;
     stream.innerHTML = "";
     (state.messages || []).forEach((m) => stream.appendChild(bubble(m)));
     stream.scrollTop = stream.scrollHeight;
@@ -99,11 +121,19 @@
     draftCards.innerHTML = "";
     const drafts = state.outboundDrafts || [];
     if (!drafts.length) {
-      draftCards.innerHTML = '<div class="mv-review-empty">AIVAN-generated outbound drafts will appear here for your review. 生成的外发草稿会出现在这里，需人工确认后再外发。</div>';
+      const empty = document.createElement("div");
+      empty.className = "mv-review-empty";
+      empty.dataset.i18n = "work.review_empty";
+      empty.textContent = t("work.review_empty",
+        "AIVAN-generated outbound drafts will appear here for your review. Every outbound message requires human confirmation.");
+      draftCards.appendChild(empty);
     } else {
       drafts.slice().reverse().forEach((d) => draftCards.appendChild(draftCard(d)));
     }
   }
+
+  // Re-render translated card labels when the language changes.
+  document.addEventListener("myaivan:lang", () => { if (lastState) render(lastState); });
 
   // ── case bootstrap ─────────────────────────────────────────────────────────
 
@@ -129,7 +159,7 @@
     const content = input.value.trim();
     if (!content) return;
     input.value = "";
-    setStatus("AIVAN 正在处理… processing…");
+    setStatus(t("status.processing", "AIVAN is processing…"));
     try {
       const state = await api("/cases/" + activeCaseId + "/messages", {
         method: "POST",
@@ -138,7 +168,7 @@
       render(state);
       setStatus("");
     } catch (e) {
-      setStatus("发送失败 Send failed: " + e.message);
+      setStatus(t("status.send_failed", "Send failed") + ": " + e.message);
     }
   }
 
@@ -148,12 +178,12 @@
       if (text) {
         input.value = (input.value ? input.value + "\n" : "") + text;
         input.focus();
-        setStatus("剪贴板内容已粘贴到输入框。Clipboard content pasted into the input box.");
+        setStatus(t("status.pasted", "Clipboard content pasted into the input box."));
         return;
       }
-      setStatus("剪贴板为空。Clipboard is empty.");
+      setStatus(t("status.clipboard_empty", "Clipboard is empty."));
     } catch (e) {
-      setStatus("浏览器未允许读取剪贴板，请使用 Ctrl+V / Cmd+V 手动粘贴。Please paste manually with Ctrl+V / Cmd+V.");
+      setStatus(t("status.paste_fallback", "Please paste manually with Ctrl+V / Cmd+V."));
     }
   }
 
@@ -162,7 +192,7 @@
     if (!file) return;
     const form = new FormData();
     form.append("file", file);
-    setStatus("上传中… uploading…");
+    setStatus(t("status.uploading", "Uploading…"));
     try {
       const resp = await fetch(API + "/cases/" + activeCaseId + "/uploads", { method: "POST", body: form });
       const state = await resp.json();
@@ -170,7 +200,7 @@
       render(state);
       setStatus("");
     } catch (e) {
-      setStatus("上传失败 Upload failed: " + e.message);
+      setStatus(t("status.upload_failed", "Upload failed") + ": " + e.message);
     } finally {
       fileInput.value = "";
     }
@@ -187,8 +217,8 @@
       render(state);
     } catch (e) { /* audit failure should not block the user */ }
     setStatus(copied
-      ? "已复制，请粘贴到微信 / WhatsApp / LINE / 旺旺后回来点 ✅。Copied — paste it into your IM tool, then click ✅."
-      : "浏览器未允许写剪贴板，请手动选择草稿文本复制。Clipboard blocked — select the draft text and copy manually.");
+      ? t("status.copied", "Copied — paste it into your IM tool, then click ✅.")
+      : t("status.copy_blocked", "Clipboard blocked — select the draft text and copy manually."));
   }
 
   async function draftAction(draftId, action) {
@@ -196,10 +226,10 @@
       const state = await api("/cases/" + activeCaseId + "/drafts/" + draftId + "/" + action, { method: "POST" });
       render(state);
       setStatus(action === "mark-sent"
-        ? "已记录为人工外发。Recorded as manually sent."
-        : "草稿已拒绝，请告诉 AIVAN 如何修改。Draft rejected — tell AIVAN how to revise it.");
+        ? t("status.marked_sent", "Recorded as manually sent.")
+        : t("status.rejected", "Draft rejected — tell AIVAN how to revise it."));
     } catch (e) {
-      setStatus("操作失败 Action failed: " + e.message);
+      setStatus(t("status.action_failed", "Action failed") + ": " + e.message);
     }
   }
 
@@ -211,14 +241,15 @@
 
   function openEmailModal(draft) {
     if (emailStatus === "not_configured") {
-      setStatus("邮件外发尚未配置，请复制草稿后手动发送。Email sending is not configured. Please copy the draft manually.");
+      setStatus(t("status.email_not_configured",
+        "Email sending is not configured. Please copy the draft manually."));
       return;
     }
     pendingEmailDraftId = draft.id;
     recipientInput.value = draft.recipient || "";
     modalNote.textContent = emailStatus === "mock"
-      ? "当前为 MOCK 演示模式：不会真正发出邮件。Mock mode: no real email will be delivered."
-      : "将通过 aivan-openclaw 真实外发邮件，请确认收件人与内容。This will send a real email through aivan-openclaw.";
+      ? t("email.modal_mock", "Mock mode: no real email will be delivered.")
+      : t("email.modal_real", "This will send a real email through aivan-openclaw.");
     modal.hidden = false;
   }
 
@@ -226,7 +257,7 @@
     const draftId = pendingEmailDraftId;
     modal.hidden = true;
     if (!draftId) return;
-    setStatus("正在外发邮件… sending email…");
+    setStatus(t("status.email_sending", "Sending email…"));
     try {
       const state = await api("/cases/" + activeCaseId + "/drafts/" + draftId + "/send-email", {
         method: "POST",
@@ -236,13 +267,13 @@
       const r = state.emailResult || {};
       if (r.success) {
         setStatus(r.provider === "mock"
-          ? "MOCK 模式外发成功（未真实发送）。Mock send recorded — no real email was delivered."
-          : "邮件已通过 aivan-openclaw 外发。Email sent via aivan-openclaw.");
+          ? t("status.email_mock", "Mock send recorded — no real email was delivered.")
+          : t("status.email_sent", "Email sent via aivan-openclaw."));
       } else {
-        setStatus("邮件外发失败 Email failed: " + (r.error || "unknown error"));
+        setStatus(t("status.email_failed", "Email failed") + ": " + (r.error || "unknown error"));
       }
     } catch (e) {
-      setStatus("邮件外发失败 Email failed: " + e.message);
+      setStatus(t("status.email_failed", "Email failed") + ": " + e.message);
     }
     pendingEmailDraftId = null;
   }
@@ -260,9 +291,9 @@
       a.download = "aivan-case-" + activeCaseId + ".md";
       a.click();
       URL.revokeObjectURL(a.href);
-      setStatus("备份已导出 Backup exported.");
+      setStatus(t("status.backup_done", "Backup exported."));
     } catch (e) {
-      setStatus("备份失败 Backup failed: " + e.message);
+      setStatus(t("status.backup_failed", "Backup failed") + ": " + e.message);
     }
   }
 
@@ -276,7 +307,7 @@
   document.getElementById("file-input").addEventListener("change", (ev) => upload(ev.target));
   document.getElementById("image-input").addEventListener("change", (ev) => upload(ev.target));
   document.getElementById("voice-btn").addEventListener("click", () => {
-    setStatus("语音输入即将上线。Voice input coming soon.");
+    setStatus(t("status.voice_soon", "Voice input coming soon."));
   });
   document.getElementById("backup-btn").addEventListener("click", backup);
   document.getElementById("email-confirm").addEventListener("click", confirmEmail);
@@ -285,5 +316,5 @@
     pendingEmailDraftId = null;
   });
 
-  ensureCase().catch((e) => setStatus("初始化失败 Init failed: " + e.message));
+  ensureCase().catch((e) => setStatus(t("status.init_failed", "Initialization failed") + ": " + e.message));
 })();

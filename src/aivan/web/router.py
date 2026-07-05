@@ -174,6 +174,17 @@ def get_email_status():
     return {"status": email_status()}
 
 
+@router.get("/api/myaivan/i18n/{lang}")
+def get_i18n_catalog(lang: str):
+    """UI string catalog. en/zh are built in; other languages are translated
+    through giraffe-language-skill and fail soft to English."""
+    from aivan.web import i18n
+
+    catalog = i18n.get_catalog(lang)
+    catalog["languages"] = i18n.SUPPORTED_LANGUAGES
+    return catalog
+
+
 @router.get("/api/myaivan/cases/{case_id}/backup.md", response_class=PlainTextResponse)
 def backup_markdown(case_id: str, db: Session = Depends(get_db)):
     case = _require_case(db, case_id)
