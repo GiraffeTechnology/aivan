@@ -300,10 +300,12 @@ else:
     if not dist_js.is_file():
         skip("Node.js handler invocation test", "dist/index.js not built")
     else:
-        # Inline Node.js test script
+        # Inline Node.js test script exercising the current OpenClaw plugin-entry
+        # contract: default export (definePluginEntry) → register(api) →
+        # api.registerAgentHarness(...) → harness.runAttempt(params).
         handler_test = textwrap.dedent(f"""
         import {{ createServer }} from 'node:http';
-        import {{ register }} from '{dist_js}';
+        import {{ pathToFileURL }} from 'node:url';
 
         const captured = [];
         const server = createServer((req, res) => {{
@@ -313,37 +315,46 @@ else:
             const parsed = JSON.parse(body);
             captured.push({{ path: req.url, body: parsed }});
             res.writeHead(200, {{ 'Content-Type': 'application/json' }});
-            res.end(JSON.stringify({{ accepted: true, project_id: parsed.project_id, action: 'queued' }}));
+            res.end(JSON.stringify({{ status: 'ok', reply_text: 'AIVAN mock reply', output: 'AIVAN mock reply' }}));
           }});
         }});
 
         server.listen(8765, '127.0.0.1', async () => {{
           process.env.AIVAN_BASE_URL = 'http://127.0.0.1:8765';
 
-          let registeredHandler = null;
-          const mockApi = {{
-            registerInteractiveHandler: (reg) => {{ registeredHandler = reg; }}
-          }};
-          register(mockApi);
+          const plugin = await import(pathToFileURL('{dist_js}').href);
+          const pluginEntry = plugin.default ?? plugin;
 
-          if (!registeredHandler) {{
-            console.log('RESULT:FAIL:registerInteractiveHandler not called');
+          let registeredHarness = null;
+          const mockApi = {{
+            registerAgentHarness: (harness) => {{ registeredHarness = harness; }}
+          }};
+          if (typeof pluginEntry === 'function') {{
+            pluginEntry(mockApi);
+          }} else if (typeof pluginEntry?.register === 'function') {{
+            pluginEntry.register(mockApi);
+          }} else {{
+            console.log('RESULT:FAIL:plugin entry has no callable register contract');
             server.close(); process.exit(1);
           }}
 
-          const ctx = {{
-            message: {{ text: 'We can quote 10000 shirts, cotton poplin, lead time 21 days, MOQ 10000 pcs.' }},
-            channel: 'wechat',
+          if (!registeredHarness) {{
+            console.log('RESULT:FAIL:registerAgentHarness not called');
+            server.close(); process.exit(1);
+          }}
+          if (registeredHarness.id !== 'openclaw-aivan') {{
+            console.log('RESULT:FAIL:harness id is not openclaw-aivan');
+            server.close(); process.exit(1);
+          }}
+
+          const params = {{
+            prompt: 'We can quote 10000 shirts, cotton poplin, lead time 21 days, MOQ 10000 pcs.',
+            sessionId: 'conv-project-001',
             senderId: 'supplier-weixin-001',
-            conversationId: 'conv-project-001',
-            peer: {{ id: 'supplier-weixin-001', name: 'Supplier Co.' }},
-            metadata: {{
-              project_id: 'test-project-001',
-              role_context: {{ side: 'supplier', role: 'seller' }}
-            }}
+            channel: 'wechat',
           }};
 
-          await registeredHandler.handler(ctx);
+          const attempt = await registeredHarness.runAttempt(params);
 
           if (captured.length === 0) {{
             console.log('RESULT:FAIL:no request reached mock AIVAN server');
@@ -354,11 +365,12 @@ else:
           const checks = {{
             'source_is_openclaw':      evt.source === 'openclaw',
             'channel_is_wechat':       evt.channel === 'wechat',
-            'project_id_preserved':    evt.project_id === 'test-project-001',
-            'role_context_preserved':  JSON.stringify(evt.role_context) === JSON.stringify({{ side: 'supplier', role: 'seller' }}),
+            'conversation_id_preserved': evt.conversation_id === 'conv-project-001',
             'message_text_forwarded':  (evt.message_text || '').includes('10000 shirts'),
             'sender_id_forwarded':     evt.sender_id === 'supplier-weixin-001',
             'mode_is_auto':            evt.mode === 'auto',
+            'reply_surfaced':          Array.isArray(attempt.assistantTexts) && attempt.assistantTexts[0] === 'AIVAN mock reply',
+            'session_id_used':         attempt.sessionIdUsed === 'conv-project-001',
           }};
 
           for (const [k, v] of Object.entries(checks)) {{
