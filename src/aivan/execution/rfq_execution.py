@@ -41,15 +41,9 @@ from aivan.schemas.rfq import (
     RFQStrategy,
     SupplierRoutingDecision,
 )
+from aivan.utils.env import env_bool
 
 logger = logging.getLogger(__name__)
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 CLASSIFICATION_SYSTEM = """
@@ -84,7 +78,7 @@ def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
     # fallback classifies by role/keyword only — it never canonicalizes business
     # facts — so this is safe under the P0 language boundary.
     fallback = _fallback_event_type(event, bool(validated_project_id))
-    if fallback != "unknown" and not _env_bool("AIVAN_EVENT_CLASSIFICATION_LLM_ENABLED"):
+    if fallback != "unknown" and not env_bool("AIVAN_EVENT_CLASSIFICATION_LLM_ENABLED"):
         return EventClassification(
             event_type=fallback,
             confidence=0.7,
@@ -120,7 +114,7 @@ def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
 def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> RFQStrategy:
     # Deterministic-by-default: do not send raw instruction text to the strategy
     # LLM unless explicitly enabled. The keyword-based fallback is deterministic.
-    if not _env_bool("AIVAN_STRATEGY_LLM_ENABLED"):
+    if not env_bool("AIVAN_STRATEGY_LLM_ENABLED"):
         return _fallback_strategy(raw_text)
 
     schema_hint = RFQStrategy().model_dump()
@@ -739,7 +733,7 @@ def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, 
     # unless LLM drafting is explicitly enabled. The template is built only from
     # already-canonical requirement/strategy/GLTG fields (English), never raw text.
     raw = {}
-    if _env_bool("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED"):
+    if env_bool("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED"):
         try:
             raw = llm_complete_json("aivan_supplier_email_draft", DRAFT_SYSTEM, str(user_prompt), schema_hint)
         except Exception:

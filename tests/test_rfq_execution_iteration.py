@@ -601,7 +601,7 @@ def test_qwen_provider_does_not_leak_api_key_in_errors(monkeypatch):
     from aivan.llm.providers.qwen_provider import QwenProvider
 
     monkeypatch.setenv("QWEN_API_KEY", "secret-qwen-key")
-    monkeypatch.setattr("aivan.llm.providers.qwen_provider.httpx.post", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+    monkeypatch.setattr("aivan.llm.providers.openai_compat.httpx.post", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
 
     provider = QwenProvider()
     with pytest.raises(RuntimeError) as exc:

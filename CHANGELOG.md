@@ -2,6 +2,22 @@
 
 All notable changes to AIVAN are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Codebase cleanup: removed unreferenced modules, committed SQLite WAL
+  artifacts, unused dependencies (alembic, aiosqlite, python-multipart,
+  pydantic-settings), and stale `.env.example` keys
+- Consolidated duplicated `_env_bool` helpers into `aivan.utils.env` and the
+  OpenAI-compatible LLM providers (OpenAI/DeepSeek/Qwen) onto a shared base
+- Updated the Gateway P0 script to the current `registerAgentHarness`
+  plugin-entry contract; removed the superseded private-domain RFQ e2e script
+- Added gateway metadata contract tests, core intermediary workflow tests,
+  and README-vs-implementation consistency tests
+- README now documents install/run/test flows, Gateway discovery/install,
+  and B/M role switching; stale env vars corrected
+
 ## [0.1.0] — 2026-06-15
 
 ### Added

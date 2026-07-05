@@ -10,6 +10,105 @@ AIVAN is not a generic chatbot. It is an auditable trade-execution system for tr
 
 ---
 
+## Install
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone https://github.com/GiraffeTechnology/aivan.git
+cd aivan
+./scripts/bootstrap_local.sh   # copies .env.example -> .env, uv sync, aivan init
+```
+
+Or manually:
+
+```bash
+cp .env.example .env
+uv sync
+uv run aivan init
+```
+
+## Run locally
+
+```bash
+uv run aivan serve             # FastAPI server on AIVAN_HOST:AIVAN_PORT (default 127.0.0.1:8765)
+uv run aivan demo              # offline core RFQ demo (mock providers)
+```
+
+The local dashboard is served at `http://127.0.0.1:8765/app`.
+
+## Test
+
+```bash
+uv run pytest -q                                              # unit + contract tests, offline
+uv run python scripts/validate_clawhub_aivan_plugin.py        # ClawHub plugin metadata
+uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
+uv run python scripts/run_aivan_openclaw_full_check.py        # full OpenClaw plugin check
+uv run python scripts/run_private_domain_rfq_e2e.py           # offline private-domain RFQ loop
+uv run python scripts/run_aivan_e2e.py                        # full E2E (requires a live GLTG server)
+```
+
+---
+
+## OpenClaw Gateway Discovery and Install
+
+OpenClaw connects to AIVAN through the bridge plugin in
+`integrations/openclaw-aivan-plugin/`:
+
+- **Discovery.** The plugin manifest `openclaw.plugin.json` declares the stable
+  plugin id `openclaw-aivan`, `activation.onStartup`, and an `aivanBaseUrl`
+  config schema. The npm package `@giraffetechnology/openclaw-aivan` points
+  `main`/`exports` and `openclaw.extensions` at the committed `dist/index.js`.
+- **Registration.** The built entry default-exports a `definePluginEntry`
+  object; OpenClaw calls its `register(api)`, which registers an agent harness
+  (id `openclaw-aivan`) via `api.registerAgentHarness(...)`.
+- **Invocation.** The harness's `runAttempt` normalizes the inbound IM/email
+  message into an OpenClaw-standard event and POSTs it to the local AIVAN
+  server (`AIVAN_BASE_URL`, default `http://127.0.0.1:8765`) at `/invoke`.
+  AIVAN also exposes `/api/openclaw/events`, `/api/skill/invoke`, and
+  `/api/rfq/create-from-event` for the same event contract.
+- **Skill listing.** `skills/aivan-trade-salesperson/SKILL.md` is the ClawHub
+  skill listing (slug `aivan-trade-salesperson`); it routes trade-sourcing
+  intent to the plugin and holds no business logic.
+
+These contracts are enforced by `tests/test_gateway_metadata_contract.py` and
+the `scripts/run_aivan_openclaw_*` check scripts.
+
+## B/M Role Switching
+
+Every OpenClaw event carries a `role_context`. AIVAN routes on it:
+
+- `buyer`, `customer`, `b_side` (or empty) → treated as a buyer-side (B) inquiry:
+  requirement structuring, supplier routing, quote drafting.
+- `supplier`, `seller`, `m_side` → treated as a supplier-side (M) reply:
+  parsed into a structured supplier quote and attached to the owning project.
+- `user` with `mode=command` → operator commands to AIVAN itself.
+
+Supplier-side events are never misclassified as new buyer inquiries;
+`project_id` and `role_context` are preserved end-to-end through the plugin
+(verified by `scripts/run_aivan_openclaw_gateway_p0_test.py`).
+
+## Buyer → Supplier → Buyer Loop
+
+1. **Buyer inquiry** arrives as an OpenClaw event and is structured into a
+   provenance-tagged requirement (language skill first for non-English input).
+2. **Intermediary handling**: AIVAN looks up private-domain context
+   (suppliers, history) and drafts supplier inquiry emails/IMs — all pending
+   human approval.
+3. **Supplier replies** are parsed (`parse_supplier_reply`) into unit price,
+   MOQ, lead time, and terms; missing fields stay `None` and never crash the flow.
+4. **Markup**: `calculate_buyer_quote` applies the configured margin
+   (`AIVAN_DEFAULT_MARGIN_RATE` or a fixed margin) on top of supplier cost.
+5. **Freight / insurance**: domestic and international logistics fees are
+   added as pass-through costs before margin.
+6. **Lead time**: GLTG P50/P80/P90 estimates set `risk_buffer_days`
+   (conservative vs expected delivery) and deadline feasibility.
+7. **Final buyer reply**: Top-3 options (fastest / lowest cost / most
+   reliable) with supplier identity and cost hidden when configured — again
+   behind the human approval gate.
+
+---
+
 ## Current Status
 
 ```text
@@ -159,7 +258,8 @@ GLTG_API_BASE_URL=http://localhost:8090
 GLTG_API_TIMEOUT_SECONDS=30
 ```
 
-Current default is v1-compatible lead-time estimation. The active roadmap is to support GLTG v2 behavior/statistical simulation:
+Current default is v1-compatible lead-time estimation. Setting
+`GLTG_API_VERSION=v2` switches the client to the v2 simulation endpoints:
 
 ```text
 POST /v2/lead-time/simulate
@@ -167,17 +267,9 @@ POST /v2/paths/enumerate
 POST /v2/reforecast
 ```
 
-AIVAN should support:
-
-```text
-GLTG_API_VERSION=v1|v2
-v2 request builder
-v2 response parser
-v1 compatibility wrapper
-mock v2 transport tests
-source_observation_ids propagation
-gltg_run_id persistence
-```
+The v2 behavior/statistical simulation rollout (full request builder,
+`source_observation_ids` propagation, `gltg_run_id` persistence) is tracked in
+`docs/GLTG_BEHAVIORAL_STATISTICAL_MODEL_ITERATION_PRD.md`.
 
 AIVAN must not calculate lead time locally and must not silently replace GLTG with LLM guesses.
 
@@ -247,7 +339,7 @@ OpenClaw:
 
 ```bash
 OPENCLAW_BASE_URL=http://localhost:3000
-OPENCLAW_GATEWAY_URL=http://localhost:3000
+OPENCLAW_MOCK_MODE=true
 ```
 
 GLTG:
@@ -255,16 +347,18 @@ GLTG:
 ```bash
 GLTG_API_BASE_URL=http://localhost:8090
 GLTG_API_TIMEOUT_SECONDS=30
-# future:
-# GLTG_API_VERSION=v1
+GLTG_API_VERSION=v1
 ```
 
 Language boundary:
 
 ```bash
-GIRAFFE_LANGUAGE_SKILL_BASE_URL=http://localhost:8780
-GIRAFFE_INTERNAL_LANGUAGE=en
+AIVAN_LANGUAGE_SKILL_ENABLED=true
+AIVAN_LANGUAGE_SKILL_BASE_URL=http://127.0.0.1:8788
+AIVAN_LANGUAGE_SKILL_FAIL_SOFT=true
 ```
+
+See `.env.example` for the full annotated list.
 
 LLM providers are optional and must not bypass deterministic gates, GLTG, giraffe-db, or the language boundary.
 

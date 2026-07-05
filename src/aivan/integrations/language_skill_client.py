@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from aivan.utils.env import env_bool
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8788"
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -44,21 +45,14 @@ def set_default_transport(transport: "httpx.BaseTransport | None") -> None:
     _DEFAULT_TRANSPORT = transport
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 def is_enabled() -> bool:
     """True when AIVAN is configured to call the language skill."""
-    return _env_bool("AIVAN_LANGUAGE_SKILL_ENABLED", False)
+    return env_bool("AIVAN_LANGUAGE_SKILL_ENABLED", False)
 
 
 def is_fail_soft() -> bool:
     """True when language-skill failures must be swallowed (the safe default)."""
-    return _env_bool("AIVAN_LANGUAGE_SKILL_FAIL_SOFT", True)
+    return env_bool("AIVAN_LANGUAGE_SKILL_FAIL_SOFT", True)
 
 
 @dataclass
