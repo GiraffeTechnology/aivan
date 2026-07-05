@@ -12,6 +12,7 @@ from email.utils import getaddresses
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.openclaw.contracts import OpenClawSendResponse
 from aivan.utils.time_utils import utcnow_iso
+from aivan.utils.env import env_bool
 
 
 SECRET_KEYS = {
@@ -56,13 +57,6 @@ def redact_secret(text: str | None) -> str:
         if value:
             redacted = redacted.replace(value, "<redacted>")
     return redacted
-
-
-def _smtp_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _single_email_address(raw: str) -> str:
@@ -150,7 +144,7 @@ def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessa
     password = os.environ.get("AIVAN_POP3_PASSWORD") or os.environ.get("AIVAN_SMTP_PASSWORD", "")
     host = os.environ.get("AIVAN_POP3_HOST", "pop.163.com")
     port = int(os.environ.get("AIVAN_POP3_PORT", "995"))
-    use_ssl = _smtp_bool("AIVAN_POP3_USE_SSL", True)
+    use_ssl = env_bool("AIVAN_POP3_USE_SSL", True)
     if not username:
         raise ValueError("AIVAN_POP3_USERNAME is not configured")
     if not password:
@@ -195,8 +189,8 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
     host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("AIVAN_SMTP_PORT", "587"))
-    use_ssl = _smtp_bool("AIVAN_SMTP_USE_SSL", port == 465)
-    use_tls = _smtp_bool("AIVAN_SMTP_USE_TLS", True)
+    use_ssl = env_bool("AIVAN_SMTP_USE_SSL", port == 465)
+    use_tls = env_bool("AIVAN_SMTP_USE_TLS", True)
 
     try:
         if real_test_email_gateway() != "openclaw_real_test":

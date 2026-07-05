@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from aivan.schemas.requirement import BuyerRequirement
+from aivan.utils.env import env_bool
 from aivan.schemas.rfq import GiraffeContext
 from aivan.sourcing.supplier_models import SupplierProfile
 from aivan.utils.tenant import resolve_service_tenant
@@ -27,10 +28,7 @@ def stub_suppliers_allowed() -> bool:
     """
     if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
         return False
-    raw = os.environ.get("AIVAN_ALLOW_STUB_SUPPLIERS")
-    if raw is None:
-        return True
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return env_bool("AIVAN_ALLOW_STUB_SUPPLIERS", default=True)
 
 
 @lru_cache(maxsize=1)

@@ -31,6 +31,8 @@ import logging
 import os
 import warnings
 
+from aivan.utils.env import env_bool
+
 logger = logging.getLogger(__name__)
 
 TENANT_RESOLUTION_REQUIRED = "TENANT_RESOLUTION_REQUIRED"
@@ -53,7 +55,7 @@ class TenantMismatchError(RuntimeError):
 
 
 def is_test_mode() -> bool:
-    return os.environ.get("AIVAN_TEST_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+    return env_bool("AIVAN_TEST_MODE")
 
 
 def _test_tenant() -> str | None:

@@ -1,39 +1,14 @@
-import os
-import httpx
-from aivan.llm.base import LLMProvider
-from aivan.llm.config import get_llm_max_retries, get_llm_timeout
-from aivan.llm.json_utils import safe_json_loads
+from aivan.llm.config import get_llm_max_retries
+from aivan.llm.providers.openai_compat import OpenAICompatProvider
 
-class QwenProvider(LLMProvider):
+
+class QwenProvider(OpenAICompatProvider):
     provider_name = "qwen"
+    env_prefix = "QWEN"
+    default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    default_model = "qwen-plus"
+    json_prompt_suffix = "\n\nRespond with valid JSON only."
 
     def __init__(self):
-        self.api_key = os.environ.get("QWEN_API_KEY", "")
-        self.base_url = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        self.model = os.environ.get("QWEN_MODEL", "qwen-plus")
-        self.timeout = get_llm_timeout()
+        super().__init__()
         self.max_retries = get_llm_max_retries()
-
-    def complete_json(self, task: str, system_prompt: str, user_prompt: str, schema_hint: dict, temperature: float = 0.0) -> dict:
-        if not self.api_key:
-            raise RuntimeError("QWEN_API_KEY not set")
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt + "\n\nRespond with valid JSON only."},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "response_format": {"type": "json_object"},
-        }
-        last_error: Exception | None = None
-        for _ in range(self.max_retries + 1):
-            try:
-                response = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
-                response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
-                return safe_json_loads(content, {})
-            except Exception as exc:
-                last_error = exc
-        raise RuntimeError(f"Qwen request failed after retries: {last_error}")

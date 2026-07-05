@@ -24,6 +24,7 @@ import os
 import threading
 import uuid
 from dataclasses import dataclass, field
+from aivan.utils.env import env_bool
 
 # Providers that live inside the tenant/private deployment boundary. Everything
 # else that reaches a hosted third-party API is "external".
@@ -93,13 +94,6 @@ class ExternalModelApproval:
 _local = threading.local()
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 def is_external_provider(provider: str | None) -> bool:
     return (provider or "").strip().lower() in EXTERNAL_PROVIDERS
 
@@ -111,7 +105,7 @@ def external_model_api_enabled() -> bool:
     automatic calls. Every external call still requires an approval packet unless
     ``AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED`` is explicitly true.
     """
-    return _env_bool("AIVAN_EXTERNAL_MODEL_API_ENABLED", False)
+    return env_bool("AIVAN_EXTERNAL_MODEL_API_ENABLED", False)
 
 
 def external_model_api_auto_allowed() -> bool:
@@ -119,16 +113,16 @@ def external_model_api_auto_allowed() -> bool:
 
     False by default and must never be true in the private-domain baseline.
     """
-    return _env_bool("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", False)
+    return env_bool("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", False)
 
 
 def llm_api_enabled() -> bool:
     """Whether LLM calls (local or external) are enabled for AIVAN."""
-    return _env_bool("AIVAN_LLM_API_ENABLED", True)
+    return env_bool("AIVAN_LLM_API_ENABLED", True)
 
 
 def vlm_api_enabled() -> bool:
-    return _env_bool("AIVAN_VLM_API_ENABLED", False)
+    return env_bool("AIVAN_VLM_API_ENABLED", False)
 
 
 def _active_approvals() -> list[ExternalModelApproval]:
