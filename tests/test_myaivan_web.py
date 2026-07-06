@@ -131,6 +131,8 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert 'id="send-btn"' in html
     assert 'id="message-input" rows="4"' in html
     assert 'id="lang-select"' in html  # language switcher
+    assert 'id="logout-btn"' in html
+    assert 'data-i18n="work.logout"' in html
     assert 'id="settings-toggle"' in html
     assert 'id="settings-menu"' in html
     assert 'id="settings-api-key"' in html
@@ -155,6 +157,8 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
     assert "handleAuthFailure" in js
     assert "rememberBackup" in js
+    assert 'API + "/logout"' in js
+    assert 'window.location.href = "/myaivan/login"' in js
     assert "restoreLastBackupIntoInput" in js
     assert "Last backup loaded into the input box" in js
     assert "myaivan-autobackup-" in js

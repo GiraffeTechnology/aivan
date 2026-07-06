@@ -537,6 +537,18 @@
     }
   }
 
+  async function logout() {
+    setStatus(t("status.logging_out", "Signing out…"));
+    try {
+      await fetch(API + "/logout", {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+      });
+    } catch (e) { /* redirect anyway; server cookie may already be gone */ }
+    document.cookie = "myaivan_session=; Max-Age=0; path=/";
+    window.location.href = "/myaivan/login";
+  }
+
   // ── wiring ─────────────────────────────────────────────────────────────────
 
   const settingsToggle = document.getElementById("settings-toggle");
@@ -608,6 +620,7 @@
     setStatus(t("status.voice_soon", "Voice input coming soon."));
   });
   document.getElementById("backup-btn").addEventListener("click", backup);
+  document.getElementById("logout-btn").addEventListener("click", logout);
   document.getElementById("email-confirm").addEventListener("click", confirmEmail);
   document.getElementById("email-cancel").addEventListener("click", () => {
     modal.hidden = true;

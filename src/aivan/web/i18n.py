@@ -39,6 +39,8 @@ CATALOG_EN: dict[str, str] = {
     "work.brand_sub": "AIVAN digital trade assistant",
     "work.backup": "Backup",
     "work.backup_tooltip": "Backup Case",
+    "work.logout": "Sign out",
+    "work.logout_tooltip": "Clear login session and return to login",
     "work.review_title": "Outbound review",
     "work.review_empty": (
         "AIVAN-generated outbound drafts will appear here for your review. "
@@ -97,6 +99,7 @@ CATALOG_EN: dict[str, str] = {
     "status.backup_done": "Backup exported.",
     "status.backup_failed": "Backup failed",
     "status.backup_loaded": "Last backup loaded into the input box. Review it before sending.",
+    "status.logging_out": "Signing out…",
     "status.voice_soon": "Voice input coming soon.",
     "status.init_failed": "Initialization failed",
     "lang.tooltip": "Switch language",
@@ -124,6 +127,8 @@ CATALOG_ZH: dict[str, str] = {
     "work.brand_sub": "AIVAN 数字业务员",
     "work.backup": "备份",
     "work.backup_tooltip": "备份当前案件",
+    "work.logout": "退出",
+    "work.logout_tooltip": "清除登录会话并返回登录页",
     "work.review_title": "外发审核",
     "work.review_empty": "AIVAN 生成的外发草稿会出现在这里，所有外发商务信息均需人工确认。",
     "work.paste": "粘贴",
@@ -179,6 +184,7 @@ CATALOG_ZH: dict[str, str] = {
     "status.backup_done": "备份已导出。",
     "status.backup_failed": "备份失败",
     "status.backup_loaded": "已将上次备份读入输入框，请确认后再发送。",
+    "status.logging_out": "正在退出…",
     "status.voice_soon": "语音输入即将上线。",
     "status.init_failed": "初始化失败",
     "lang.tooltip": "切换语言",
