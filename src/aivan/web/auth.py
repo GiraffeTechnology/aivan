@@ -25,6 +25,7 @@ import os
 import re
 import secrets as _secrets
 import time
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 
 from fastapi import HTTPException, Request
 
@@ -116,9 +117,25 @@ def human_challenge_difficulty() -> int:
         return DEFAULT_HUMAN_CHALLENGE_DIFFICULTY
 
 
-def issue_session_token(now: float | None = None) -> str:
+def _encode_user_id(user_id: str) -> str:
+    return urlsafe_b64encode((user_id or "").encode()).decode().rstrip("=")
+
+
+def _decode_user_id(encoded: str) -> str:
+    if not encoded:
+        return ""
+    padded = encoded + ("=" * (-len(encoded) % 4))
+    try:
+        return urlsafe_b64decode(padded.encode()).decode()
+    except Exception:
+        return ""
+
+
+def issue_session_token(now: float | None = None, user_id: str = "") -> str:
     expires = int((now if now is not None else time.time()) + session_ttl_seconds())
-    return f"{expires}.{_sign(f'myaivan-session:{expires}')}"
+    encoded_user = _encode_user_id(user_id)
+    payload = f"myaivan-session:{expires}:{encoded_user}"
+    return f"{expires}.{encoded_user}.{_sign(payload)}"
 
 
 def _cleanup_human_challenges(now: float) -> None:
@@ -211,6 +228,11 @@ def _otp_debug_enabled() -> bool:
     )
 
 
+def _static_otp_code() -> str:
+    code = os.environ.get("AIVAN_WEB_STATIC_OTP_CODE", "").strip()
+    return code if code.isdigit() and len(code) == 6 else ""
+
+
 def issue_login_code(email: str, *, now: float | None = None) -> dict:
     """Generate and send a one-time login code to an email address.
 
@@ -223,13 +245,21 @@ def issue_login_code(email: str, *, now: float | None = None) -> dict:
     if not is_login_email_allowed(normalized):
         raise PermissionError("This email is not allowed to sign in to MyAIVAN")
 
-    code = f"{_secrets.randbelow(1_000_000):06d}"
+    code = _static_otp_code() or f"{_secrets.randbelow(1_000_000):06d}"
     expires = int((now if now is not None else time.time()) + otp_ttl_seconds())
     _OTP_STORE[normalized] = {
         "hash": _hash_otp(normalized, code, expires),
         "expires": expires,
         "attempts": 0,
     }
+    if _static_otp_code():
+        return {
+            "sent": True,
+            "provider": "static_test",
+            "messageId": "",
+            "expiresInSeconds": otp_ttl_seconds(),
+            "error": "",
+        }
     result = send_email(
         to=normalized,
         subject="Your MyAIVAN login code",
@@ -277,17 +307,41 @@ def verify_login_code(email: str, code: str, *, now: float | None = None) -> boo
 
 
 def verify_session_token(token: str, now: float | None = None) -> bool:
+    return bool(session_user_id(token, now=now) is not None)
+
+
+def session_user_id(token: str, now: float | None = None) -> str | None:
     if not token or not _signing_secret():
-        return False
-    expires_raw, _, signature = token.partition(".")
+        return None
+    parts = token.split(".")
+    if len(parts) == 2:
+        expires_raw, signature = parts
+        encoded_user = ""
+        payload = f"myaivan-session:{expires_raw}"
+    elif len(parts) == 3:
+        expires_raw, encoded_user, signature = parts
+        payload = f"myaivan-session:{expires_raw}:{encoded_user}"
+    else:
+        return None
     try:
         expires = int(expires_raw)
     except ValueError:
-        return False
+        return None
     if (now if now is not None else time.time()) >= expires:
-        return False
-    expected = _sign(f"myaivan-session:{expires}")
-    return hmac.compare_digest(signature, expected)
+        return None
+    expected = _sign(payload)
+    if not hmac.compare_digest(signature, expected):
+        return None
+    return _decode_user_id(encoded_user)
+
+
+def request_user_id(request: Request) -> str:
+    user_id = session_user_id(request.cookies.get(SESSION_COOKIE, ""))
+    if user_id is not None:
+        return user_id
+    if verify_presented_key(_presented_key(request)):
+        return "api_key"
+    return ""
 
 
 def _presented_key(request: Request) -> str:

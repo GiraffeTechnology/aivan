@@ -137,6 +137,8 @@ def test_login_session_grants_page_and_api_access(api_client, production_with_ke
     ok = _login_with_dynamic_password(api_client)
     assert ok.status_code == 200
     assert web_auth.SESSION_COOKIE in ok.cookies
+    assert ok.json()["userId"] == "user@example.com"
+    assert web_auth.session_user_id(ok.cookies[web_auth.SESSION_COOKIE]) == "user@example.com"
 
     # Cookie is kept by the TestClient → pages and API now work.
     assert api_client.get("/myaivan", follow_redirects=False).status_code == 200
@@ -151,7 +153,9 @@ def test_api_key_login_still_grants_session(api_client, production_with_key):
     ok = api_client.post("/api/myaivan/login", json={"key": KEY})
     assert ok.status_code == 200
     assert ok.json()["method"] == "api_key"
+    assert ok.json()["userId"] == "api_key"
     assert web_auth.SESSION_COOKIE in ok.cookies
+    assert web_auth.session_user_id(ok.cookies[web_auth.SESSION_COOKIE]) == "api_key"
     assert api_client.get("/myaivan/work", follow_redirects=False).status_code == 200
 
 
@@ -190,6 +194,23 @@ def test_login_code_requires_human_verification(api_client, production_with_key)
         json={"email": "user@example.com", "humanProof": {"challengeId": "bad", "nonce": "0", "digest": "bad"}},
     )
     assert resp.status_code == 403
+
+
+def test_static_otp_test_mode_requires_human_verification_then_logs_in(api_client, production_with_key, monkeypatch):
+    monkeypatch.setenv("AIVAN_WEB_STATIC_OTP_CODE", "123456")
+    challenge = api_client.post("/api/myaivan/login/challenge").json()
+    requested = api_client.post(
+        "/api/myaivan/login/request-code",
+        json={"email": "user@example.com", "humanProof": _human_proof(challenge)},
+    )
+    assert requested.status_code == 200
+    assert requested.json()["provider"] == "static_test"
+
+    bad = api_client.post("/api/myaivan/login", json={"email": "user@example.com", "code": "000000"})
+    assert bad.status_code == 401
+    ok = api_client.post("/api/myaivan/login", json={"email": "user@example.com", "code": "123456"})
+    assert ok.status_code == 200
+    assert web_auth.SESSION_COOKIE in ok.cookies
 
 
 # ── i18n stays public (UI strings only) ───────────────────────────────────────

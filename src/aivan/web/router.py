@@ -340,10 +340,10 @@ def login(body: dict):
     if key:
         if not web_auth.verify_presented_key(key):
             raise HTTPException(status_code=401, detail="Invalid access key")
-        response = JSONResponse({"ok": True, "mode": "session", "method": "api_key"})
+        response = JSONResponse({"ok": True, "mode": "session", "method": "api_key", "userId": "api_key"})
         response.set_cookie(
             web_auth.SESSION_COOKIE,
-            web_auth.issue_session_token(),
+            web_auth.issue_session_token(user_id="api_key"),
             max_age=web_auth.session_ttl_seconds(),
             httponly=True,
             samesite="lax",
@@ -354,15 +354,16 @@ def login(body: dict):
     email = str((body or {}).get("email") or "")
     code = str((body or {}).get("code") or "")
     try:
+        normalized_email = web_auth.normalize_email(email)
         ok = web_auth.verify_login_code(email, code)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     if not ok:
         raise HTTPException(status_code=401, detail="Invalid or expired dynamic password")
-    response = JSONResponse({"ok": True, "mode": "session"})
+    response = JSONResponse({"ok": True, "mode": "session", "userId": normalized_email})
     response.set_cookie(
         web_auth.SESSION_COOKIE,
-        web_auth.issue_session_token(),
+        web_auth.issue_session_token(user_id=normalized_email),
         max_age=web_auth.session_ttl_seconds(),
         httponly=True,
         samesite="lax",

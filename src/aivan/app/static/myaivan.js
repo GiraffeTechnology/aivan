@@ -16,6 +16,9 @@
   const CASE_KEY = "myaivan.activeCaseId";
   const LAYOUT_KEY = "myaivan.layoutHeights";
   const API_KEY_KEY = "myaivan.apiKey";
+  const LAST_BACKUP_KEY = "myaivan.lastBackup";
+  const LAST_BACKUP_RESTORED_KEY = "myaivan.lastBackupRestoredAt";
+  const AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000;
   const emailStatus = document.body.dataset.emailStatus || "not_configured";
 
   const stream = document.getElementById("conversation-stream");
@@ -28,6 +31,7 @@
   let activeCaseId = null;
   let pendingEmailDraftId = null;
   let lastState = null;
+  let authFailureHandled = false;
 
   function t(key, fallback) {
     return (window.MyaivanI18n && window.MyaivanI18n.t(key, fallback)) || fallback || key;
@@ -46,6 +50,90 @@
     return headers;
   }
 
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function rememberBackup(markdown, reason) {
+    try {
+      localStorage.setItem(LAST_BACKUP_KEY, JSON.stringify({
+        caseId: activeCaseId || "",
+        markdown: markdown || "",
+        reason: reason || "backup",
+        savedAt: new Date().toISOString(),
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function restoreLastBackupIntoInput() {
+    if (input.value.trim()) return;
+    try {
+      const backup = JSON.parse(localStorage.getItem(LAST_BACKUP_KEY) || "null");
+      if (!backup || !backup.markdown || !backup.savedAt) return;
+      if (localStorage.getItem(LAST_BACKUP_RESTORED_KEY) === backup.savedAt) return;
+      input.value = backup.markdown;
+      localStorage.setItem(LAST_BACKUP_RESTORED_KEY, backup.savedAt);
+      setStatus(t("status.backup_loaded", "Last backup loaded into the input box. Review it before sending."));
+    } catch (e) { /* ignore */ }
+  }
+
+  function backupMarkdownFromState(reason) {
+    const state = lastState || {};
+    const c = state.case || {};
+    const lines = [
+      "# MyAIVAN Local Backup",
+      "",
+      "- Reason: " + (reason || "manual"),
+      "- Case ID: " + (c.id || activeCaseId || "unknown"),
+      "- Title: " + (c.title || ""),
+      "- Status: " + (c.status || ""),
+      "- Exported at: " + new Date().toISOString(),
+      "",
+      "## Messages",
+      "",
+    ];
+    (state.messages || []).forEach((m) => {
+      lines.push("### " + (m.role || "message") + " / " + (m.type || "text"));
+      lines.push((m.createdAt || "") + "");
+      lines.push("");
+      lines.push(m.content || "");
+      lines.push("");
+    });
+    lines.push("## Outbound Drafts", "");
+    (state.outboundDrafts || []).forEach((d) => {
+      lines.push("### " + (d.channel || "draft") + " / " + (d.status || ""));
+      if (d.recipient) lines.push("- To: " + d.recipient);
+      if (d.subject) lines.push("- Subject: " + d.subject);
+      lines.push("");
+      lines.push(d.body || "");
+      lines.push("");
+    });
+    return lines.join("\n");
+  }
+
+  function backupFromLastState(reason) {
+    if (!lastState && !activeCaseId) return false;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const markdown = backupMarkdownFromState(reason);
+    rememberBackup(markdown, reason || "local fallback");
+    downloadText("myaivan-autobackup-" + (activeCaseId || "unknown") + "-" + stamp + ".md",
+      markdown);
+    return true;
+  }
+
+  function handleAuthFailure() {
+    if (authFailureHandled) throw new Error("authentication required");
+    authFailureHandled = true;
+    backupFromLastState("authentication lost");
+    window.location.href = "/myaivan/login";
+    throw new Error("authentication required");
+  }
+
   async function api(path, options) {
     const opts = Object.assign({}, options || {});
     opts.headers = authHeaders(Object.assign({ "Content-Type": "application/json" }, opts.headers || {}));
@@ -53,10 +141,7 @@
       headers: { "Content-Type": "application/json" },
     }, opts));
     const data = await resp.json().catch(() => ({}));
-    if (resp.status === 401) {
-      window.location.href = "/myaivan/login";
-      throw new Error("authentication required");
-    }
+    if (resp.status === 401 || resp.status === 403) handleAuthFailure();
     if (!resp.ok) {
       throw new Error((data && data.detail) || ("Request failed: " + resp.status));
     }
@@ -235,6 +320,7 @@
         const state = await api("/cases/" + saved);
         activeCaseId = saved;
         render(state);
+        restoreLastBackupIntoInput();
         return;
       } catch (e) { /* stale id → create a new case */ }
     }
@@ -242,6 +328,7 @@
     activeCaseId = state.case.id;
     localStorage.setItem(CASE_KEY, activeCaseId);
     render(state);
+    restoreLastBackupIntoInput();
   }
 
   // ── actions ────────────────────────────────────────────────────────────────
@@ -290,6 +377,7 @@
         headers: authHeaders(),
         body: form,
       });
+      if (resp.status === 401 || resp.status === 403) handleAuthFailure();
       const state = await resp.json();
       if (!resp.ok) throw new Error(state.detail || resp.status);
       render(state);
@@ -363,7 +451,9 @@
       if (r.success) {
         setStatus(r.provider === "mock"
           ? t("status.email_mock", "Mock send recorded — no real email was delivered.")
-          : t("status.email_sent", "Email sent via aivan-openclaw."));
+          : r.provider === "smtp"
+            ? t("status.email_smtp", "Email sent via SMTP.")
+            : t("status.email_sent", "Email sent via aivan-openclaw."));
       } else {
         setStatus(t("status.email_failed", "Email failed") + ": " + (r.error || "unknown error"));
       }
@@ -375,20 +465,24 @@
 
   // ── backup ─────────────────────────────────────────────────────────────────
 
-  async function backup() {
+  async function backup(options) {
+    const opts = options || {};
+    if (!activeCaseId) return;
     try {
       const resp = await fetch(API + "/cases/" + activeCaseId + "/backup.md", { headers: authHeaders() });
+      if (resp.status === 401 || resp.status === 403) handleAuthFailure();
       if (!resp.ok) throw new Error(String(resp.status));
       const text = await resp.text();
-      const blob = new Blob([text], { type: "text/markdown" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "aivan-case-" + activeCaseId + ".md";
-      a.click();
-      URL.revokeObjectURL(a.href);
-      setStatus(t("status.backup_done", "Backup exported."));
+      rememberBackup(text, opts.auto ? "scheduled backup" : "manual backup");
+      const prefix = opts.auto ? "myaivan-autobackup-" : "aivan-case-";
+      downloadText(prefix + activeCaseId + ".md", text);
+      if (!opts.auto) setStatus(t("status.backup_done", "Backup exported."));
     } catch (e) {
-      setStatus(t("status.backup_failed", "Backup failed") + ": " + e.message);
+      if (opts.auto) {
+        backupFromLastState("scheduled backup fallback");
+      } else {
+        setStatus(t("status.backup_failed", "Backup failed") + ": " + e.message);
+      }
     }
   }
 
@@ -445,4 +539,5 @@
   });
 
   ensureCase().catch((e) => setStatus(t("status.init_failed", "Initialization failed") + ": " + e.message));
+  setInterval(() => backup({ auto: true }), AUTO_BACKUP_INTERVAL_MS);
 })();

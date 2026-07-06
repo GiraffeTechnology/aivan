@@ -39,6 +39,10 @@ def is_real_test_email_mode() -> bool:
     return os.environ.get("AIVAN_EMAIL_SEND_MODE", "").strip().lower() == "real_test"
 
 
+def is_smtp_email_mode() -> bool:
+    return os.environ.get("AIVAN_EMAIL_SEND_MODE", "").strip().lower() == "smtp"
+
+
 def real_test_email_gateway() -> str:
     return os.environ.get("AIVAN_EMAIL_GATEWAY", "").strip().lower()
 
@@ -78,10 +82,19 @@ def validate_real_test_recipient(recipient: str) -> str:
     return normalized
 
 
+def validate_smtp_recipient(recipient: str) -> str:
+    normalized = _single_email_address(recipient)
+    if not normalized:
+        raise ValueError("email recipient is empty")
+    return normalized
+
+
 def _subject_from_draft(draft: InquiryDraftRecord) -> str:
     for part in (draft.notes or "").splitlines():
         if part.lower().startswith("subject:"):
             return part.split(":", 1)[1].strip()
+        if part.lower().startswith("subject="):
+            return part.split("=", 1)[1].strip()
     for line in (draft.message_text or "").splitlines():
         if line.lower().startswith("subject:"):
             return line.split(":", 1)[1].strip()
@@ -225,6 +238,58 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
         return OpenClawSendResponse(
             success=True,
             message_id=f"smtp_real_test_{utcnow_iso()}",
+            sent_at=utcnow_iso(),
+        )
+    except Exception as exc:
+        return OpenClawSendResponse(success=False, error=redact_secret(str(exc)))
+
+
+def send_smtp_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
+    """Send an approved business email through the configured SMTP account.
+
+    This is the production path used by MyAIVAN after an operator confirms the
+    generated outbound draft. Test-only allowlists remain in ``real_test`` mode.
+    """
+    recipient = (draft.target_peer_id or "").strip()
+    sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
+    username = os.environ.get("AIVAN_SMTP_USERNAME", "")
+    password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
+    host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
+    port = int(os.environ.get("AIVAN_SMTP_PORT", "587"))
+    use_ssl = env_bool("AIVAN_SMTP_USE_SSL", port == 465)
+    use_tls = env_bool("AIVAN_SMTP_USE_TLS", not use_ssl)
+
+    try:
+        recipient_address = validate_smtp_recipient(recipient)
+        sender_address = _single_email_address(sender)
+        username_address = _single_email_address(username)
+        if not sender_address:
+            raise ValueError("SMTP sender is not configured")
+        if sender_address != username_address:
+            raise ValueError("SMTP sender must match SMTP username")
+        if not password:
+            raise ValueError("AIVAN_SMTP_PASSWORD is not configured")
+
+        msg = EmailMessage()
+        msg["From"] = sender
+        msg["To"] = recipient
+        msg["Subject"] = _subject_from_draft(draft)
+        msg.set_content(_body_from_draft(draft))
+
+        smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_cls(host, port, timeout=30) as smtp:
+            if use_tls and not use_ssl:
+                smtp.starttls()
+            smtp.login(username, password)
+            refused = smtp.send_message(msg, from_addr=sender_address, to_addrs=[recipient_address])
+        if refused:
+            return OpenClawSendResponse(
+                success=False,
+                error=redact_secret(f"SMTP refused recipients: {sorted(refused)}"),
+            )
+        return OpenClawSendResponse(
+            success=True,
+            message_id=f"smtp_{utcnow_iso()}",
             sent_at=utcnow_iso(),
         )
     except Exception as exc:

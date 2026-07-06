@@ -136,9 +136,18 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert "row-resize" in css
     js = (STATIC / "myaivan.js").read_text()
     assert "myaivan.layoutHeights" in js
+    assert "myaivan.lastBackup" in js
+    assert "myaivan.lastBackupRestoredAt" in js
     assert "stream-review-resizer" in js and "review-input-resizer" in js
     assert "myaivan.apiKey" in js
     assert "X-AIVAN-API-Key" in js
+    assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
+    assert "handleAuthFailure" in js
+    assert "rememberBackup" in js
+    assert "restoreLastBackupIntoInput" in js
+    assert "Last backup loaded into the input box" in js
+    assert "myaivan-autobackup-" in js
+    assert "authentication lost" in js
 
 
 def test_04_user_messages_align_right():
@@ -291,6 +300,67 @@ def test_14_email_send_uses_adapter_mock_mode(api_client):
     assert state["outboundDrafts"][-1]["status"] == "email_sent"
     events = _events(api_client, case_id)
     assert "email_send_requested" in events and "email_sent" in events
+
+
+def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
+    monkeypatch.setenv("AIVAN_EMAIL_SEND_MODE", "smtp")
+    monkeypatch.delenv("OPENCLAW_MOCK_MODE", raising=False)
+    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "info@myaivan.com")
+    monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.office365.com")
+    monkeypatch.setenv("AIVAN_SMTP_PORT", "587")
+    monkeypatch.setenv("AIVAN_SMTP_USE_SSL", "false")
+    monkeypatch.setenv("AIVAN_SMTP_USE_TLS", "true")
+    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "info@myaivan.com")
+    monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "app-password")
+    sent = {}
+
+    class _SMTP:
+        def __init__(self, host, port, timeout):
+            sent["host"] = host
+            sent["port"] = port
+            sent["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self):
+            sent["starttls"] = True
+
+        def login(self, username, password):
+            sent["username"] = username
+            sent["password_seen"] = bool(password)
+
+        def send_message(self, msg, from_addr=None, to_addrs=None):
+            sent["from"] = msg["From"]
+            sent["to"] = msg["To"]
+            sent["envelope_from"] = from_addr
+            sent["envelope_to"] = to_addrs
+            sent["subject"] = msg["Subject"]
+            sent["body"] = msg.get_content()
+            return {}
+
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP", _SMTP)
+    case_id = _new_case(api_client)
+    draft = _make_draft(api_client, case_id, " Please draft a reply for email.")
+    resp = api_client.post(
+        f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/send-email",
+        json={"recipient": "buyer@example.com"},
+    )
+    assert resp.status_code == 200
+    state = resp.json()
+    assert state["emailResult"]["success"] is True
+    assert state["emailResult"]["provider"] == "smtp"
+    assert state["outboundDrafts"][-1]["status"] == "email_sent"
+    assert sent["host"] == "smtp.office365.com"
+    assert sent["port"] == 587
+    assert sent["starttls"] is True
+    assert sent["from"] == "info@myaivan.com"
+    assert sent["envelope_from"] == "info@myaivan.com"
+    assert sent["envelope_to"] == ["buyer@example.com"]
+    assert sent["username"] == "info@myaivan.com"
 
 
 # ── 15: email unavailable state ───────────────────────────────────────────────
