@@ -33,8 +33,10 @@ body {
 .mv-welcome { max-width: 560px; text-align: center; padding: 24px; }
 .mv-giraffe-icon {
   display: block;
-  width: clamp(108px, 18vw, 164px);
-  height: clamp(108px, 18vw, 164px);
+  width: clamp(88px, 18vmin, 180px);
+  max-width: 34vw;
+  max-height: 22vh;
+  height: auto;
   object-fit: contain;
   margin: 0 auto 18px;
 }

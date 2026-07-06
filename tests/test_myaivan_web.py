@@ -67,7 +67,10 @@ def test_01_welcome_page_renders(api_client):
     assert "Start Working" in resp.text
     assert "/static/giraffe-logo.png" in resp.text
     assert (STATIC / "giraffe-logo.png").is_file()
-    assert ".mv-giraffe-icon" in (STATIC / "myaivan.css").read_text()
+    css = (STATIC / "myaivan.css").read_text()
+    assert ".mv-giraffe-icon" in css
+    logo_css = css.split(".mv-giraffe-icon", 1)[1].split("}", 1)[0]
+    assert "vmin" in logo_css and "max-height" in logo_css and "height: auto" in logo_css
     assert 'data-i18n="welcome.title"' in resp.text
     # …and the required Chinese copy is served through the zh catalog.
     zh = api_client.get("/api/myaivan/i18n/zh").json()["strings"]
