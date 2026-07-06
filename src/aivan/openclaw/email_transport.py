@@ -52,12 +52,15 @@ def allowed_recipients() -> set[str]:
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
-def redact_secret(text: str | None) -> str:
+def redact_secret(text: str | None, extra_secrets: list[str] | tuple[str, ...] = ()) -> str:
     if not text:
         return ""
     redacted = str(text)
     for key in SECRET_KEYS:
         value = os.environ.get(key)
+        if value:
+            redacted = redacted.replace(value, "<redacted>")
+    for value in extra_secrets:
         if value:
             redacted = redacted.replace(value, "<redacted>")
     return redacted
@@ -145,7 +148,11 @@ def _message_body_excerpt(raw_message: bytes, *, max_chars: int = 2000) -> tuple
     return from_address, to_address, subject, date, "\n".join(parts).strip()[:max_chars]
 
 
-def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessage]:
+def fetch_real_test_pop3_messages(
+    *,
+    limit: int = 20,
+    password_override: str = "",
+) -> list[RealTestEmailMessage]:
     """Fetch recent messages for controlled real-test email receive checks.
 
     This is intentionally a test helper for the OpenClaw real-test gateway path.
@@ -154,7 +161,11 @@ def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessa
     if real_test_email_gateway() != "openclaw_real_test":
         raise ValueError("AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email receive")
     username = os.environ.get("AIVAN_POP3_USERNAME") or os.environ.get("AIVAN_SMTP_USERNAME", "")
-    password = os.environ.get("AIVAN_POP3_PASSWORD") or os.environ.get("AIVAN_SMTP_PASSWORD", "")
+    password = (
+        password_override
+        or os.environ.get("AIVAN_POP3_PASSWORD")
+        or os.environ.get("AIVAN_SMTP_PASSWORD", "")
+    )
     host = os.environ.get("AIVAN_POP3_HOST", "pop.163.com")
     port = int(os.environ.get("AIVAN_POP3_PORT", "995"))
     use_ssl = env_bool("AIVAN_POP3_USE_SSL", True)
@@ -192,14 +203,14 @@ def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessa
             except Exception:
                 pass
     except Exception as exc:
-        raise RuntimeError(redact_secret(str(exc))) from exc
+        raise RuntimeError(redact_secret(str(exc), [password_override])) from exc
 
 
-def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
+def send_real_test_email(draft: InquiryDraftRecord, *, password_override: str = "") -> OpenClawSendResponse:
     recipient = (draft.target_peer_id or "").strip()
     sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
     username = os.environ.get("AIVAN_SMTP_USERNAME", "")
-    password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
+    password = password_override or os.environ.get("AIVAN_SMTP_PASSWORD", "")
     host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("AIVAN_SMTP_PORT", "587"))
     use_ssl = env_bool("AIVAN_SMTP_USE_SSL", port == 465)
@@ -241,10 +252,10 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             sent_at=utcnow_iso(),
         )
     except Exception as exc:
-        return OpenClawSendResponse(success=False, error=redact_secret(str(exc)))
+        return OpenClawSendResponse(success=False, error=redact_secret(str(exc), [password_override]))
 
 
-def send_smtp_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
+def send_smtp_email(draft: InquiryDraftRecord, *, password_override: str = "") -> OpenClawSendResponse:
     """Send an approved business email through the configured SMTP account.
 
     This is the production path used by MyAIVAN after an operator confirms the
@@ -253,7 +264,7 @@ def send_smtp_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     recipient = (draft.target_peer_id or "").strip()
     sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
     username = os.environ.get("AIVAN_SMTP_USERNAME", "")
-    password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
+    password = password_override or os.environ.get("AIVAN_SMTP_PASSWORD", "")
     host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("AIVAN_SMTP_PORT", "587"))
     use_ssl = env_bool("AIVAN_SMTP_USE_SSL", port == 465)
@@ -293,4 +304,4 @@ def send_smtp_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             sent_at=utcnow_iso(),
         )
     except Exception as exc:
-        return OpenClawSendResponse(success=False, error=redact_secret(str(exc)))
+        return OpenClawSendResponse(success=False, error=redact_secret(str(exc), [password_override]))

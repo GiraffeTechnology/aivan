@@ -16,10 +16,22 @@
   const CASE_KEY = "myaivan.activeCaseId";
   const LAYOUT_KEY = "myaivan.layoutHeights";
   const API_KEY_KEY = "myaivan.apiKey";
+  const EMAIL_API_KEY_KEY = "myaivan.emailApiKey";
   const LAST_BACKUP_KEY = "myaivan.lastBackup";
   const LAST_BACKUP_RESTORED_KEY = "myaivan.lastBackupRestoredAt";
   const AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000;
   const emailStatus = document.body.dataset.emailStatus || "not_configured";
+  const emailConfig = {
+    status: emailStatus,
+    provider: document.body.dataset.emailProvider || emailStatus,
+    accountEmail: (document.body.dataset.emailAccount || "").trim().toLowerCase(),
+    loginEmail: (document.body.dataset.emailLogin || "").trim().toLowerCase(),
+    smtpConfigured: document.body.dataset.emailSmtpConfigured === "true",
+    pop3Configured: document.body.dataset.emailPop3Configured === "true",
+    loginEmailMatches: document.body.dataset.emailLoginMatches === "true",
+    passwordConfigured: document.body.dataset.emailPasswordConfigured === "true",
+    requiresApiKey: document.body.dataset.emailRequiresApiKey === "true",
+  };
 
   const stream = document.getElementById("conversation-stream");
   const review = document.getElementById("review-area");
@@ -41,6 +53,40 @@
 
   function storedApiKey() {
     try { return (localStorage.getItem(API_KEY_KEY) || "").trim(); } catch (e) { return ""; }
+  }
+
+  function storedEmailApiKey() {
+    try { return (localStorage.getItem(EMAIL_API_KEY_KEY) || "").trim(); } catch (e) { return ""; }
+  }
+
+  function realEmailReady() {
+    return emailConfig.status === "configured"
+      && emailConfig.smtpConfigured
+      && emailConfig.pop3Configured
+      && emailConfig.loginEmailMatches
+      && (emailConfig.passwordConfigured || !!storedEmailApiKey());
+  }
+
+  function emailReadinessMessage() {
+    if (realEmailReady()) {
+      return t("settings.email_ready", "Email ready") + ": " + (emailConfig.accountEmail || "");
+    }
+    if (emailConfig.status !== "configured") {
+      return t("settings.email_mode_missing", "Real email mode is not configured.");
+    }
+    if (!emailConfig.smtpConfigured) {
+      return t("settings.email_smtp_missing", "SMTP sending settings are incomplete.");
+    }
+    if (!emailConfig.pop3Configured) {
+      return t("settings.email_pop3_missing", "POP3 receiving settings are incomplete.");
+    }
+    if (!emailConfig.loginEmailMatches) {
+      return t("settings.email_login_mismatch", "Login email must match the configured mailbox.");
+    }
+    if (!emailConfig.passwordConfigured && !storedEmailApiKey()) {
+      return t("settings.email_key_missing", "Save the email sending API Key to enable Email.");
+    }
+    return t("settings.email_not_ready", "Email is not ready.");
   }
 
   function authHeaders(extra) {
@@ -211,8 +257,13 @@
     if (terminal) {
       card.querySelectorAll(".mv-draft-actions button").forEach((b) => { b.disabled = true; });
     }
+    const emailBtn = card.querySelector(".mv-act-email");
+    if (!terminal && !realEmailReady()) {
+      emailBtn.disabled = true;
+      emailBtn.title = emailReadinessMessage();
+    }
     card.querySelector(".mv-act-copy").addEventListener("click", () => copyDraft(draft));
-    card.querySelector(".mv-act-email").addEventListener("click", () => openEmailModal(draft));
+    emailBtn.addEventListener("click", () => openEmailModal(draft));
     card.querySelector(".mv-act-sent").addEventListener("click", () => draftAction(draft.id, "mark-sent"));
     card.querySelector(".mv-act-reject").addEventListener("click", () => draftAction(draft.id, "reject"));
     return card;
@@ -423,16 +474,13 @@
   const recipientInput = document.getElementById("email-recipient");
 
   function openEmailModal(draft) {
-    if (emailStatus === "not_configured") {
-      setStatus(t("status.email_not_configured",
-        "Email sending is not configured. Please copy the draft manually."));
+    if (!realEmailReady()) {
+      setStatus(emailReadinessMessage());
       return;
     }
     pendingEmailDraftId = draft.id;
     recipientInput.value = draft.recipient || "";
-    modalNote.textContent = emailStatus === "mock"
-      ? t("email.modal_mock", "Mock mode: no real email will be delivered.")
-      : t("email.modal_real", "This will send a real email through aivan-openclaw.");
+    modalNote.textContent = t("email.modal_real", "This will send a real email through aivan-openclaw.");
     modal.hidden = false;
   }
 
@@ -444,7 +492,10 @@
     try {
       const state = await api("/cases/" + activeCaseId + "/drafts/" + draftId + "/send-email", {
         method: "POST",
-        body: JSON.stringify({ recipient: recipientInput.value.trim() }),
+        body: JSON.stringify({
+          recipient: recipientInput.value.trim(),
+          emailApiKey: storedEmailApiKey(),
+        }),
       });
       render(state);
       const r = state.emailResult || {};
@@ -491,16 +542,26 @@
   const settingsToggle = document.getElementById("settings-toggle");
   const settingsMenu = document.getElementById("settings-menu");
   const settingsApiKey = document.getElementById("settings-api-key");
+  const settingsEmailApiKey = document.getElementById("settings-email-api-key");
+  const settingsEmailStatus = document.getElementById("settings-email-status");
   const settingsSaveKey = document.getElementById("settings-save-key");
   const settingsClearKey = document.getElementById("settings-clear-key");
+  const settingsSaveEmailKey = document.getElementById("settings-save-email-key");
+  const settingsClearEmailKey = document.getElementById("settings-clear-email-key");
 
   function setSettingsOpen(open) {
     settingsMenu.hidden = !open;
     settingsToggle.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) {
       settingsApiKey.value = storedApiKey();
+      settingsEmailApiKey.value = storedEmailApiKey();
+      updateEmailSettingsStatus();
       settingsApiKey.focus();
     }
+  }
+
+  function updateEmailSettingsStatus() {
+    if (settingsEmailStatus) settingsEmailStatus.textContent = emailReadinessMessage();
   }
 
   settingsToggle.addEventListener("click", (ev) => {
@@ -518,6 +579,21 @@
     try { localStorage.removeItem(API_KEY_KEY); } catch (e) { /* ignore */ }
     settingsApiKey.value = "";
     setStatus(t("status.api_key_cleared", "API Key cleared from this browser."));
+    setSettingsOpen(false);
+  });
+  settingsSaveEmailKey.addEventListener("click", () => {
+    try { localStorage.setItem(EMAIL_API_KEY_KEY, settingsEmailApiKey.value.trim()); } catch (e) { /* ignore */ }
+    updateEmailSettingsStatus();
+    if (lastState) render(lastState);
+    setStatus(t("status.email_api_key_saved", "Email API Key saved in this browser."));
+    setSettingsOpen(false);
+  });
+  settingsClearEmailKey.addEventListener("click", () => {
+    try { localStorage.removeItem(EMAIL_API_KEY_KEY); } catch (e) { /* ignore */ }
+    settingsEmailApiKey.value = "";
+    updateEmailSettingsStatus();
+    if (lastState) render(lastState);
+    setStatus(t("status.email_api_key_cleared", "Email API Key cleared from this browser."));
     setSettingsOpen(false);
   });
 

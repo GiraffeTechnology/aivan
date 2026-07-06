@@ -381,6 +381,8 @@ def send_draft_email(
     case: WebCaseRecord,
     draft: WebOutboundDraftRecord,
     recipient: str = "",
+    login_email: str = "",
+    email_api_key: str = "",
 ) -> tuple[WebOutboundDraftRecord, EmailSendResult]:
     if draft.status in ("rejected", "email_sent", "manually_sent"):
         raise DraftStateError(f"draft {draft.draft_id} cannot be emailed from status {draft.status!r}")
@@ -397,6 +399,8 @@ def send_draft_email(
             body=draft.body,
             case_id=case.case_id,
             draft_id=draft.draft_id,
+            login_email=login_email,
+            email_api_key=email_api_key,
         )
 
     if result.success:

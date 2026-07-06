@@ -134,6 +134,10 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert 'id="settings-toggle"' in html
     assert 'id="settings-menu"' in html
     assert 'id="settings-api-key"' in html
+    assert 'id="settings-email-api-key"' in html
+    assert 'data-email-smtp-configured=' in html
+    assert 'data-email-pop3-configured=' in html
+    assert 'data-email-login-matches=' in html
     css = (STATIC / "myaivan.css").read_text()
     input_css = css.split(".mv-input-row textarea", 1)[1].split("}", 1)[0]
     assert "min-height" in input_css and "overflow-y: auto" in input_css
@@ -144,7 +148,10 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert "myaivan.lastBackupRestoredAt" in js
     assert "stream-review-resizer" in js and "review-input-resizer" in js
     assert "myaivan.apiKey" in js
+    assert "myaivan.emailApiKey" in js
     assert "X-AIVAN-API-Key" in js
+    assert "emailApiKey: storedEmailApiKey()" in js
+    assert "realEmailReady" in js
     assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
     assert "handleAuthFailure" in js
     assert "rememberBackup" in js
@@ -315,7 +322,11 @@ def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
     monkeypatch.setenv("AIVAN_SMTP_USE_SSL", "false")
     monkeypatch.setenv("AIVAN_SMTP_USE_TLS", "true")
     monkeypatch.setenv("AIVAN_SMTP_USERNAME", "info@myaivan.com")
-    monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "app-password")
+    monkeypatch.delenv("AIVAN_SMTP_PASSWORD", raising=False)
+    monkeypatch.setenv("AIVAN_POP3_HOST", "outlook.office365.com")
+    monkeypatch.setenv("AIVAN_POP3_PORT", "995")
+    monkeypatch.setenv("AIVAN_POP3_USE_SSL", "true")
+    monkeypatch.setenv("AIVAN_POP3_USERNAME", "info@myaivan.com")
     sent = {}
 
     class _SMTP:
@@ -335,7 +346,7 @@ def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
 
         def login(self, username, password):
             sent["username"] = username
-            sent["password_seen"] = bool(password)
+            sent["password"] = password
 
         def send_message(self, msg, from_addr=None, to_addrs=None):
             sent["from"] = msg["From"]
@@ -351,7 +362,7 @@ def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
     draft = _make_draft(api_client, case_id, " Please draft a reply for email.")
     resp = api_client.post(
         f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/send-email",
-        json={"recipient": "buyer@example.com"},
+        json={"recipient": "buyer@example.com", "emailApiKey": "office365-app-password"},
     )
     assert resp.status_code == 200
     state = resp.json()
@@ -365,6 +376,15 @@ def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
     assert sent["envelope_from"] == "info@myaivan.com"
     assert sent["envelope_to"] == ["buyer@example.com"]
     assert sent["username"] == "info@myaivan.com"
+    assert sent["password"] == "office365-app-password"
+
+    status = api_client.get("/api/myaivan/email/status").json()
+    assert status["status"] == "configured"
+    assert status["provider"] == "smtp"
+    assert status["accountEmail"] == "info@myaivan.com"
+    assert status["smtpConfigured"] is True
+    assert status["pop3Configured"] is True
+    assert status["requiresApiKey"] is True
 
 
 # ── 15: email unavailable state ───────────────────────────────────────────────

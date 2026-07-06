@@ -19,7 +19,7 @@ from aivan.db.session import get_db
 from aivan.utils.ids import new_id
 from aivan.web import auth as web_auth
 from aivan.web import service
-from aivan.web.email_outbound import email_status
+from aivan.web.email_outbound import email_configuration, email_status
 
 router = APIRouter()
 
@@ -247,12 +247,27 @@ def draft_reject(case_id: str, draft_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/send-email", dependencies=_PROTECTED)
-def draft_send_email(case_id: str, draft_id: str, body: dict | None = None, db: Session = Depends(get_db)):
+def draft_send_email(
+    case_id: str,
+    draft_id: str,
+    request: Request,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+):
     case = _require_case(db, case_id)
     draft = _require_draft(db, case_id, draft_id)
     recipient = str((body or {}).get("recipient") or "")
+    email_api_key = str((body or {}).get("emailApiKey") or "")
+    login_email = web_auth.request_user_id(request)
     try:
-        draft, result = service.send_draft_email(db, case, draft, recipient=recipient)
+        draft, result = service.send_draft_email(
+            db,
+            case,
+            draft,
+            recipient=recipient,
+            login_email=login_email,
+            email_api_key=email_api_key,
+        )
     except service.DraftStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     state = service.case_state(db, case)
@@ -266,8 +281,8 @@ def draft_send_email(case_id: str, draft_id: str, body: dict | None = None, db: 
 
 
 @router.get("/api/myaivan/email/status", dependencies=_PROTECTED)
-def get_email_status():
-    return {"status": email_status()}
+def get_email_status(request: Request):
+    return email_configuration(login_email=web_auth.request_user_id(request)).to_dict()
 
 
 @router.get("/api/myaivan/i18n/{lang}")
@@ -452,10 +467,15 @@ def myaivan_work(request: Request):
     guard = _page_guard(request)
     if guard is not None:
         return guard
+    email_config = email_configuration(login_email=web_auth.request_user_id(request))
     return _templates().TemplateResponse(
         request,
         "myaivan_work.html",
-        {"title": "MyAIVAN — workspace", "email_status": email_status()},
+        {
+            "title": "MyAIVAN — workspace",
+            "email_status": email_status(),
+            "email_config": email_config.to_dict(),
+        },
     )
 
 
