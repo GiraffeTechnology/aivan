@@ -6,17 +6,20 @@
  *    always behind an explicit confirmation modal.
  *  - Mock email results are labeled as mock, never as real delivery.
  *
- * All user-visible strings resolve through MyaivanI18n.t() (English canonical,
- * other languages served by /api/myaivan/i18n via giraffe-language-skill).
+ * All user-visible strings resolve through MyaivanI18n.t(); the language
+ * switcher only exposes catalogs that are available in production.
  */
 (function () {
   "use strict";
 
   const API = "/api/myaivan";
   const CASE_KEY = "myaivan.activeCaseId";
+  const LAYOUT_KEY = "myaivan.layoutHeights";
   const emailStatus = document.body.dataset.emailStatus || "not_configured";
 
   const stream = document.getElementById("conversation-stream");
+  const review = document.getElementById("review-area");
+  const inputbar = document.querySelector(".mv-inputbar");
   const draftCards = document.getElementById("draft-cards");
   const input = document.getElementById("message-input");
   const statusLine = document.getElementById("status-line");
@@ -138,6 +141,76 @@
 
   // Re-render translated card labels when the language changes.
   document.addEventListener("myaivan:lang", () => { if (lastState) render(lastState); });
+
+  // ── resizable work areas ──────────────────────────────────────────────────
+
+  function px(n) { return Math.max(0, Math.round(n)) + "px"; }
+
+  function currentLayout() {
+    return {
+      stream: stream.getBoundingClientRect().height,
+      review: review.getBoundingClientRect().height,
+      inputbar: inputbar.getBoundingClientRect().height,
+    };
+  }
+
+  function applyLayout(layout) {
+    if (!layout) return;
+    if (layout.stream) stream.style.flex = "0 0 " + px(layout.stream);
+    if (layout.review) review.style.flex = "0 0 " + px(layout.review);
+    if (layout.inputbar) inputbar.style.flex = "0 0 " + px(layout.inputbar);
+  }
+
+  function saveLayout() {
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(currentLayout())); } catch (e) { /* ignore */ }
+  }
+
+  function restoreLayout() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null");
+      if (saved && saved.stream && saved.review && saved.inputbar) applyLayout(saved);
+    } catch (e) { /* ignore */ }
+  }
+
+  function initResizer(handleId, upperEl, lowerEl, upperMin, lowerMin) {
+    const handle = document.getElementById(handleId);
+    if (!handle || !upperEl || !lowerEl) return;
+    handle.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      handle.setPointerCapture(ev.pointerId);
+      document.body.classList.add("mv-resizing");
+      const startY = ev.clientY;
+      const upperStart = upperEl.getBoundingClientRect().height;
+      const lowerStart = lowerEl.getBoundingClientRect().height;
+      const total = upperStart + lowerStart;
+
+      function onMove(moveEv) {
+        const delta = moveEv.clientY - startY;
+        let upperNext = Math.max(upperMin, upperStart + delta);
+        let lowerNext = Math.max(lowerMin, total - upperNext);
+        if (lowerNext === lowerMin) upperNext = total - lowerMin;
+        upperEl.style.flex = "0 0 " + px(upperNext);
+        lowerEl.style.flex = "0 0 " + px(lowerNext);
+      }
+
+      function onUp(upEv) {
+        handle.releasePointerCapture(upEv.pointerId);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
+        document.body.classList.remove("mv-resizing");
+        saveLayout();
+      }
+
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
+    });
+  }
+
+  restoreLayout();
+  initResizer("stream-review-resizer", stream, review, 120, 112);
+  initResizer("review-input-resizer", review, inputbar, 112, 168);
 
   // ── case bootstrap ─────────────────────────────────────────────────────────
 

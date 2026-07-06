@@ -65,6 +65,7 @@ def test_01_welcome_page_renders(api_client):
     # English is the canonical/system language in the markup…
     assert "Welcome back. What should your AIVAN handle today?" in resp.text
     assert "Start Working" in resp.text
+    assert "MyAIVAN is your AIVAN digital trade assistant" in resp.text
     assert "/static/giraffe-logo.png" in resp.text
     assert (STATIC / "giraffe-logo.png").is_file()
     css = (STATIC / "myaivan.css").read_text()
@@ -89,14 +90,25 @@ def test_02_start_working_navigates_to_conversation(api_client):
 
 def test_03_conversation_page_renders_three_areas(api_client):
     html = api_client.get("/myaivan/work").text
+    assert ">MyAIVAN<" in html
     assert 'id="conversation-stream"' in html   # top
+    assert 'id="stream-review-resizer"' in html
     assert 'id="review-area"' in html           # middle
+    assert 'id="review-input-resizer"' in html
     assert 'id="message-input"' in html         # bottom
     assert 'id="paste-btn"' in html
     assert 'id="file-input"' in html and 'id="image-input"' in html
     assert 'id="voice-btn"' in html
     assert 'id="send-btn"' in html
+    assert 'id="message-input" rows="4"' in html
     assert 'id="lang-select"' in html  # language switcher
+    css = (STATIC / "myaivan.css").read_text()
+    input_css = css.split(".mv-input-row textarea", 1)[1].split("}", 1)[0]
+    assert "min-height" in input_css and "overflow-y: auto" in input_css
+    assert "row-resize" in css
+    js = (STATIC / "myaivan.js").read_text()
+    assert "myaivan.layoutHeights" in js
+    assert "stream-review-resizer" in js and "review-input-resizer" in js
 
 
 def test_04_user_messages_align_right():
@@ -340,6 +352,7 @@ def test_20_product_copy_keeps_trade_assistant_positioning():
     work = (TEMPLATES / "myaivan_work.html").read_text()
     assert "digital trade assistant" in welcome
     assert "digital trade assistant" in work
+    assert "MyAIVAN is your AIVAN digital trade assistant" in welcome
     assert "数字业务员" in i18n.CATALOG_ZH["welcome.tagline"]
     assert "数字业务员" in i18n.CATALOG_ZH["work.brand_sub"]
 

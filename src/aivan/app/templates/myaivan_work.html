@@ -8,7 +8,7 @@
 </head>
 <body class="mv-work-body" data-email-status="{{ email_status }}">
   <header class="mv-header">
-    <a class="mv-header-brand" href="/myaivan">myaivan</a>
+    <a class="mv-header-brand" href="/myaivan">MyAIVAN</a>
     <span class="mv-header-sub" data-i18n="work.brand_sub">AIVAN digital trade assistant</span>
     <div class="mv-lang-switch" title="Switch language" data-i18n-title="lang.tooltip">
       <span class="mv-lang-icon" aria-hidden="true">🌐</span>
@@ -20,6 +20,8 @@
 
   <!-- Top area: conversation stream -->
   <section id="conversation-stream" class="mv-stream" aria-label="Conversation stream"></section>
+  <div id="stream-review-resizer" class="mv-resizer" role="separator"
+       aria-orientation="horizontal" aria-label="Resize conversation and review areas"></div>
 
   <!-- Middle area: generated outbound review -->
   <section id="review-area" class="mv-review" aria-label="Generated outbound review">
@@ -31,6 +33,8 @@
       </div>
     </div>
   </section>
+  <div id="review-input-resizer" class="mv-resizer" role="separator"
+       aria-orientation="horizontal" aria-label="Resize review and input areas"></div>
 
   <!-- Bottom area: input bar -->
   <footer class="mv-inputbar">
@@ -49,7 +53,7 @@
               data-i18n="work.voice" data-i18n-title="work.voice_tooltip">Voice</button>
     </div>
     <div class="mv-input-row">
-      <textarea id="message-input" rows="2"
+      <textarea id="message-input" rows="4"
         placeholder="Paste a buyer inquiry, supplier reply, or tell AIVAN what to handle next..."
         data-i18n-placeholder="work.placeholder"></textarea>
       <button id="send-btn" class="mv-send-btn" data-i18n="work.send">Send</button>

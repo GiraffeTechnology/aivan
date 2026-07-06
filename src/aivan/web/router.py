@@ -347,7 +347,7 @@ def _page_guard(request: Request):
         return None
     if decision == "fail_closed":
         return PlainTextResponse(
-            "myaivan is unavailable: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET.",
+            "MyAIVAN is unavailable: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET.",
             status_code=503,
         )
     return RedirectResponse("/myaivan/login", status_code=303)
@@ -362,7 +362,7 @@ def myaivan_login(request: Request):
     if web_auth.auth_mode() == "misconfigured":
         return _page_guard(request)
     return _templates().TemplateResponse(
-        request, "myaivan_login.html", {"title": "myaivan — sign in"}
+        request, "myaivan_login.html", {"title": "MyAIVAN — sign in"}
     )
 
 
@@ -384,7 +384,7 @@ def myaivan_welcome(request: Request):
     if guard is not None:
         return guard
     return _templates().TemplateResponse(
-        request, "myaivan_welcome.html", {"title": "myaivan — AIVAN digital trade assistant"}
+        request, "myaivan_welcome.html", {"title": "MyAIVAN — AIVAN digital trade assistant"}
     )
 
 
@@ -404,7 +404,7 @@ def myaivan_work(request: Request):
     return _templates().TemplateResponse(
         request,
         "myaivan_work.html",
-        {"title": "myaivan — workspace", "email_status": email_status()},
+        {"title": "MyAIVAN — workspace", "email_status": email_status()},
     )
 
 

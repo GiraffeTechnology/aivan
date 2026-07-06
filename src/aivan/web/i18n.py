@@ -1,11 +1,9 @@
 """UI string catalogs for the myaivan Web UI.
 
 English is the system/canonical language. ``en`` and ``zh`` catalogs are
-built in; any other language is produced by translating the English catalog
-through giraffe-language-skill (``POST /v1/outbound/render``), one string at a
-time, cached in-process. Translation is fail-soft: strings the service cannot
-translate stay English, and when the service is unavailable the whole catalog
-falls back to English — the UI must never break because translation is down.
+built in and are the only languages offered until the production
+giraffe-language-skill provider returns real translations. The UI must never
+offer a language option that silently renders English.
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ logger = logging.getLogger(__name__)
 CATALOG_EN: dict[str, str] = {
     "welcome.title": "Welcome back. What should your AIVAN handle today?",
     "welcome.tagline": (
-        "myaivan is your AIVAN digital trade assistant for inquiry management, "
+        "MyAIVAN is your AIVAN digital trade assistant for inquiry management, "
         "business communication, and human-confirmed outbound messages."
     ),
     "welcome.start": "Start Working",
@@ -82,7 +80,7 @@ CATALOG_EN: dict[str, str] = {
 # Built-in curated Chinese catalog (product copy from the PRD).
 CATALOG_ZH: dict[str, str] = {
     "welcome.title": "欢迎回来。今天要让你的 AIVAN 处理哪一条询价？",
-    "welcome.tagline": "myaivan 是你的 AIVAN 数字业务员，用于管理询价、处理贸易信息收发，并在所有外发商务信息前进行人工确认。",
+    "welcome.tagline": "MyAIVAN 是你的 AIVAN 数字业务员，用于管理询价、处理贸易信息收发，并在所有外发商务信息前进行人工确认。",
     "welcome.start": "开始工作",
     "work.brand_sub": "AIVAN 数字业务员",
     "work.backup": "备份",
@@ -138,19 +136,13 @@ CATALOG_ZH: dict[str, str] = {
 
 BUILTIN_CATALOGS: dict[str, dict[str, str]] = {"en": CATALOG_EN, "zh": CATALOG_ZH}
 
-# Languages offered by the UI switcher. Anything beyond en/zh is translated
-# on demand through giraffe-language-skill.
+# Languages offered by the UI switcher. Keep this list limited to catalogs that
+# are known to render translated UI. The deployed language-skill can run in mock
+# mode and return source text unchanged; do not expose those languages as
+# selectable until a real provider is configured.
 SUPPORTED_LANGUAGES: dict[str, str] = {
     "en": "English",
     "zh": "中文",
-    "ja": "日本語",
-    "ko": "한국어",
-    "es": "Español",
-    "fr": "Français",
-    "de": "Deutsch",
-    "pt": "Português",
-    "ru": "Русский",
-    "ar": "العربية",
 }
 
 _cache: dict[str, dict] = {}
