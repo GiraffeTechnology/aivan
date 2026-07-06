@@ -89,7 +89,8 @@ def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch)
     assert 'id="send-code"' in html
     assert 'id="login-code"' in html
     assert 'id="key-mode-toggle"' in html
-    assert 'id="login-key"' in html
+    assert 'id="login-key"' not in html
+    assert "localStorage.getItem(\"myaivan.apiKey\")" in html
     assert "5-minute dynamic password" in html
 
 

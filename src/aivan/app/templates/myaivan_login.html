@@ -32,7 +32,6 @@
         <button id="login-submit" type="submit" class="mv-start-btn" disabled>Sign in</button>
       </div>
       <div id="key-login-panel" class="mv-login-panel" hidden>
-        <input id="login-key" type="password" placeholder="AIVAN API key" autocomplete="current-password">
         <button id="key-login-submit" type="button" class="mv-start-btn">Sign in with key</button>
       </div>
     </form>
@@ -52,7 +51,6 @@
       var keyModeToggle = document.getElementById("key-mode-toggle");
       var emailLoginPanel = document.getElementById("email-login-panel");
       var keyLoginPanel = document.getElementById("key-login-panel");
-      var keyInput = document.getElementById("login-key");
       var keySubmitButton = document.getElementById("key-login-submit");
       var humanProof = null;
 
@@ -73,7 +71,7 @@
         keyModeToggle.title = enabled ? "Use email dynamic password login" : "Use API key login";
         keyModeToggle.setAttribute("aria-label", keyModeToggle.title);
         if (enabled) {
-          keyInput.focus();
+          keySubmitButton.focus();
         } else {
           emailInput.focus();
         }
@@ -174,7 +172,9 @@
         clearError();
         keySubmitButton.disabled = true;
         try {
-          var key = keyInput.value.trim();
+          var key = "";
+          try { key = (localStorage.getItem("myaivan.apiKey") || "").trim(); } catch (e) { key = ""; }
+          if (!key) throw new Error("No API key saved on this computer.");
           var resp = await fetch("/api/myaivan/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -182,7 +182,6 @@
           });
           var data = await resp.json().catch(function () { return {}; });
           if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
-          try { localStorage.setItem("myaivan.apiKey", key); } catch (e) { /* ignore */ }
           window.location.href = "/myaivan/work";
         } catch (e) {
           keySubmitButton.disabled = false;
