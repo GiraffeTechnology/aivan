@@ -82,11 +82,10 @@ def test_01_welcome_page_renders(api_client):
 def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch):
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.setenv("AIVAN_API_KEY", "test-key")
-    monkeypatch.setenv("AIVAN_WEB_LOGIN_DEFAULT_EMAIL", "info@myaivan.com")
     html = api_client.get("/myaivan/login").text
     assert "/static/giraffe-logo.png" in html
     assert 'id="login-email"' in html
-    assert 'value="info@myaivan.com"' in html
+    assert 'value="info@myaivan.com"' not in html
     assert 'id="lang-select"' in html
     assert "🌐" in html
     assert "myaivan-i18n.js" in html
@@ -97,7 +96,7 @@ def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch)
     assert 'id="key-mode-toggle"' in html
     assert 'id="login-key"' not in html
     assert "localStorage.getItem(\"myaivan.apiKey\")" in html
-    assert "5-minute dynamic password" in html
+    assert "5-minute dynamic password we send you" not in html
 
 
 def test_02_start_working_navigates_to_conversation(api_client):

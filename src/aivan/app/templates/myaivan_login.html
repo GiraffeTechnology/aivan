@@ -15,9 +15,6 @@
     <img class="mv-giraffe-icon" src="/static/giraffe-logo.png" alt="Giraffe Technology logo">
     <div class="mv-logo">AIVAN</div>
     <h1 class="mv-welcome-title" data-i18n="login.title">Sign in to MyAIVAN</h1>
-    <p class="mv-tagline" data-i18n="login.tagline">
-      Enter your email, verify you are human, then use the 5-minute dynamic password we send you.
-    </p>
     <div class="mv-login-mode">
       <span data-i18n="login.mode_email">Email dynamic password</span>
       <button id="key-mode-toggle" type="button" class="mv-icon-btn" title="Use API key login"
@@ -26,7 +23,7 @@
     <form id="login-form" class="mv-login-form">
       <div id="email-login-panel" class="mv-login-panel">
         <input id="login-email" type="email" placeholder="Email address" autocomplete="email"
-               value="{{ login_default_email or '' }}" data-i18n-placeholder="login.email_placeholder" required>
+               data-i18n-placeholder="login.email_placeholder" required>
         <button id="human-check" type="button" class="mv-human-check" aria-pressed="false">
           <span class="mv-human-box" aria-hidden="true"></span>
           <span id="human-label" data-i18n="login.human">I'm human</span>

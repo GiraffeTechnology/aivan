@@ -412,9 +412,7 @@ def myaivan_login(request: Request):
     if web_auth.auth_mode() == "misconfigured":
         return _page_guard(request)
     return _templates().TemplateResponse(
-        request,
-        "myaivan_login.html",
-        {"title": "MyAIVAN — sign in", "login_default_email": web_auth.login_default_email()},
+        request, "myaivan_login.html", {"title": "MyAIVAN — sign in"}
     )
 
 

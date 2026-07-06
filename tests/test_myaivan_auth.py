@@ -102,7 +102,7 @@ def test_production_pages_redirect_to_login(api_client, production_with_key):
     assert 'id="login-email"' in login.text
     assert 'id="human-check"' in login.text
     assert 'id="send-code"' in login.text
-    assert "5-minute dynamic password" in login.text
+    assert "5-minute dynamic password we send you" not in login.text
 
 
 def test_production_api_unauthenticated_401(api_client, production_with_key):
