@@ -87,6 +87,10 @@ def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch)
     assert "/static/giraffe-logo.png" in html
     assert 'id="login-email"' in html
     assert 'value="info@myaivan.com"' in html
+    assert 'id="lang-select"' in html
+    assert "🌐" in html
+    assert "myaivan-i18n.js" in html
+    assert 'data-i18n="login.title"' in html
     assert 'id="human-check"' in html
     assert 'id="send-code"' in html
     assert 'id="login-code"' in html

@@ -34,6 +34,7 @@ def test_english_is_canonical_builtin(api_client):
     assert data["source"] == "builtin"
     assert data["strings"]["welcome.title"].startswith("Welcome back")
     assert data["strings"]["welcome.tagline"].startswith("MyAIVAN is")
+    assert data["strings"]["login.title"] == "Sign in to MyAIVAN"
     assert data["languages"] == {"en": "English", "zh": "中文"}
 
 
@@ -44,6 +45,7 @@ def test_zh_builtin_and_region_tags_normalize(api_client):
         assert data["source"] == "builtin"
         assert "欢迎回来" in data["strings"]["welcome.title"]
         assert data["strings"]["welcome.tagline"].startswith("MyAIVAN 是")
+        assert data["strings"]["login.title"] == "登录 MyAIVAN"
 
 
 def test_zh_catalog_covers_every_english_key():
@@ -59,7 +61,7 @@ def test_unavailable_language_normalizes_to_english(api_client):
 # ── UI wiring ─────────────────────────────────────────────────────────────────
 
 def test_language_switcher_on_both_pages(api_client):
-    for path in ("/myaivan", "/myaivan/work"):
+    for path in ("/myaivan", "/myaivan/login", "/myaivan/work"):
         html = api_client.get(path).text
         assert 'id="lang-select"' in html, f"{path} missing language switcher"
         assert "🌐" in html, f"{path} missing language icon"
@@ -74,8 +76,8 @@ def test_default_language_follows_system_language():
 
 
 def test_templates_use_english_canonical_markup():
-    for name in ("myaivan_welcome.html", "myaivan_work.html"):
+    for name in ("myaivan_welcome.html", "myaivan_login.html", "myaivan_work.html"):
         html = (TEMPLATES / name).read_text()
         assert 'data-i18n=' in html
         # Canonical markup is English; other languages come from catalogs.
-        assert "Welcome back" in html or "Outbound review" in html
+        assert "Welcome back" in html or "Sign in to MyAIVAN" in html or "Outbound review" in html

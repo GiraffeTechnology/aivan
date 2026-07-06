@@ -7,37 +7,45 @@
   <link rel="stylesheet" href="/static/myaivan.css">
 </head>
 <body class="mv-welcome-body">
+  <div class="mv-lang-switch mv-lang-floating" title="Switch language" data-i18n-title="lang.tooltip">
+    <span class="mv-lang-icon" aria-hidden="true">🌐</span>
+    <select id="lang-select" aria-label="Switch language"></select>
+  </div>
   <main class="mv-welcome">
     <img class="mv-giraffe-icon" src="/static/giraffe-logo.png" alt="Giraffe Technology logo">
     <div class="mv-logo">AIVAN</div>
-    <h1 class="mv-welcome-title">Sign in to MyAIVAN</h1>
-    <p class="mv-tagline">
+    <h1 class="mv-welcome-title" data-i18n="login.title">Sign in to MyAIVAN</h1>
+    <p class="mv-tagline" data-i18n="login.tagline">
       Enter your email, verify you are human, then use the 5-minute dynamic password we send you.
     </p>
     <div class="mv-login-mode">
-      <span>Email dynamic password</span>
+      <span data-i18n="login.mode_email">Email dynamic password</span>
       <button id="key-mode-toggle" type="button" class="mv-icon-btn" title="Use API key login"
-              aria-label="Use API key login" aria-pressed="false">🔑</button>
+              aria-label="Use API key login" aria-pressed="false" data-i18n-title="login.key_toggle">🔑</button>
     </div>
     <form id="login-form" class="mv-login-form">
       <div id="email-login-panel" class="mv-login-panel">
         <input id="login-email" type="email" placeholder="Email address" autocomplete="email"
-               value="{{ login_default_email or '' }}" required>
+               value="{{ login_default_email or '' }}" data-i18n-placeholder="login.email_placeholder" required>
         <button id="human-check" type="button" class="mv-human-check" aria-pressed="false">
           <span class="mv-human-box" aria-hidden="true"></span>
-          <span id="human-label">I'm human</span>
+          <span id="human-label" data-i18n="login.human">I'm human</span>
         </button>
-        <button id="send-code" type="button" class="mv-secondary-btn" disabled>Send dynamic password</button>
+        <button id="send-code" type="button" class="mv-secondary-btn" disabled
+                data-i18n="login.send_code">Send dynamic password</button>
         <input id="login-code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
-               placeholder="6-digit dynamic password" autocomplete="one-time-code" required disabled>
-        <button id="login-submit" type="submit" class="mv-start-btn" disabled>Sign in</button>
+               placeholder="6-digit dynamic password" autocomplete="one-time-code"
+               data-i18n-placeholder="login.code_placeholder" required disabled>
+        <button id="login-submit" type="submit" class="mv-start-btn" disabled data-i18n="login.submit">Sign in</button>
       </div>
       <div id="key-login-panel" class="mv-login-panel" hidden>
-        <button id="key-login-submit" type="button" class="mv-start-btn">Sign in with key</button>
+        <button id="key-login-submit" type="button" class="mv-start-btn"
+                data-i18n="login.key_submit">Sign in with key</button>
       </div>
     </form>
     <p id="login-error" class="mv-login-error" hidden></p>
   </main>
+  <script src="/static/myaivan-i18n.js"></script>
   <script>
     (function () {
       "use strict";
@@ -55,6 +63,10 @@
       var keySubmitButton = document.getElementById("key-login-submit");
       var humanProof = null;
 
+      function t(key, fallback) {
+        return (window.MyaivanI18n && window.MyaivanI18n.t(key, fallback)) || fallback || key;
+      }
+
       function showError(message) {
         errorLine.textContent = message;
         errorLine.hidden = false;
@@ -69,7 +81,9 @@
         emailLoginPanel.hidden = enabled;
         keyLoginPanel.hidden = !enabled;
         keyModeToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
-        keyModeToggle.title = enabled ? "Use email dynamic password login" : "Use API key login";
+        keyModeToggle.title = enabled
+          ? t("login.email_toggle", "Use email dynamic password login")
+          : t("login.key_toggle", "Use API key login");
         keyModeToggle.setAttribute("aria-label", keyModeToggle.title);
         if (enabled) {
           keySubmitButton.focus();
@@ -108,7 +122,7 @@
       humanButton.addEventListener("click", async function () {
         clearError();
         humanButton.disabled = true;
-        humanLabel.textContent = "Verifying...";
+        humanLabel.textContent = t("login.verifying", "Verifying...");
         try {
           var resp = await fetch("/api/myaivan/login/challenge", { method: "POST" });
           var challenge = await resp.json();
@@ -116,12 +130,12 @@
           humanProof = await solveChallenge(challenge);
           humanButton.classList.add("mv-human-ok");
           humanButton.setAttribute("aria-pressed", "true");
-          humanLabel.textContent = "I'm human";
+          humanLabel.textContent = t("login.human", "I'm human");
           sendCodeButton.disabled = false;
         } catch (e) {
           humanProof = null;
           humanButton.disabled = false;
-          humanLabel.textContent = "I'm human";
+          humanLabel.textContent = t("login.human", "I'm human");
           showError(e.message);
         }
       });
@@ -129,7 +143,7 @@
       sendCodeButton.addEventListener("click", async function () {
         clearError();
         sendCodeButton.disabled = true;
-        sendCodeButton.textContent = "Sending...";
+        sendCodeButton.textContent = t("login.sending", "Sending...");
         try {
           var resp = await fetch("/api/myaivan/login/request-code", {
             method: "POST",
@@ -141,11 +155,11 @@
           codeInput.disabled = false;
           submitButton.disabled = false;
           codeInput.focus();
-          sendCodeButton.textContent = "Dynamic password sent";
+          sendCodeButton.textContent = t("login.sent", "Dynamic password sent");
           if (data.debugCode) codeInput.value = data.debugCode;
         } catch (e) {
           sendCodeButton.disabled = false;
-          sendCodeButton.textContent = "Send dynamic password";
+          sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
           showError(e.message);
         }
       });
