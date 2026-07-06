@@ -49,12 +49,25 @@ def _events(api_client, case_id: str) -> list[str]:
 
 # ── 1–2: welcome page & navigation ────────────────────────────────────────────
 
+def test_00_root_domain_entry_redirects_to_myaivan(api_client):
+    resp = api_client.get("/", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/myaivan"
+    head = api_client.head("/", follow_redirects=False)
+    assert head.status_code == 303
+    assert head.headers["location"] == "/myaivan"
+
+
 def test_01_welcome_page_renders(api_client):
+    assert api_client.head("/myaivan").status_code == 200
     resp = api_client.get("/myaivan")
     assert resp.status_code == 200
     # English is the canonical/system language in the markup…
     assert "Welcome back. What should your AIVAN handle today?" in resp.text
     assert "Start Working" in resp.text
+    assert "/static/giraffe-logo.png" in resp.text
+    assert (STATIC / "giraffe-logo.png").is_file()
+    assert ".mv-giraffe-icon" in (STATIC / "myaivan.css").read_text()
     assert 'data-i18n="welcome.title"' in resp.text
     # …and the required Chinese copy is served through the zh catalog.
     zh = api_client.get("/api/myaivan/i18n/zh").json()["strings"]
@@ -119,22 +132,41 @@ def test_07_file_upload_works(api_client):
     case_id = _new_case(api_client)
     resp = api_client.post(
         f"/api/myaivan/cases/{case_id}/uploads",
-        files={"file": ("spec.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")},
+        files={
+            "file": (
+                "spec.txt",
+                io.BytesIO(b"Buyer asks for 5000 cotton shirts to Tokyo within 45 days."),
+                "text/plain",
+            )
+        },
     )
     assert resp.status_code == 200
     state = resp.json()
     assert state["attachments"] and state["attachments"][0]["kind"] == "file"
+    summaries = [m for m in state["messages"] if m["role"] == "aivan" and m["type"] == "structured_summary"]
+    assert any("Text preview" in m["content"] for m in summaries)
+    assert any("5000 cotton shirts" in m["metadata"]["understanding"]["textPreview"] for m in summaries)
     assert "file_uploaded" in _events(api_client, case_id)
 
 
 def test_08_image_upload_works(api_client):
     case_id = _new_case(api_client)
+    png_1x1 = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00"
+        b"\x90wS\xde"
+    )
     resp = api_client.post(
         f"/api/myaivan/cases/{case_id}/uploads",
-        files={"file": ("sample.png", io.BytesIO(b"\x89PNG fake"), "image/png")},
+        files={"file": ("sample.png", io.BytesIO(png_1x1), "image/png")},
     )
     assert resp.status_code == 200
-    assert resp.json()["attachments"][0]["kind"] == "image"
+    state = resp.json()
+    assert state["attachments"][0]["kind"] == "image"
+    summaries = [m for m in state["messages"] if m["role"] == "aivan" and m["type"] == "structured_summary"]
+    assert any("1x1" in m["content"] for m in summaries)
     assert "image_uploaded" in _events(api_client, case_id)
 
 

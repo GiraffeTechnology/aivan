@@ -262,7 +262,9 @@ def add_attachment(
     content_type: str,
     size_bytes: int,
     storage_path: str,
+    understanding: dict | None = None,
 ) -> WebAttachmentRecord:
+    understanding = understanding or {}
     record = WebAttachmentRecord(
         attachment_id=f"att_{new_id()}",
         case_id=case.case_id,
@@ -274,15 +276,20 @@ def add_attachment(
     )
     db.add(record)
     add_message(db, case, "user", filename, message_type=kind,
-                meta={"attachmentId": record.attachment_id, "sizeBytes": size_bytes})
+                meta={"attachmentId": record.attachment_id, "sizeBytes": size_bytes,
+                      "contentType": content_type})
+    summary = understanding.get("summary") or (
+        f"Received {kind} “{filename}” ({size_bytes} bytes)."
+    )
     add_message(
         db, case, "aivan",
-        f"Received {kind} “{filename}” ({size_bytes} bytes). "
-        "Tell me what to do with it — summarize it, or draft a reply/inquiry based on it.",
-        message_type="text",
+        f"{summary} Tell me what to do with it: summarize it, extract trade facts, "
+        "or draft a reply/inquiry based on it.",
+        message_type="structured_summary",
+        meta={"attachmentId": record.attachment_id, "understanding": understanding},
     )
     log_event(db, case.case_id, f"{kind}_uploaded", filename,
-              meta={"attachmentId": record.attachment_id})
+              meta={"attachmentId": record.attachment_id, "understanding": understanding})
     _touch(case)
     db.commit()
     return record

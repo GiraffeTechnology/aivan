@@ -9,9 +9,10 @@ All endpoints fail with structured errors; draft-state violations return 409.
 from __future__ import annotations
 
 import os
+import struct
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from aivan.db.session import get_db
@@ -33,6 +34,93 @@ def _upload_dir() -> str:
     return os.environ.get("AIVAN_WEB_UPLOAD_DIR", os.path.join("data", "web_uploads"))
 
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+
+def _png_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) >= 24 and raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return struct.unpack(">II", raw[16:24])
+    return None
+
+
+def _gif_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) >= 10 and raw[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", raw[6:10])
+    return None
+
+
+def _jpeg_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) < 4 or not raw.startswith(b"\xff\xd8"):
+        return None
+    pos = 2
+    while pos + 9 < len(raw):
+        if raw[pos] != 0xFF:
+            pos += 1
+            continue
+        marker = raw[pos + 1]
+        pos += 2
+        if marker in (0xD8, 0xD9):
+            continue
+        if pos + 2 > len(raw):
+            return None
+        length = struct.unpack(">H", raw[pos:pos + 2])[0]
+        if length < 2 or pos + length > len(raw):
+            return None
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB):
+            if length >= 7:
+                height, width = struct.unpack(">HH", raw[pos + 3:pos + 7])
+                return width, height
+            return None
+        pos += length
+    return None
+
+
+def _image_dimensions(raw: bytes) -> tuple[int, int] | None:
+    return _png_dimensions(raw) or _gif_dimensions(raw) or _jpeg_dimensions(raw)
+
+
+def _text_preview(raw: bytes, content_type: str, filename: str) -> str:
+    lower_name = filename.lower()
+    looks_text = (
+        content_type.startswith("text/")
+        or content_type in {"application/json", "application/xml", "application/csv"}
+        or lower_name.endswith((".txt", ".csv", ".md", ".json", ".xml", ".html", ".htm"))
+    )
+    if not looks_text:
+        return ""
+    try:
+        text = raw[:4096].decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = raw[:4096].decode("gb18030")
+        except UnicodeDecodeError:
+            return ""
+    text = " ".join(text.split())
+    return text[:500]
+
+
+def _upload_understanding(kind: str, filename: str, content_type: str, size_bytes: int, raw: bytes) -> dict:
+    if kind == "image":
+        dims = _image_dimensions(raw)
+        summary = f"Image uploaded: {filename} ({content_type}, {size_bytes} bytes)."
+        if dims:
+            summary = (
+                f"Image uploaded: {filename} ({content_type}, {dims[0]}x{dims[1]}, "
+                f"{size_bytes} bytes)."
+            )
+        return {"summary": summary, "dimensions": dims}
+
+    preview = _text_preview(raw, content_type, filename)
+    if preview:
+        return {
+            "summary": (
+                f"File uploaded: {filename} ({content_type}, {size_bytes} bytes). "
+                f"Text preview: {preview}"
+            ),
+            "textPreview": preview,
+        }
+    return {
+        "summary": f"File uploaded: {filename} ({content_type}, {size_bytes} bytes).",
+    }
 
 
 def _require_case(db: Session, case_id: str):
@@ -93,13 +181,16 @@ async def upload(case_id: str, file: UploadFile, db: Session = Depends(get_db)):
     upload_dir = _upload_dir()
     os.makedirs(upload_dir, exist_ok=True)
     safe_name = os.path.basename(file.filename or "upload.bin")
+    content_type = file.content_type or "application/octet-stream"
+    understanding = _upload_understanding(kind, safe_name, content_type, len(raw), raw)
     storage_path = os.path.join(upload_dir, f"{new_id()}_{safe_name}")
     with open(storage_path, "wb") as fh:
         fh.write(raw)
     record = service.add_attachment(
         db, case, kind=kind, filename=safe_name,
-        content_type=file.content_type or "application/octet-stream",
+        content_type=content_type,
         size_bytes=len(raw), storage_path=storage_path,
+        understanding=understanding,
     )
     state = service.case_state(db, case)
     state["attachmentId"] = record.attachment_id
@@ -275,6 +366,18 @@ def myaivan_login(request: Request):
     )
 
 
+@router.head("/myaivan/login")
+def myaivan_login_head(request: Request):
+    guard = _page_guard(request) if web_auth.auth_mode() == "misconfigured" else None
+    if guard is not None:
+        return guard
+    if web_auth.auth_mode() == "open":
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/myaivan", status_code=303)
+    return Response(status_code=200)
+
+
 @router.get("/myaivan", response_class=HTMLResponse)
 def myaivan_welcome(request: Request):
     guard = _page_guard(request)
@@ -283,6 +386,14 @@ def myaivan_welcome(request: Request):
     return _templates().TemplateResponse(
         request, "myaivan_welcome.html", {"title": "myaivan — AIVAN digital trade assistant"}
     )
+
+
+@router.head("/myaivan")
+def myaivan_welcome_head(request: Request):
+    guard = _page_guard(request)
+    if guard is not None:
+        return guard
+    return Response(status_code=200)
 
 
 @router.get("/myaivan/work", response_class=HTMLResponse)
@@ -295,3 +406,11 @@ def myaivan_work(request: Request):
         "myaivan_work.html",
         {"title": "myaivan — workspace", "email_status": email_status()},
     )
+
+
+@router.head("/myaivan/work")
+def myaivan_work_head(request: Request):
+    guard = _page_guard(request)
+    if guard is not None:
+        return guard
+    return Response(status_code=200)
