@@ -40,6 +40,12 @@ body {
   object-fit: contain;
   margin: 0 auto 18px;
 }
+.mv-giraffe-icon-home {
+  width: clamp(128px, 24vmin, 260px);
+  max-width: 46vw;
+  max-height: 30vh;
+  margin-bottom: 22px;
+}
 .mv-logo { font-size: 28px; font-weight: 700; letter-spacing: 4px; color: var(--mv-accent); margin-bottom: 18px; }
 .mv-welcome-title { font-size: 26px; margin: 0 0 8px; }
 .mv-welcome-title-zh { font-size: 18px; color: var(--mv-muted); margin: 0 0 24px; }
