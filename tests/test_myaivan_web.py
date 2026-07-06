@@ -79,6 +79,20 @@ def test_01_welcome_page_renders(api_client):
     assert zh["welcome.start"] == "开始工作"
 
 
+def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "test-key")
+    html = api_client.get("/myaivan/login").text
+    assert "/static/giraffe-logo.png" in html
+    assert 'id="login-email"' in html
+    assert 'id="human-check"' in html
+    assert 'id="send-code"' in html
+    assert 'id="login-code"' in html
+    assert 'id="key-mode-toggle"' in html
+    assert 'id="login-key"' in html
+    assert "5-minute dynamic password" in html
+
+
 def test_02_start_working_navigates_to_conversation(api_client):
     welcome = api_client.get("/myaivan").text
     assert 'href="/myaivan/work"' in welcome
@@ -102,6 +116,9 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert 'id="send-btn"' in html
     assert 'id="message-input" rows="4"' in html
     assert 'id="lang-select"' in html  # language switcher
+    assert 'id="settings-toggle"' in html
+    assert 'id="settings-menu"' in html
+    assert 'id="settings-api-key"' in html
     css = (STATIC / "myaivan.css").read_text()
     input_css = css.split(".mv-input-row textarea", 1)[1].split("}", 1)[0]
     assert "min-height" in input_css and "overflow-y: auto" in input_css
@@ -109,6 +126,8 @@ def test_03_conversation_page_renders_three_areas(api_client):
     js = (STATIC / "myaivan.js").read_text()
     assert "myaivan.layoutHeights" in js
     assert "stream-review-resizer" in js and "review-input-resizer" in js
+    assert "myaivan.apiKey" in js
+    assert "X-AIVAN-API-Key" in js
 
 
 def test_04_user_messages_align_right():

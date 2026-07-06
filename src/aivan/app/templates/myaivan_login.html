@@ -8,14 +8,33 @@
 </head>
 <body class="mv-welcome-body">
   <main class="mv-welcome">
+    <img class="mv-giraffe-icon" src="/static/giraffe-logo.png" alt="Giraffe Technology logo">
     <div class="mv-logo">AIVAN</div>
     <h1 class="mv-welcome-title">Sign in to MyAIVAN</h1>
     <p class="mv-tagline">
-      Enter your AIVAN access key to continue. Sessions expire automatically.
+      Enter your email, verify you are human, then use the 5-minute dynamic password we send you.
     </p>
+    <div class="mv-login-mode">
+      <span>Email dynamic password</span>
+      <button id="key-mode-toggle" type="button" class="mv-icon-btn" title="Use API key login"
+              aria-label="Use API key login" aria-pressed="false">🔑</button>
+    </div>
     <form id="login-form" class="mv-login-form">
-      <input id="login-key" type="password" placeholder="AIVAN access key" autocomplete="current-password" required>
-      <button type="submit" class="mv-start-btn">Sign in</button>
+      <div id="email-login-panel" class="mv-login-panel">
+        <input id="login-email" type="email" placeholder="Email address" autocomplete="email" required>
+        <button id="human-check" type="button" class="mv-human-check" aria-pressed="false">
+          <span class="mv-human-box" aria-hidden="true"></span>
+          <span id="human-label">I'm human</span>
+        </button>
+        <button id="send-code" type="button" class="mv-secondary-btn" disabled>Send dynamic password</button>
+        <input id="login-code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+               placeholder="6-digit dynamic password" autocomplete="one-time-code" required disabled>
+        <button id="login-submit" type="submit" class="mv-start-btn" disabled>Sign in</button>
+      </div>
+      <div id="key-login-panel" class="mv-login-panel" hidden>
+        <input id="login-key" type="password" placeholder="AIVAN API key" autocomplete="current-password">
+        <button id="key-login-submit" type="button" class="mv-start-btn">Sign in with key</button>
+      </div>
     </form>
     <p id="login-error" class="mv-login-error" hidden></p>
   </main>
@@ -24,21 +43,150 @@
       "use strict";
       var form = document.getElementById("login-form");
       var errorLine = document.getElementById("login-error");
+      var emailInput = document.getElementById("login-email");
+      var codeInput = document.getElementById("login-code");
+      var humanButton = document.getElementById("human-check");
+      var humanLabel = document.getElementById("human-label");
+      var sendCodeButton = document.getElementById("send-code");
+      var submitButton = document.getElementById("login-submit");
+      var keyModeToggle = document.getElementById("key-mode-toggle");
+      var emailLoginPanel = document.getElementById("email-login-panel");
+      var keyLoginPanel = document.getElementById("key-login-panel");
+      var keyInput = document.getElementById("login-key");
+      var keySubmitButton = document.getElementById("key-login-submit");
+      var humanProof = null;
+
+      function showError(message) {
+        errorLine.textContent = message;
+        errorLine.hidden = false;
+      }
+
+      function clearError() {
+        errorLine.hidden = true;
+        errorLine.textContent = "";
+      }
+
+      function setKeyMode(enabled) {
+        emailLoginPanel.hidden = enabled;
+        keyLoginPanel.hidden = !enabled;
+        keyModeToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+        keyModeToggle.title = enabled ? "Use email dynamic password login" : "Use API key login";
+        keyModeToggle.setAttribute("aria-label", keyModeToggle.title);
+        if (enabled) {
+          keyInput.focus();
+        } else {
+          emailInput.focus();
+        }
+      }
+
+      keyModeToggle.addEventListener("click", function () {
+        clearError();
+        setKeyMode(keyLoginPanel.hidden);
+      });
+
+      async function sha256Hex(text) {
+        var data = new TextEncoder().encode(text);
+        var hash = await crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hash)).map(function (b) {
+          return b.toString(16).padStart(2, "0");
+        }).join("");
+      }
+
+      async function solveChallenge(challenge) {
+        var prefix = "0".repeat(challenge.difficulty);
+        for (var nonce = 0; nonce < 5000000; nonce += 1) {
+          var digest = await sha256Hex(challenge.challengeId + ":" + challenge.salt + ":" + nonce);
+          if (digest.slice(0, challenge.difficulty) === prefix) {
+            return { challengeId: challenge.challengeId, nonce: String(nonce), digest: digest };
+          }
+          if (nonce > 0 && nonce % 500 === 0) {
+            await new Promise(function (resolve) { setTimeout(resolve, 0); });
+          }
+        }
+        throw new Error("Human verification timed out. Please try again.");
+      }
+
+      humanButton.addEventListener("click", async function () {
+        clearError();
+        humanButton.disabled = true;
+        humanLabel.textContent = "Verifying...";
+        try {
+          var resp = await fetch("/api/myaivan/login/challenge", { method: "POST" });
+          var challenge = await resp.json();
+          if (!resp.ok) throw new Error(challenge.detail || "Could not start human verification");
+          humanProof = await solveChallenge(challenge);
+          humanButton.classList.add("mv-human-ok");
+          humanButton.setAttribute("aria-pressed", "true");
+          humanLabel.textContent = "I'm human";
+          sendCodeButton.disabled = false;
+        } catch (e) {
+          humanProof = null;
+          humanButton.disabled = false;
+          humanLabel.textContent = "I'm human";
+          showError(e.message);
+        }
+      });
+
+      sendCodeButton.addEventListener("click", async function () {
+        clearError();
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = "Sending...";
+        try {
+          var resp = await fetch("/api/myaivan/login/request-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: emailInput.value, humanProof: humanProof }),
+          });
+          var data = await resp.json().catch(function () { return {}; });
+          if (!resp.ok) throw new Error(data.detail || "Could not send dynamic password");
+          codeInput.disabled = false;
+          submitButton.disabled = false;
+          codeInput.focus();
+          sendCodeButton.textContent = "Dynamic password sent";
+          if (data.debugCode) codeInput.value = data.debugCode;
+        } catch (e) {
+          sendCodeButton.disabled = false;
+          sendCodeButton.textContent = "Send dynamic password";
+          showError(e.message);
+        }
+      });
+
       form.addEventListener("submit", async function (ev) {
         ev.preventDefault();
-        errorLine.hidden = true;
+        clearError();
+        submitButton.disabled = true;
         try {
           var resp = await fetch("/api/myaivan/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: document.getElementById("login-key").value }),
+            body: JSON.stringify({ email: emailInput.value, code: codeInput.value }),
           });
           var data = await resp.json().catch(function () { return {}; });
           if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
           window.location.href = "/myaivan/work";
         } catch (e) {
-          errorLine.textContent = e.message;
-          errorLine.hidden = false;
+          submitButton.disabled = false;
+          showError(e.message);
+        }
+      });
+
+      keySubmitButton.addEventListener("click", async function () {
+        clearError();
+        keySubmitButton.disabled = true;
+        try {
+          var key = keyInput.value.trim();
+          var resp = await fetch("/api/myaivan/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: key }),
+          });
+          var data = await resp.json().catch(function () { return {}; });
+          if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+          try { localStorage.setItem("myaivan.apiKey", key); } catch (e) { /* ignore */ }
+          window.location.href = "/myaivan/work";
+        } catch (e) {
+          keySubmitButton.disabled = false;
+          showError(e.message);
         }
       });
     })();

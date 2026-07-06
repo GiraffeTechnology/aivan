@@ -15,6 +15,7 @@
   const API = "/api/myaivan";
   const CASE_KEY = "myaivan.activeCaseId";
   const LAYOUT_KEY = "myaivan.layoutHeights";
+  const API_KEY_KEY = "myaivan.apiKey";
   const emailStatus = document.body.dataset.emailStatus || "not_configured";
 
   const stream = document.getElementById("conversation-stream");
@@ -34,10 +35,23 @@
 
   function setStatus(text) { statusLine.textContent = text || ""; }
 
+  function storedApiKey() {
+    try { return (localStorage.getItem(API_KEY_KEY) || "").trim(); } catch (e) { return ""; }
+  }
+
+  function authHeaders(extra) {
+    const headers = Object.assign({}, extra || {});
+    const key = storedApiKey();
+    if (key) headers["X-AIVAN-API-Key"] = key;
+    return headers;
+  }
+
   async function api(path, options) {
+    const opts = Object.assign({}, options || {});
+    opts.headers = authHeaders(Object.assign({ "Content-Type": "application/json" }, opts.headers || {}));
     const resp = await fetch(API + path, Object.assign({
       headers: { "Content-Type": "application/json" },
-    }, options));
+    }, opts));
     const data = await resp.json().catch(() => ({}));
     if (resp.status === 401) {
       window.location.href = "/myaivan/login";
@@ -271,7 +285,11 @@
     form.append("file", file);
     setStatus(t("status.uploading", "Uploading…"));
     try {
-      const resp = await fetch(API + "/cases/" + activeCaseId + "/uploads", { method: "POST", body: form });
+      const resp = await fetch(API + "/cases/" + activeCaseId + "/uploads", {
+        method: "POST",
+        headers: authHeaders(),
+        body: form,
+      });
       const state = await resp.json();
       if (!resp.ok) throw new Error(state.detail || resp.status);
       render(state);
@@ -359,7 +377,7 @@
 
   async function backup() {
     try {
-      const resp = await fetch(API + "/cases/" + activeCaseId + "/backup.md");
+      const resp = await fetch(API + "/cases/" + activeCaseId + "/backup.md", { headers: authHeaders() });
       if (!resp.ok) throw new Error(String(resp.status));
       const text = await resp.text();
       const blob = new Blob([text], { type: "text/markdown" });
@@ -375,6 +393,39 @@
   }
 
   // ── wiring ─────────────────────────────────────────────────────────────────
+
+  const settingsToggle = document.getElementById("settings-toggle");
+  const settingsMenu = document.getElementById("settings-menu");
+  const settingsApiKey = document.getElementById("settings-api-key");
+  const settingsSaveKey = document.getElementById("settings-save-key");
+  const settingsClearKey = document.getElementById("settings-clear-key");
+
+  function setSettingsOpen(open) {
+    settingsMenu.hidden = !open;
+    settingsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      settingsApiKey.value = storedApiKey();
+      settingsApiKey.focus();
+    }
+  }
+
+  settingsToggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    setSettingsOpen(settingsMenu.hidden);
+  });
+  settingsMenu.addEventListener("click", (ev) => ev.stopPropagation());
+  document.addEventListener("click", () => setSettingsOpen(false));
+  settingsSaveKey.addEventListener("click", () => {
+    try { localStorage.setItem(API_KEY_KEY, settingsApiKey.value.trim()); } catch (e) { /* ignore */ }
+    setStatus(t("status.api_key_saved", "API Key saved in this browser."));
+    setSettingsOpen(false);
+  });
+  settingsClearKey.addEventListener("click", () => {
+    try { localStorage.removeItem(API_KEY_KEY); } catch (e) { /* ignore */ }
+    settingsApiKey.value = "";
+    setStatus(t("status.api_key_cleared", "API Key cleared from this browser."));
+    setSettingsOpen(false);
+  });
 
   document.getElementById("send-btn").addEventListener("click", () => sendMessage("text"));
   input.addEventListener("keydown", (ev) => {

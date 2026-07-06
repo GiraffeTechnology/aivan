@@ -14,6 +14,23 @@
       <span class="mv-lang-icon" aria-hidden="true">🌐</span>
       <select id="lang-select" aria-label="Switch language"></select>
     </div>
+    <div class="mv-settings-wrap">
+      <button id="settings-toggle" class="mv-icon-btn" type="button" title="Settings"
+              aria-label="Settings" aria-expanded="false">⚙</button>
+      <div id="settings-menu" class="mv-settings-menu" hidden>
+        <div class="mv-settings-title">Settings</div>
+        <label class="mv-settings-field">
+          <span>API Key</span>
+          <input id="settings-api-key" type="password" placeholder="Stored in this browser">
+        </label>
+        <div class="mv-settings-actions">
+          <button id="settings-save-key" type="button">Save</button>
+          <button id="settings-clear-key" type="button">Clear</button>
+        </div>
+        <button class="mv-settings-row" type="button" disabled>Account profile</button>
+        <button class="mv-settings-row" type="button" disabled>Email delivery</button>
+      </div>
+    </div>
     <button id="backup-btn" class="mv-header-action" title="Backup Case"
             data-i18n="work.backup" data-i18n-title="work.backup_tooltip">Backup</button>
   </header>

@@ -10,6 +10,7 @@ Rules under test:
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 import pytest
@@ -17,6 +18,30 @@ import pytest
 from aivan.web import auth as web_auth
 
 KEY = "test-myaivan-access-key"
+
+
+def _human_proof(challenge: dict) -> dict:
+    prefix = "0" * challenge["difficulty"]
+    for nonce in range(2_000_000):
+        raw = f"{challenge['challengeId']}:{challenge['salt']}:{nonce}".encode()
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest.startswith(prefix):
+            return {"challengeId": challenge["challengeId"], "nonce": str(nonce), "digest": digest}
+    raise AssertionError("could not solve test challenge")
+
+
+def _login_with_dynamic_password(api_client, email: str = "user@example.com"):
+    challenge = api_client.post("/api/myaivan/login/challenge").json()
+    requested = api_client.post(
+        "/api/myaivan/login/request-code",
+        json={"email": email, "humanProof": _human_proof(challenge)},
+    )
+    assert requested.status_code == 200
+    data = requested.json()
+    assert data["sent"] is True
+    assert data["expiresInSeconds"] == 300
+    assert len(data["debugCode"]) == 6
+    return api_client.post("/api/myaivan/login", json={"email": email, "code": data["debugCode"]})
 
 
 @pytest.fixture
@@ -71,7 +96,13 @@ def test_production_pages_redirect_to_login(api_client, production_with_key):
         resp = api_client.get(path, follow_redirects=False)
         assert resp.status_code == 303, path
         assert resp.headers["location"] == "/myaivan/login"
-    assert api_client.get("/myaivan/login").status_code == 200
+    login = api_client.get("/myaivan/login")
+    assert login.status_code == 200
+    assert "/static/giraffe-logo.png" in login.text
+    assert 'id="login-email"' in login.text
+    assert 'id="human-check"' in login.text
+    assert 'id="send-code"' in login.text
+    assert "5-minute dynamic password" in login.text
 
 
 def test_production_api_unauthenticated_401(api_client, production_with_key):
@@ -100,10 +131,10 @@ def test_production_api_key_header_and_bearer_work(api_client, production_with_k
 # ── login session flow ────────────────────────────────────────────────────────
 
 def test_login_session_grants_page_and_api_access(api_client, production_with_key):
-    bad = api_client.post("/api/myaivan/login", json={"key": "wrong"})
+    bad = api_client.post("/api/myaivan/login", json={"email": "user@example.com", "code": "000000"})
     assert bad.status_code == 401
 
-    ok = api_client.post("/api/myaivan/login", json={"key": KEY})
+    ok = _login_with_dynamic_password(api_client)
     assert ok.status_code == 200
     assert web_auth.SESSION_COOKIE in ok.cookies
 
@@ -113,8 +144,19 @@ def test_login_session_grants_page_and_api_access(api_client, production_with_ke
     assert api_client.post("/api/myaivan/cases", json={}).status_code == 200
 
 
+def test_api_key_login_still_grants_session(api_client, production_with_key):
+    bad = api_client.post("/api/myaivan/login", json={"key": "wrong"})
+    assert bad.status_code == 401
+
+    ok = api_client.post("/api/myaivan/login", json={"key": KEY})
+    assert ok.status_code == 200
+    assert ok.json()["method"] == "api_key"
+    assert web_auth.SESSION_COOKIE in ok.cookies
+    assert api_client.get("/myaivan/work", follow_redirects=False).status_code == 200
+
+
 def test_logout_revokes_session(api_client, production_with_key):
-    api_client.post("/api/myaivan/login", json={"key": KEY})
+    _login_with_dynamic_password(api_client)
     assert api_client.get("/myaivan", follow_redirects=False).status_code == 200
     api_client.post("/api/myaivan/logout")
     resp = api_client.get("/myaivan", follow_redirects=False)
@@ -136,10 +178,18 @@ def test_tampered_or_expired_session_rejected(api_client, production_with_key):
 
 
 def test_rotating_secret_invalidates_sessions(api_client, production_with_key, monkeypatch):
-    api_client.post("/api/myaivan/login", json={"key": KEY})
+    _login_with_dynamic_password(api_client)
     assert api_client.post("/api/myaivan/cases", json={}).status_code == 200
     monkeypatch.setenv("AIVAN_API_KEY", "rotated-key")
     assert api_client.post("/api/myaivan/cases", json={}).status_code == 401
+
+
+def test_login_code_requires_human_verification(api_client, production_with_key):
+    resp = api_client.post(
+        "/api/myaivan/login/request-code",
+        json={"email": "user@example.com", "humanProof": {"challengeId": "bad", "nonce": "0", "digest": "bad"}},
+    )
+    assert resp.status_code == 403
 
 
 # ── i18n stays public (UI strings only) ───────────────────────────────────────

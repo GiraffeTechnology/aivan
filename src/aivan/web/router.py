@@ -289,12 +289,42 @@ def backup_markdown(case_id: str, db: Session = Depends(get_db)):
 
 # ── Auth: login / logout ──────────────────────────────────────────────────────
 
+@router.post("/api/myaivan/login/challenge")
+def login_challenge():
+    """Issue a self-hosted human proof-of-work challenge for login."""
+    return web_auth.issue_human_challenge()
+
+
+@router.post("/api/myaivan/login/request-code")
+def request_login_code(body: dict):
+    """Send a 5-minute dynamic password to the requested email address."""
+    mode = web_auth.auth_mode()
+    if mode == "misconfigured":
+        raise HTTPException(
+            status_code=503,
+            detail="Server auth misconfigured: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET",
+        )
+    if mode == "open":
+        return {"sent": True, "mode": "open", "expiresInSeconds": web_auth.otp_ttl_seconds()}
+    if not web_auth.verify_human_proof((body or {}).get("humanProof")):
+        raise HTTPException(status_code=403, detail="Human verification is required")
+    try:
+        result = web_auth.issue_login_code(str((body or {}).get("email") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    if not result["sent"]:
+        raise HTTPException(status_code=503, detail=result["error"] or "Could not send dynamic password")
+    return result
+
+
 @router.post("/api/myaivan/login")
 def login(body: dict):
-    """Exchange the AIVAN access key for a session cookie.
+    """Exchange email + dynamic password for a session cookie.
 
-    Fails closed in misconfigured production; 401 on a wrong key. The i18n
-    catalog and this endpoint are the only unauthenticated API surface.
+    API key / bearer access remains available for API clients through the auth
+    dependency, but the browser login form uses email-delivered OTP only.
     """
     from fastapi.responses import JSONResponse
 
@@ -307,8 +337,28 @@ def login(body: dict):
     if mode == "open":
         return JSONResponse({"ok": True, "mode": "open"})
     key = str((body or {}).get("key") or "")
-    if not web_auth.verify_presented_key(key):
-        raise HTTPException(status_code=401, detail="Invalid access key")
+    if key:
+        if not web_auth.verify_presented_key(key):
+            raise HTTPException(status_code=401, detail="Invalid access key")
+        response = JSONResponse({"ok": True, "mode": "session", "method": "api_key"})
+        response.set_cookie(
+            web_auth.SESSION_COOKIE,
+            web_auth.issue_session_token(),
+            max_age=web_auth.session_ttl_seconds(),
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/",
+        )
+        return response
+    email = str((body or {}).get("email") or "")
+    code = str((body or {}).get("code") or "")
+    try:
+        ok = web_auth.verify_login_code(email, code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid or expired dynamic password")
     response = JSONResponse({"ok": True, "mode": "session"})
     response.set_cookie(
         web_auth.SESSION_COOKIE,
