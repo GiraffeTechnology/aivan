@@ -201,7 +201,9 @@ body {
   color: var(--mv-muted); font-size: 12px; margin: 12px 0 10px;
 }
 .mv-login-panel, .mv-login-step { display: flex; flex-direction: column; gap: 12px; }
-.mv-login-step[hidden] { display: none; }
+.mv-login-panel[hidden], .mv-login-step[hidden], .mv-human-check[hidden], .mv-secondary-btn[hidden] {
+  display: none;
+}
 .mv-login-form input {
   padding: 12px 14px; border: 1px solid var(--mv-border); border-radius: 10px; font-size: 15px;
 }

@@ -70,6 +70,8 @@ def test_01_welcome_page_renders(api_client):
     assert (STATIC / "giraffe-logo.png").is_file()
     css = (STATIC / "myaivan.css").read_text()
     assert ".mv-giraffe-icon" in css
+    assert ".mv-login-panel[hidden]" in css
+    assert ".mv-human-check[hidden]" in css
     logo_css = css.split(".mv-giraffe-icon", 1)[1].split("}", 1)[0]
     assert "vmin" in logo_css and "max-height" in logo_css and "height: auto" in logo_css
     assert 'data-i18n="welcome.title"' in resp.text
@@ -91,6 +93,8 @@ def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch)
     assert "🌐" in html
     assert "myaivan-i18n.js" in html
     assert 'data-i18n="login.title"' in html
+    assert "sha256Fallback" in html
+    assert "!window.crypto || !crypto.subtle" in html
     assert 'id="human-check"' in html and 'id="human-check" type="button" class="mv-human-check" aria-pressed="false" hidden' in html
     assert 'id="send-code"' in html and 'hidden>Send dynamic password</button>' in html
     assert 'id="login-code-step" class="mv-login-step" hidden' in html
