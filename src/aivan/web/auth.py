@@ -200,6 +200,16 @@ def is_login_email_allowed(email: str) -> bool:
     return not allowed or email in allowed
 
 
+def login_default_email() -> str:
+    configured = os.environ.get("AIVAN_WEB_LOGIN_DEFAULT_EMAIL", "").strip()
+    if not configured:
+        return ""
+    try:
+        return normalize_email(configured)
+    except ValueError:
+        return ""
+
+
 def _hash_otp(email: str, code: str, expires: int) -> str:
     return _sign(f"myaivan-login-otp:{email}:{expires}:{code}")
 

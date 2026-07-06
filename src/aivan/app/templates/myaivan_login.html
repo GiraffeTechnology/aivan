@@ -21,7 +21,8 @@
     </div>
     <form id="login-form" class="mv-login-form">
       <div id="email-login-panel" class="mv-login-panel">
-        <input id="login-email" type="email" placeholder="Email address" autocomplete="email" required>
+        <input id="login-email" type="email" placeholder="Email address" autocomplete="email"
+               value="{{ login_default_email or '' }}" required>
         <button id="human-check" type="button" class="mv-human-check" aria-pressed="false">
           <span class="mv-human-box" aria-hidden="true"></span>
           <span id="human-label">I'm human</span>

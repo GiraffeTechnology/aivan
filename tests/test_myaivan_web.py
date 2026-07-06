@@ -82,9 +82,11 @@ def test_01_welcome_page_renders(api_client):
 def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch):
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.setenv("AIVAN_API_KEY", "test-key")
+    monkeypatch.setenv("AIVAN_WEB_LOGIN_DEFAULT_EMAIL", "info@myaivan.com")
     html = api_client.get("/myaivan/login").text
     assert "/static/giraffe-logo.png" in html
     assert 'id="login-email"' in html
+    assert 'value="info@myaivan.com"' in html
     assert 'id="human-check"' in html
     assert 'id="send-code"' in html
     assert 'id="login-code"' in html
