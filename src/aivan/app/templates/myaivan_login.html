@@ -22,18 +22,23 @@
     </div>
     <form id="login-form" class="mv-login-form">
       <div id="email-login-panel" class="mv-login-panel">
-        <input id="login-email" type="email" placeholder="Email address" autocomplete="email"
-               data-i18n-placeholder="login.email_placeholder" required>
-        <button id="human-check" type="button" class="mv-human-check" aria-pressed="false">
+        <div id="login-email-step" class="mv-login-step">
+          <input id="login-email" type="email" placeholder="Email address" autocomplete="email"
+                 data-i18n-placeholder="login.email_placeholder" required>
+          <button id="email-next" type="button" class="mv-start-btn" data-i18n="login.email_next">Continue</button>
+        </div>
+        <button id="human-check" type="button" class="mv-human-check" aria-pressed="false" hidden>
           <span class="mv-human-box" aria-hidden="true"></span>
           <span id="human-label" data-i18n="login.human">I'm human</span>
         </button>
         <button id="send-code" type="button" class="mv-secondary-btn" disabled
-                data-i18n="login.send_code">Send dynamic password</button>
+                data-i18n="login.send_code" hidden>Send dynamic password</button>
+        <div id="login-code-step" class="mv-login-step" hidden>
         <input id="login-code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
                placeholder="6-digit dynamic password" autocomplete="one-time-code"
                data-i18n-placeholder="login.code_placeholder" required disabled>
         <button id="login-submit" type="submit" class="mv-start-btn" disabled data-i18n="login.submit">Sign in</button>
+        </div>
       </div>
       <div id="key-login-panel" class="mv-login-panel" hidden>
         <button id="key-login-submit" type="button" class="mv-start-btn"
@@ -48,6 +53,9 @@
       "use strict";
       var form = document.getElementById("login-form");
       var errorLine = document.getElementById("login-error");
+      var emailStep = document.getElementById("login-email-step");
+      var emailNextButton = document.getElementById("email-next");
+      var codeStep = document.getElementById("login-code-step");
       var emailInput = document.getElementById("login-email");
       var codeInput = document.getElementById("login-code");
       var humanButton = document.getElementById("human-check");
@@ -74,6 +82,19 @@
         errorLine.textContent = "";
       }
 
+      function setOtpStep(step) {
+        emailStep.hidden = step !== "email";
+        humanButton.hidden = step !== "human";
+        sendCodeButton.hidden = step !== "send";
+        codeStep.hidden = step !== "code";
+        codeInput.disabled = step !== "code";
+        submitButton.disabled = step !== "code";
+        if (step === "email") emailInput.focus();
+        if (step === "human") humanButton.focus();
+        if (step === "send") sendCodeButton.focus();
+        if (step === "code") codeInput.focus();
+      }
+
       function setKeyMode(enabled) {
         emailLoginPanel.hidden = enabled;
         keyLoginPanel.hidden = !enabled;
@@ -85,13 +106,26 @@
         if (enabled) {
           keySubmitButton.focus();
         } else {
-          emailInput.focus();
+          setOtpStep("email");
         }
       }
 
       keyModeToggle.addEventListener("click", function () {
         clearError();
         setKeyMode(keyLoginPanel.hidden);
+      });
+
+      emailNextButton.addEventListener("click", function () {
+        clearError();
+        if (!emailInput.reportValidity()) return;
+        humanProof = null;
+        humanButton.classList.remove("mv-human-ok");
+        humanButton.disabled = false;
+        humanButton.setAttribute("aria-pressed", "false");
+        humanLabel.textContent = t("login.human", "I'm human");
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+        setOtpStep("human");
       });
 
       async function sha256Hex(text) {
@@ -129,6 +163,7 @@
           humanButton.setAttribute("aria-pressed", "true");
           humanLabel.textContent = t("login.human", "I'm human");
           sendCodeButton.disabled = false;
+          setOtpStep("send");
         } catch (e) {
           humanProof = null;
           humanButton.disabled = false;
@@ -151,9 +186,9 @@
           if (!resp.ok) throw new Error(data.detail || "Could not send dynamic password");
           codeInput.disabled = false;
           submitButton.disabled = false;
-          codeInput.focus();
           sendCodeButton.textContent = t("login.sent", "Dynamic password sent");
           if (data.debugCode) codeInput.value = data.debugCode;
+          setOtpStep("code");
         } catch (e) {
           sendCodeButton.disabled = false;
           sendCodeButton.textContent = t("login.send_code", "Send dynamic password");

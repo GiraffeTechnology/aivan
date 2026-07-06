@@ -85,17 +85,22 @@ def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch)
     html = api_client.get("/myaivan/login").text
     assert "/static/giraffe-logo.png" in html
     assert 'id="login-email"' in html
+    assert 'id="email-next"' in html
     assert 'value="info@myaivan.com"' not in html
     assert 'id="lang-select"' in html
     assert "🌐" in html
     assert "myaivan-i18n.js" in html
     assert 'data-i18n="login.title"' in html
-    assert 'id="human-check"' in html
-    assert 'id="send-code"' in html
+    assert 'id="human-check"' in html and 'id="human-check" type="button" class="mv-human-check" aria-pressed="false" hidden' in html
+    assert 'id="send-code"' in html and 'hidden>Send dynamic password</button>' in html
+    assert 'id="login-code-step" class="mv-login-step" hidden' in html
     assert 'id="login-code"' in html
     assert 'id="key-mode-toggle"' in html
     assert 'id="login-key"' not in html
     assert "localStorage.getItem(\"myaivan.apiKey\")" in html
+    assert 'setOtpStep("human")' in html
+    assert 'setOtpStep("send")' in html
+    assert 'setOtpStep("code")' in html
     assert "5-minute dynamic password we send you" not in html
 
 
