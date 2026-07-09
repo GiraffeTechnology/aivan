@@ -508,16 +508,29 @@
     return true;
   }
 
-  function execCopyText(text, sourceEl) {
-    let handled = false;
+  function execCopyText(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.setAttribute("aria-hidden", "true");
+    ta.style.position = "fixed";
+    ta.style.top = "8px";
+    ta.style.left = "8px";
+    ta.style.width = "24px";
+    ta.style.height = "24px";
+    ta.style.zIndex = "2147483647";
+    ta.style.opacity = "0.01";
+    ta.style.pointerEvents = "none";
+    document.body.appendChild(ta);
     const onCopy = (ev) => {
       if (!ev.clipboardData) return;
       ev.clipboardData.setData("text/plain", text);
       ev.preventDefault();
-      handled = true;
     };
     document.addEventListener("copy", onCopy);
-    const selected = selectElementText(sourceEl);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
     let copied = false;
     try {
       copied = !!(document.execCommand && document.execCommand("copy"));
@@ -525,13 +538,14 @@
       copied = false;
     } finally {
       document.removeEventListener("copy", onCopy);
+      document.body.removeChild(ta);
     }
-    return copied && handled && selected;
+    return copied;
   }
 
   async function copyTextToClipboard(text, sourceEl) {
     if (!text) return false;
-    if (execCopyText(text, sourceEl)) return true;
+    if (execCopyText(text)) return true;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(text);
@@ -539,6 +553,7 @@
       }
     } catch (e) { /* HTTP pages often block the async clipboard API. */ }
 
+    selectElementText(sourceEl);
     return false;
   }
 

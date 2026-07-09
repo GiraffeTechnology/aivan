@@ -163,6 +163,7 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert 'document.execCommand("copy")' in js
     assert 'document.addEventListener("copy", onCopy)' in js
     assert 'ev.clipboardData.setData("text/plain", text)' in js
+    assert 'ta.style.top = "8px"' in js
     assert 'top = "-1000px"' not in js
     assert "if (!copied)" in js
     assert '"/copied"' in js.split("if (!copied)", 1)[1]
