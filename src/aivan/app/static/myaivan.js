@@ -496,13 +496,40 @@
     }
   }
 
-  async function copyDraft(draft, card) {
-    let copied = false;
-    const cleanBody = cleanDraftText(card) || draft.body;
+  async function copyTextToClipboard(text) {
+    if (!text) return false;
     try {
-      await navigator.clipboard.writeText(cleanBody);
-      copied = true;
-    } catch (e) { /* clipboard blocked; body text remains selectable */ }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* HTTP pages often block the async clipboard API. */ }
+
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.left = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    let copied = false;
+    try {
+      copied = document.execCommand && document.execCommand("copy");
+    } catch (e) {
+      copied = false;
+    } finally {
+      document.body.removeChild(ta);
+    }
+    return copied;
+  }
+
+  async function copyDraft(draft, card) {
+    const cleanBody = cleanDraftText(card) || draft.body;
+    const copied = await copyTextToClipboard(cleanBody);
     try {
       const state = await api("/cases/" + activeCaseId + "/drafts/" + draft.id + "/copied", {
         method: "POST",

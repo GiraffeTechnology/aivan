@@ -159,6 +159,8 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert "mv-draft-icon-actions" in js
     assert "bodyOverride" in js
     assert "editTraceHtml" in js
+    assert "copyTextToClipboard" in js
+    assert 'document.execCommand("copy")' in js
     assert "emailApiKey: storedEmailApiKey()" in js
     assert "realEmailReady" in js
     assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
