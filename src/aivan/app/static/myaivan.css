@@ -33,18 +33,18 @@ body {
 .mv-welcome { max-width: 560px; text-align: center; padding: 24px; }
 .mv-giraffe-icon {
   display: block;
-  width: clamp(88px, 18vmin, 180px);
-  max-width: 34vw;
-  max-height: 22vh;
+  width: clamp(140px, 26vmin, 240px);
+  max-width: 44vw;
+  max-height: 28vh;
   height: auto;
   object-fit: contain;
-  margin: 0 auto 18px;
+  margin: 0 auto 20px;
 }
 .mv-giraffe-icon-home {
-  width: clamp(128px, 24vmin, 260px);
-  max-width: 46vw;
-  max-height: 30vh;
-  margin-bottom: 22px;
+  width: clamp(180px, 32vmin, 320px);
+  max-width: 54vw;
+  max-height: 34vh;
+  margin-bottom: 24px;
 }
 .mv-logo { font-size: 28px; font-weight: 700; letter-spacing: 4px; color: var(--mv-accent); margin-bottom: 18px; }
 .mv-welcome-title { font-size: 26px; margin: 0 0 8px; }
