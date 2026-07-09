@@ -310,11 +310,12 @@
       btn.setAttribute("aria-label", tooltip);
     });
 
-    if (terminal) {
-      card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-    }
     const emailBtn = card.querySelector(".mv-act-email");
-    if (!terminal && !realEmailReady()) {
+    if (terminal) {
+      emailBtn.disabled = true;
+      card.querySelector(".mv-act-sent").disabled = true;
+      card.querySelector(".mv-act-reject").disabled = true;
+    } else if (!realEmailReady()) {
       emailBtn.disabled = true;
       emailBtn.title = emailReadinessMessage();
     }

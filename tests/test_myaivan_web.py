@@ -161,6 +161,9 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert "editTraceHtml" in js
     assert "copyTextToClipboard" in js
     assert 'document.execCommand("copy")' in js
+    assert 'querySelectorAll("button").forEach' not in js
+    assert 'card.querySelector(".mv-act-sent").disabled = true' in js
+    assert 'card.querySelector(".mv-act-reject").disabled = true' in js
     assert "emailApiKey: storedEmailApiKey()" in js
     assert "realEmailReady" in js
     assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
