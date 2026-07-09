@@ -239,7 +239,7 @@ def issue_login_code(email: str, *, now: float | None = None) -> dict:
     The cleartext code is sent only by email. Test/debug environments may opt
     into returning it through ``debugCode`` for automation.
     """
-    from aivan.web.email_outbound import send_email
+    from aivan.web.email_outbound import send_login_otp_email
 
     normalized = normalize_email(email)
     if not is_login_email_allowed(normalized):
@@ -260,17 +260,10 @@ def issue_login_code(email: str, *, now: float | None = None) -> dict:
             "expiresInSeconds": otp_ttl_seconds(),
             "error": "",
         }
-    result = send_email(
+    result = send_login_otp_email(
         to=normalized,
-        subject="Your MyAIVAN login code",
-        body=(
-            "Your MyAIVAN dynamic password is:\n\n"
-            f"{code}\n\n"
-            f"It expires in {otp_ttl_seconds() // 60} minutes. "
-            "If you did not request this code, ignore this email."
-        ),
-        case_id="myaivan-login",
-        draft_id=f"login_{_secrets.token_hex(8)}",
+        code=code,
+        ttl_seconds=otp_ttl_seconds(),
     )
     if not result.success:
         _OTP_STORE.pop(normalized, None)

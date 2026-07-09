@@ -213,6 +213,72 @@ def test_static_otp_test_mode_requires_human_verification_then_logs_in(api_clien
     assert web_auth.SESSION_COOKIE in ok.cookies
 
 
+def test_login_code_sends_real_smtp_from_service_mailbox(api_client, production_with_key, monkeypatch):
+    monkeypatch.setenv("OPENCLAW_MOCK_MODE", "false")
+    monkeypatch.delenv("AIVAN_WEB_STATIC_OTP_CODE", raising=False)
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_FROM", "service@myaivan.com")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_SMTP_HOST", "smtp.office365.com")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_SMTP_PORT", "587")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_SMTP_USE_SSL", "false")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_SMTP_USE_TLS", "true")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_SMTP_USERNAME", "service@myaivan.com")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_SMTP_PASSWORD", "service-app-password")
+    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "info@myaivan.com")
+    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "info@myaivan.com")
+
+    sent = {}
+
+    class _SMTP:
+        def __init__(self, host, port, timeout=30):
+            sent["host"] = host
+            sent["port"] = port
+            sent["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self):
+            sent["starttls"] = True
+
+        def login(self, username, password):
+            sent["username"] = username
+            sent["password"] = password
+
+        def send_message(self, msg, from_addr=None, to_addrs=None):
+            sent["from"] = msg["From"]
+            sent["to"] = msg["To"]
+            sent["subject"] = msg["Subject"]
+            sent["body"] = msg.get_content()
+            sent["envelope_from"] = from_addr
+            sent["envelope_to"] = to_addrs
+            return {}
+
+    monkeypatch.setattr("aivan.web.email_outbound.smtplib.SMTP", _SMTP)
+    challenge = api_client.post("/api/myaivan/login/challenge").json()
+    requested = api_client.post(
+        "/api/myaivan/login/request-code",
+        json={"email": "buyer@example.com", "humanProof": _human_proof(challenge)},
+    )
+    assert requested.status_code == 200
+    data = requested.json()
+    assert data["sent"] is True
+    assert data["provider"] == "smtp"
+    assert len(data["debugCode"]) == 6
+    assert sent["host"] == "smtp.office365.com"
+    assert sent["port"] == 587
+    assert sent["starttls"] is True
+    assert sent["username"] == "service@myaivan.com"
+    assert sent["password"] == "service-app-password"
+    assert sent["from"] == "service@myaivan.com"
+    assert sent["envelope_from"] == "service@myaivan.com"
+    assert sent["envelope_to"] == ["buyer@example.com"]
+    assert data["debugCode"] in sent["body"]
+    assert "info@myaivan.com" not in sent["body"]
+
+
 # ── i18n stays public (UI strings only) ───────────────────────────────────────
 
 def test_i18n_public_in_production(api_client, production_with_key):

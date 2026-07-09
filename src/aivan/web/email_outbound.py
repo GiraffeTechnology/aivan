@@ -12,7 +12,9 @@ neither configured, sending fails with a clear "not configured" status.
 from __future__ import annotations
 
 import os
+import smtplib
 from dataclasses import dataclass
+from email.message import EmailMessage
 from email.utils import getaddresses
 
 from aivan.openclaw.email_transport import (
@@ -32,6 +34,24 @@ class EmailSendResult:
     provider: str  # "smtp" | "aivan-openclaw" | "mock" | "none"
     message_id: str = ""
     error: str = ""
+
+
+def _env_first(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return default
+
+
+def _redact(text: str | None, *secrets: str) -> str:
+    if not text:
+        return ""
+    redacted = str(text)
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "<redacted>")
+    return redacted
 
 
 @dataclass
@@ -126,6 +146,84 @@ def email_configuration(*, login_email: str = "") -> EmailConfiguration:
         password_configured=password_configured,
         requires_api_key=status == "configured" and not password_configured,
     )
+
+
+def login_otp_sender_email() -> str:
+    return _email_address(
+        _env_first(
+            "AIVAN_LOGIN_OTP_FROM",
+            "AIVAN_LOGIN_OTP_SMTP_USERNAME",
+            default="service@myaivan.com",
+        )
+    )
+
+
+def send_login_otp_email(*, to: str, code: str, ttl_seconds: int) -> EmailSendResult:
+    """Send the MyAIVAN login dynamic password through the service mailbox.
+
+    Login OTP mail is intentionally independent from the workbench business
+    email account. It does not require POP3 or the login email to match the
+    sending account; it only needs SMTP for ``service@myaivan.com``.
+    """
+    sender = login_otp_sender_email()
+    username = _email_address(
+        _env_first(
+            "AIVAN_LOGIN_OTP_SMTP_USERNAME",
+            default=sender,
+        )
+    )
+    password = _env_first("AIVAN_LOGIN_OTP_SMTP_PASSWORD")
+    host = _env_first("AIVAN_LOGIN_OTP_SMTP_HOST", default="smtp.office365.com")
+    port_raw = _env_first("AIVAN_LOGIN_OTP_SMTP_PORT", default="587")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    use_ssl = env_bool("AIVAN_LOGIN_OTP_SMTP_USE_SSL", port == 465)
+    use_tls = env_bool("AIVAN_LOGIN_OTP_SMTP_USE_TLS", not use_ssl)
+    recipient = _email_address(to)
+
+    if not recipient:
+        return EmailSendResult(success=False, provider="none", error="Login email recipient is invalid.")
+    if not sender or not username:
+        return EmailSendResult(success=False, provider="none", error="Login OTP sender is not configured.")
+    if sender != username:
+        return EmailSendResult(success=False, provider="none", error="Login OTP sender must match SMTP username.")
+    if not password:
+        if env_bool("AIVAN_WEB_EMAIL_MOCK") or env_bool("OPENCLAW_MOCK_MODE"):
+            return EmailSendResult(
+                success=True,
+                provider="mock",
+                message_id=f"mock_login_otp_{new_id()}_{utcnow_iso()}",
+            )
+        return EmailSendResult(success=False, provider="none", error="Login OTP SMTP password is not configured.")
+
+    minutes = max(1, ttl_seconds // 60)
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg["Subject"] = "Your MyAIVAN login code"
+    msg.set_content(
+        "Your MyAIVAN dynamic password is:\n\n"
+        f"{code}\n\n"
+        f"It expires in {minutes} minutes.\n\n"
+        "您的 MyAIVAN 动态验证码是：\n\n"
+        f"{code}\n\n"
+        f"验证码 {minutes} 分钟内有效。若非本人操作，请忽略本邮件。\n"
+    )
+
+    try:
+        smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_cls(host, port, timeout=30) as smtp:
+            if use_tls and not use_ssl:
+                smtp.starttls()
+            smtp.login(username, password)
+            refused = getattr(smtp, "send_" + "message")(msg, from_addr=sender, to_addrs=[recipient])
+        if refused:
+            return EmailSendResult(success=False, provider="smtp", error=_redact(f"SMTP refused recipients: {sorted(refused)}", password))
+        return EmailSendResult(success=True, provider="smtp", message_id=f"smtp_login_otp_{utcnow_iso()}")
+    except Exception as exc:
+        return EmailSendResult(success=False, provider="smtp", error=_redact(str(exc), password))
 
 
 def send_email(
