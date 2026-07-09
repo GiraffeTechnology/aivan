@@ -497,8 +497,41 @@
     }
   }
 
-  async function copyTextToClipboard(text) {
+  function selectElementText(el) {
+    if (!el || !window.getSelection || !document.createRange) return false;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    if (el.focus) el.focus({ preventScroll: true });
+    return true;
+  }
+
+  function execCopyText(text, sourceEl) {
+    let handled = false;
+    const onCopy = (ev) => {
+      if (!ev.clipboardData) return;
+      ev.clipboardData.setData("text/plain", text);
+      ev.preventDefault();
+      handled = true;
+    };
+    document.addEventListener("copy", onCopy);
+    const selected = selectElementText(sourceEl);
+    let copied = false;
+    try {
+      copied = !!(document.execCommand && document.execCommand("copy"));
+    } catch (e) {
+      copied = false;
+    } finally {
+      document.removeEventListener("copy", onCopy);
+    }
+    return copied && handled && selected;
+  }
+
+  async function copyTextToClipboard(text, sourceEl) {
     if (!text) return false;
+    if (execCopyText(text, sourceEl)) return true;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(text);
@@ -506,31 +539,12 @@
       }
     } catch (e) { /* HTTP pages often block the async clipboard API. */ }
 
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "-1000px";
-    ta.style.left = "-1000px";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    ta.setSelectionRange(0, ta.value.length);
-    let copied = false;
-    try {
-      copied = document.execCommand && document.execCommand("copy");
-    } catch (e) {
-      copied = false;
-    } finally {
-      document.body.removeChild(ta);
-    }
-    return copied;
+    return false;
   }
 
   async function copyDraft(draft, card) {
     const cleanBody = cleanDraftText(card) || draft.body;
-    const copied = await copyTextToClipboard(cleanBody);
+    const copied = await copyTextToClipboard(cleanBody, card.querySelector(".mv-draft-body"));
     try {
       const state = await api("/cases/" + activeCaseId + "/drafts/" + draft.id + "/copied", {
         method: "POST",
@@ -540,7 +554,7 @@
     } catch (e) { /* audit failure should not block the user */ }
     setStatus(copied
       ? t("status.copied", "Copied — paste it into your IM tool, then click ✅.")
-      : t("status.copy_blocked", "Clipboard blocked — select the draft text and copy manually."));
+      : t("status.copy_blocked", "Clipboard blocked — the draft text is selected. Press Ctrl+C / Cmd+C, then paste manually."));
   }
 
   async function draftAction(draftId, action) {
