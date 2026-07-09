@@ -98,7 +98,7 @@ def test_production_pages_redirect_to_login(api_client, production_with_key):
         assert resp.headers["location"] == "/myaivan/login"
     login = api_client.get("/myaivan/login")
     assert login.status_code == 200
-    assert "/static/giraffe-logo.png" in login.text
+    assert "/static/giraffe-icon-tight.png" in login.text
     assert 'id="login-email"' in login.text
     assert 'id="human-check"' in login.text
     assert 'id="send-code"' in login.text

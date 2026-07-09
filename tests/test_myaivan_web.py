@@ -66,9 +66,9 @@ def test_01_welcome_page_renders(api_client):
     assert "Welcome back. What should your AIVAN handle today?" in resp.text
     assert "Start Working" in resp.text
     assert "MyAIVAN is your AIVAN digital trade assistant" in resp.text
-    assert "/static/giraffe-logo.png" in resp.text
+    assert "/static/giraffe-icon-tight.png" in resp.text
     assert 'class="mv-giraffe-icon mv-giraffe-icon-home"' in resp.text
-    assert (STATIC / "giraffe-logo.png").is_file()
+    assert (STATIC / "giraffe-icon-tight.png").is_file()
     css = (STATIC / "myaivan.css").read_text()
     assert ".mv-giraffe-icon" in css
     assert ".mv-giraffe-icon-home" in css
@@ -87,7 +87,7 @@ def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch)
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.setenv("AIVAN_API_KEY", "test-key")
     html = api_client.get("/myaivan/login").text
-    assert "/static/giraffe-logo.png" in html
+    assert "/static/giraffe-icon-tight.png" in html
     assert "mv-giraffe-icon-home" not in html
     assert 'id="login-email"' in html
     assert 'id="email-next"' in html
