@@ -545,6 +545,10 @@
   async function copyDraft(draft, card) {
     const cleanBody = cleanDraftText(card) || draft.body;
     const copied = await copyTextToClipboard(cleanBody, card.querySelector(".mv-draft-body"));
+    if (!copied) {
+      setStatus(t("status.copy_blocked", "Clipboard blocked — the draft text is selected. Press Ctrl+C / Cmd+C, then paste manually."));
+      return;
+    }
     try {
       const state = await api("/cases/" + activeCaseId + "/drafts/" + draft.id + "/copied", {
         method: "POST",
@@ -552,9 +556,7 @@
       });
       render(state);
     } catch (e) { /* audit failure should not block the user */ }
-    setStatus(copied
-      ? t("status.copied", "Copied — paste it into your IM tool, then click ✅.")
-      : t("status.copy_blocked", "Clipboard blocked — the draft text is selected. Press Ctrl+C / Cmd+C, then paste manually."));
+    setStatus(t("status.copied", "Copied — paste it into your IM tool, then click ✅."));
   }
 
   async function draftAction(draftId, action) {
