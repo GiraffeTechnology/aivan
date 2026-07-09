@@ -229,8 +229,9 @@ def _draft_action(db: Session, case_id: str, draft_id: str, action):
 
 
 @router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/copied", dependencies=_PROTECTED)
-def draft_copied(case_id: str, draft_id: str, db: Session = Depends(get_db)):
-    case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.mark_copied(db, d))
+def draft_copied(case_id: str, draft_id: str, body: dict | None = None, db: Session = Depends(get_db)):
+    body_override = str((body or {}).get("bodyOverride") or "")
+    case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.mark_copied(db, d, body_override))
     return service.case_state(db, case)
 
 
@@ -258,6 +259,7 @@ def draft_send_email(
     draft = _require_draft(db, case_id, draft_id)
     recipient = str((body or {}).get("recipient") or "")
     email_api_key = str((body or {}).get("emailApiKey") or "")
+    body_override = str((body or {}).get("bodyOverride") or "")
     login_email = web_auth.request_user_id(request)
     try:
         draft, result = service.send_draft_email(
@@ -267,6 +269,7 @@ def draft_send_email(
             recipient=recipient,
             login_email=login_email,
             email_api_key=email_api_key,
+            body_override=body_override,
         )
     except service.DraftStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

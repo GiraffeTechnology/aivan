@@ -42,6 +42,7 @@
 
   let activeCaseId = null;
   let pendingEmailDraftId = null;
+  let pendingEmailBody = "";
   let lastState = null;
   let authFailureHandled = false;
 
@@ -221,30 +222,84 @@
       + " (" + draft.riskLevel + "): " + draft.riskNotes.join("; ") + "</div>";
   }
 
+  function cleanDraftText(card) {
+    const body = card.querySelector(".mv-draft-body");
+    return body ? (body.innerText || body.textContent || "").replace(/\u00a0/g, " ").trim() : "";
+  }
+
+  function editTraceHtml(original, current) {
+    if ((original || "") === (current || "")) return "";
+    const before = (original || "").split(/\s+/).filter(Boolean);
+    const after = (current || "").split(/\s+/).filter(Boolean);
+    let start = 0;
+    while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+    let endBefore = before.length - 1;
+    let endAfter = after.length - 1;
+    while (endBefore >= start && endAfter >= start && before[endBefore] === after[endAfter]) {
+      endBefore -= 1;
+      endAfter -= 1;
+    }
+    const removed = before.slice(start, endBefore + 1).join(" ");
+    const added = after.slice(start, endAfter + 1).join(" ");
+    const parts = ['<span class="mv-edit-label">' + t("draft.edited", "Edited") + "</span>"];
+    if (removed) parts.push('<span class="mv-edit-removed">- ' + escapeHtml(removed) + "</span>");
+    if (added) parts.push('<span class="mv-edit-added">+ ' + escapeHtml(added) + "</span>");
+    return parts.join(" ");
+  }
+
+  function escapeHtml(text) {
+    return (text || "").replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;",
+    })[ch]);
+  }
+
+  function updateEditTrace(card) {
+    const trace = card.querySelector(".mv-edit-trace");
+    if (!trace) return;
+    const original = card.dataset.originalBody || "";
+    const current = cleanDraftText(card);
+    const html = editTraceHtml(original, current);
+    trace.innerHTML = html;
+    trace.hidden = !html;
+  }
+
   function draftCard(draft) {
     const card = document.createElement("div");
     card.className = "mv-draft-card";
     card.dataset.draftId = draft.id;
+    card.dataset.originalBody = draft.body || "";
     const terminal = ["email_sent", "manually_sent", "rejected"].includes(draft.status);
     card.innerHTML =
-      '<div class="mv-draft-head">' +
-        '<span class="mv-chip">channel: ' + draft.channel + "</span>" +
-        (draft.recipient ? '<span class="mv-chip">to: ' + draft.recipient + "</span>" : "") +
-        '<span class="mv-chip mv-chip-status-' + draft.status + '">' + draft.status + "</span>" +
+      '<div class="mv-draft-top">' +
+        '<div class="mv-draft-head">' +
+          '<span class="mv-chip">channel: ' + draft.channel + "</span>" +
+          (draft.recipient ? '<span class="mv-chip">to: ' + draft.recipient + "</span>" : "") +
+          '<span class="mv-chip mv-chip-status-' + draft.status + '">' + draft.status + "</span>" +
+        "</div>" +
+        '<div class="mv-draft-icon-actions">' +
+          '<button class="mv-icon-btn mv-act-copy"></button>' +
+          '<button class="mv-icon-btn mv-act-email"></button>' +
+        "</div>" +
       "</div>" +
       riskNoteHtml(draft) +
-      '<div class="mv-draft-body"></div>' +
+      '<div class="mv-draft-body" role="textbox" aria-multiline="true"></div>' +
+      '<div class="mv-edit-trace" hidden></div>' +
       '<div class="mv-draft-actions">' +
-        '<button class="mv-act-copy"></button>' +
-        '<button class="mv-act-email"></button>' +
         '<button class="mv-act-sent"></button>' +
         '<button class="mv-act-reject"></button>' +
       "</div>";
-    card.querySelector(".mv-draft-body").textContent = draft.body;
+    const bodyEl = card.querySelector(".mv-draft-body");
+    bodyEl.textContent = draft.body;
+    bodyEl.contentEditable = terminal ? "false" : "true";
+    bodyEl.addEventListener("input", () => updateEditTrace(card));
 
     const labels = [
-      [".mv-act-copy", t("draft.copy", "Copy"), t("draft.copy_tooltip", "Copy for manual paste")],
-      [".mv-act-email", "✉️ " + t("draft.email", "Email"), t("draft.email_tooltip", "Send by Email")],
+      [".mv-act-copy", "⧉", t("draft.copy_tooltip", "Copy for manual paste")],
+      [".mv-act-email", "✉️", t("draft.email_tooltip", "Send by Email")],
       [".mv-act-sent", "✅ " + t("draft.mark_sent", "Sent"), t("draft.mark_sent_tooltip", "Mark as manually sent")],
       [".mv-act-reject", "❌ " + t("draft.reject", "Reject"), t("draft.reject_tooltip", "Reject draft")],
     ];
@@ -252,17 +307,18 @@
       const btn = card.querySelector(sel);
       btn.textContent = label;
       btn.title = tooltip;
+      btn.setAttribute("aria-label", tooltip);
     });
 
     if (terminal) {
-      card.querySelectorAll(".mv-draft-actions button").forEach((b) => { b.disabled = true; });
+      card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
     }
     const emailBtn = card.querySelector(".mv-act-email");
     if (!terminal && !realEmailReady()) {
       emailBtn.disabled = true;
       emailBtn.title = emailReadinessMessage();
     }
-    card.querySelector(".mv-act-copy").addEventListener("click", () => copyDraft(draft));
+    card.querySelector(".mv-act-copy").addEventListener("click", () => copyDraft(draft, card));
     emailBtn.addEventListener("click", () => openEmailModal(draft));
     card.querySelector(".mv-act-sent").addEventListener("click", () => draftAction(draft.id, "mark-sent"));
     card.querySelector(".mv-act-reject").addEventListener("click", () => draftAction(draft.id, "reject"));
@@ -440,14 +496,18 @@
     }
   }
 
-  async function copyDraft(draft) {
+  async function copyDraft(draft, card) {
     let copied = false;
+    const cleanBody = cleanDraftText(card) || draft.body;
     try {
-      await navigator.clipboard.writeText(draft.body);
+      await navigator.clipboard.writeText(cleanBody);
       copied = true;
     } catch (e) { /* clipboard blocked; body text remains selectable */ }
     try {
-      const state = await api("/cases/" + activeCaseId + "/drafts/" + draft.id + "/copied", { method: "POST" });
+      const state = await api("/cases/" + activeCaseId + "/drafts/" + draft.id + "/copied", {
+        method: "POST",
+        body: JSON.stringify({ bodyOverride: cleanBody }),
+      });
       render(state);
     } catch (e) { /* audit failure should not block the user */ }
     setStatus(copied
@@ -478,7 +538,9 @@
       setStatus(emailReadinessMessage());
       return;
     }
+    const card = document.querySelector('.mv-draft-card[data-draft-id="' + draft.id + '"]');
     pendingEmailDraftId = draft.id;
+    pendingEmailBody = card ? (cleanDraftText(card) || draft.body || "") : (draft.body || "");
     recipientInput.value = draft.recipient || "";
     modalNote.textContent = t("email.modal_real", "This will send a real email through aivan-openclaw.");
     modal.hidden = false;
@@ -495,6 +557,7 @@
         body: JSON.stringify({
           recipient: recipientInput.value.trim(),
           emailApiKey: storedEmailApiKey(),
+          bodyOverride: pendingEmailBody,
         }),
       });
       render(state);
@@ -512,6 +575,7 @@
       setStatus(t("status.email_failed", "Email failed") + ": " + e.message);
     }
     pendingEmailDraftId = null;
+    pendingEmailBody = "";
   }
 
   // ── backup ─────────────────────────────────────────────────────────────────

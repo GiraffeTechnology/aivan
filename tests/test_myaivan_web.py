@@ -155,6 +155,10 @@ def test_03_conversation_page_renders_three_areas(api_client):
     assert "myaivan.apiKey" in js
     assert "myaivan.emailApiKey" in js
     assert "X-AIVAN-API-Key" in js
+    assert "contentEditable" in js
+    assert "mv-draft-icon-actions" in js
+    assert "bodyOverride" in js
+    assert "editTraceHtml" in js
     assert "emailApiKey: storedEmailApiKey()" in js
     assert "realEmailReady" in js
     assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
@@ -266,9 +270,15 @@ def test_10_generated_draft_appears_in_review_area(api_client):
 def test_11_copy_marks_copied_and_audits(api_client):
     case_id = _new_case(api_client)
     draft = _make_draft(api_client, case_id)
-    resp = api_client.post(f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/copied")
+    edited_body = draft["body"] + "\nEdited before paste."
+    resp = api_client.post(
+        f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/copied",
+        json={"bodyOverride": edited_body},
+    )
     assert resp.status_code == 200
-    assert resp.json()["outboundDrafts"][-1]["status"] == "copied"
+    copied = resp.json()["outboundDrafts"][-1]
+    assert copied["status"] == "copied"
+    assert copied["body"] == edited_body
     assert "draft_copied" in _events(api_client, case_id)
 
 
@@ -369,7 +379,11 @@ def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
     draft = _make_draft(api_client, case_id, " Please draft a reply for email.")
     resp = api_client.post(
         f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/send-email",
-        json={"recipient": "buyer@example.com", "emailApiKey": "office365-app-password"},
+        json={
+            "recipient": "buyer@example.com",
+            "emailApiKey": "office365-app-password",
+            "bodyOverride": "Clean edited email body without change marks.",
+        },
     )
     assert resp.status_code == 200
     state = resp.json()
@@ -384,6 +398,8 @@ def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
     assert sent["envelope_to"] == ["buyer@example.com"]
     assert sent["username"] == "info@myaivan.com"
     assert sent["password"] == "office365-app-password"
+    assert "Clean edited email body without change marks." in sent["body"]
+    assert "mv-edit" not in sent["body"]
 
     status = api_client.get("/api/myaivan/email/status").json()
     assert status["status"] == "configured"

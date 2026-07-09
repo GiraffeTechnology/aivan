@@ -100,7 +100,10 @@ body {
 .mv-review-empty { color: var(--mv-muted); font-size: 13px; padding: 8px 0; }
 .mv-draft-cards { display: flex; flex-direction: column; gap: 10px; }
 .mv-draft-card { background: var(--mv-panel); border: 1px solid var(--mv-border); border-radius: 10px; padding: 12px; }
-.mv-draft-head { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--mv-muted); margin-bottom: 6px; flex-wrap: wrap; }
+.mv-draft-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.mv-draft-head { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--mv-muted); flex-wrap: wrap; min-width: 0; }
+.mv-draft-icon-actions { display: inline-flex; gap: 6px; flex: 0 0 auto; }
+.mv-draft-icon-actions .mv-icon-btn { width: 30px; height: 30px; font-size: 15px; }
 .mv-chip { background: #eef1f4; border-radius: 999px; padding: 2px 10px; }
 .mv-chip-status-draft { background: #e0ecff; }
 .mv-chip-status-copied { background: #fef3c7; }
@@ -109,7 +112,22 @@ body {
 .mv-risk-note { font-size: 12px; margin: 4px 0; }
 .mv-risk-medium { color: var(--mv-risk-medium); }
 .mv-risk-high { color: var(--mv-risk-high); font-weight: 600; }
-.mv-draft-body { font-size: 13px; white-space: pre-wrap; background: #f8f9fa; border-radius: 8px; padding: 10px; margin: 6px 0 10px; }
+.mv-draft-body {
+  font-size: 13px; white-space: pre-wrap; background: #f8f9fa; border-radius: 8px;
+  padding: 10px; margin: 6px 0 8px; min-height: 72px; outline: none;
+}
+.mv-draft-body[contenteditable="true"] { cursor: text; }
+.mv-draft-body[contenteditable="true"]:focus {
+  background: #fff; border: 1px solid var(--mv-accent); padding: 9px;
+}
+.mv-edit-trace {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin: 0 0 10px; font-size: 12px; line-height: 1.35;
+}
+.mv-edit-trace[hidden] { display: none; }
+.mv-edit-label { color: var(--mv-muted); font-weight: 600; }
+.mv-edit-added { color: #047857; background: #d3f2e3; border-radius: 6px; padding: 2px 6px; }
+.mv-edit-removed { color: #b91c1c; background: #fee2e2; border-radius: 6px; padding: 2px 6px; text-decoration: line-through; }
 .mv-draft-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .mv-draft-actions button {
   border: 1px solid var(--mv-border); background: #fff; border-radius: 8px;
