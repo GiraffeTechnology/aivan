@@ -11,11 +11,17 @@ neither configured, sending fails with a clear "not configured" status.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import smtplib
+import time
 from dataclasses import dataclass
 from email.message import EmailMessage
 from email.utils import getaddresses
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from aivan.openclaw.email_transport import (
     is_real_test_email_mode,
@@ -31,7 +37,7 @@ from aivan.utils.time_utils import utcnow_iso
 @dataclass
 class EmailSendResult:
     success: bool
-    provider: str  # "smtp" | "aivan-openclaw" | "mock" | "none"
+    provider: str  # "smtp" | "feishu" | "aivan-openclaw" | "mock" | "none"
     message_id: str = ""
     error: str = ""
 
@@ -153,8 +159,139 @@ def login_otp_sender_email() -> str:
         _env_first(
             "AIVAN_LOGIN_OTP_FROM",
             "AIVAN_LOGIN_OTP_SMTP_USERNAME",
-            default="service@myaivan.com",
+            default="service@myaivan.cn",
         )
+    )
+
+
+def _feishu_token_cache_path() -> Path:
+    return Path(_env_first("AIVAN_LOGIN_OTP_FEISHU_TOKEN_CACHE", default="/tmp/myaivan-feishu-token.json"))
+
+
+def _jwt_expiry(token: str) -> int:
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return int(json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))["exp"])
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def _load_feishu_tokens() -> dict:
+    state = {
+        "access_token": _env_first("AIVAN_LOGIN_OTP_FEISHU_ACCESS_TOKEN"),
+        "refresh_token": _env_first("AIVAN_LOGIN_OTP_FEISHU_REFRESH_TOKEN"),
+    }
+    path = _feishu_token_cache_path()
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+        if cached.get("client_id") == _env_first("AIVAN_LOGIN_OTP_FEISHU_APP_ID"):
+            state.update({key: cached.get(key, state.get(key, "")) for key in ("access_token", "refresh_token")})
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        pass
+    return state
+
+
+def _store_feishu_tokens(state: dict) -> None:
+    path = _feishu_token_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "client_id": _env_first("AIVAN_LOGIN_OTP_FEISHU_APP_ID"),
+        "access_token": state.get("access_token", ""),
+        "refresh_token": state.get("refresh_token", ""),
+    }
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    temporary.chmod(0o600)
+    temporary.replace(path)
+
+
+def _feishu_post(url: str, payload: dict, *, access_token: str = "") -> tuple[int, dict]:
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    request = Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=30) as response:
+            return int(response.status), json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            body = {"code": exc.code, "msg": exc.reason}
+        return int(exc.code), body
+
+
+def _refresh_feishu_access_token(state: dict) -> dict:
+    client_id = _env_first("AIVAN_LOGIN_OTP_FEISHU_APP_ID")
+    client_secret = _env_first("AIVAN_LOGIN_OTP_FEISHU_APP_SECRET")
+    refresh_token = state.get("refresh_token", "")
+    if not client_id or not client_secret or not refresh_token:
+        raise ValueError("Feishu OAuth refresh credentials are not configured.")
+    status, data = _feishu_post(
+        "https://open.feishu.cn/open-apis/authen/v2/oauth/token",
+        {
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+        },
+    )
+    if status >= 400 or data.get("code", 0) != 0 or not data.get("access_token"):
+        message = _redact(data.get("msg") or str(status), client_secret, refresh_token)
+        raise ValueError(f"Feishu OAuth refresh failed: {message}")
+    updated = {
+        "access_token": data["access_token"],
+        "refresh_token": data.get("refresh_token") or refresh_token,
+    }
+    _store_feishu_tokens(updated)
+    return updated
+
+
+def _send_feishu_login_otp(*, recipient: str, code: str, ttl_seconds: int) -> EmailSendResult:
+    state = _load_feishu_tokens()
+    access_token = state.get("access_token", "")
+    if not access_token:
+        return EmailSendResult(success=False, provider="none", error="Feishu access token is not configured.")
+    if _jwt_expiry(access_token) and _jwt_expiry(access_token) <= int(time.time()) + 60:
+        try:
+            state = _refresh_feishu_access_token(state)
+            access_token = state["access_token"]
+        except (OSError, URLError, ValueError) as exc:
+            return EmailSendResult(
+                success=False,
+                provider="feishu",
+                error=_redact(str(exc), access_token, state.get("refresh_token", "")),
+            )
+
+    minutes = max(1, ttl_seconds // 60)
+    payload = {
+        "subject": "Your MyAIVAN login code",
+        "to": [{"mail_address": recipient, "name": recipient}],
+        "body_plain_text": (
+            "Your MyAIVAN dynamic password is:\n\n"
+            f"{code}\n\n"
+            f"It expires in {minutes} minutes.\n\n"
+            "您的 MyAIVAN 动态验证码是：\n\n"
+            f"{code}\n\n"
+            f"验证码 {minutes} 分钟内有效。若非本人操作，请忽略本邮件。\n"
+        ),
+        "dedupe_key": f"myaivan-login-otp-{new_id()}",
+    }
+    try:
+        status, data = _feishu_post(
+            "https://open.feishu.cn/open-apis/mail/v1/user_mailboxes/me/messages/send",
+            payload,
+            access_token=access_token,
+        )
+    except (OSError, URLError) as exc:
+        return EmailSendResult(success=False, provider="feishu", error=_redact(str(exc), access_token))
+    if status >= 400 or data.get("code", 0) != 0:
+        return EmailSendResult(success=False, provider="feishu", error=_redact(data.get("msg") or str(status), access_token))
+    return EmailSendResult(
+        success=True,
+        provider="feishu",
+        message_id=str((data.get("data") or {}).get("message_id") or ""),
     )
 
 
@@ -163,7 +300,7 @@ def send_login_otp_email(*, to: str, code: str, ttl_seconds: int) -> EmailSendRe
 
     Login OTP mail is intentionally independent from the workbench business
     email account. It does not require POP3 or the login email to match the
-    sending account; it only needs SMTP for ``service@myaivan.com``.
+    sending account. Production may use Feishu Mail API or SMTP.
     """
     sender = login_otp_sender_email()
     username = _email_address(
@@ -185,6 +322,10 @@ def send_login_otp_email(*, to: str, code: str, ttl_seconds: int) -> EmailSendRe
 
     if not recipient:
         return EmailSendResult(success=False, provider="none", error="Login email recipient is invalid.")
+    if _env_first("AIVAN_LOGIN_OTP_PROVIDER").lower() == "feishu":
+        if sender != "service@myaivan.cn":
+            return EmailSendResult(success=False, provider="none", error="Feishu OTP sender must be service@myaivan.cn.")
+        return _send_feishu_login_otp(recipient=recipient, code=code, ttl_seconds=ttl_seconds)
     if not sender or not username:
         return EmailSendResult(success=False, provider="none", error="Login OTP sender is not configured.")
     if sender != username:

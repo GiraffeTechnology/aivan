@@ -279,6 +279,36 @@ def test_login_code_sends_real_smtp_from_service_mailbox(api_client, production_
     assert "info@myaivan.com" not in sent["body"]
 
 
+def test_login_code_sends_via_feishu_mail_api(api_client, production_with_key, monkeypatch):
+    monkeypatch.setenv("OPENCLAW_MOCK_MODE", "false")
+    monkeypatch.delenv("AIVAN_WEB_STATIC_OTP_CODE", raising=False)
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_PROVIDER", "feishu")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_FROM", "service@myaivan.cn")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_FEISHU_ACCESS_TOKEN", "test-access-token")
+    monkeypatch.setenv("AIVAN_LOGIN_OTP_FEISHU_TOKEN_CACHE", "/tmp/nonexistent-myaivan-test-token.json")
+
+    sent = {}
+
+    def _post(url, payload, *, access_token=""):
+        sent.update(url=url, payload=payload, access_token=access_token)
+        return 200, {"code": 0, "msg": "ok", "data": {"message_id": "mail-message-id"}}
+
+    monkeypatch.setattr("aivan.web.email_outbound._feishu_post", _post)
+    challenge = api_client.post("/api/myaivan/login/challenge").json()
+    requested = api_client.post(
+        "/api/myaivan/login/request-code",
+        json={"email": "service@abcdyi.cn", "humanProof": _human_proof(challenge)},
+    )
+
+    assert requested.status_code == 200
+    assert requested.json()["provider"] == "feishu"
+    assert sent["url"].endswith("/mail/v1/user_mailboxes/me/messages/send")
+    assert sent["access_token"] == "test-access-token"
+    assert sent["payload"]["to"] == [{"mail_address": "service@abcdyi.cn", "name": "service@abcdyi.cn"}]
+    assert len(requested.json()["debugCode"]) == 6
+    assert requested.json()["debugCode"] in sent["payload"]["body_plain_text"]
+
+
 # ── i18n stays public (UI strings only) ───────────────────────────────────────
 
 def test_i18n_public_in_production(api_client, production_with_key):
