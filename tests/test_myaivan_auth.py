@@ -196,6 +196,22 @@ def test_login_code_requires_human_verification(api_client, production_with_key)
     assert resp.status_code == 403
 
 
+def test_human_challenge_verifies_without_process_local_state(production_with_key):
+    challenge = web_auth.issue_human_challenge(now=1_000)
+    proof = _human_proof(challenge)
+    web_auth._HUMAN_CHALLENGES.clear()
+
+    assert web_auth.verify_human_proof(proof, now=1_001) is True
+
+
+def test_human_challenge_rejects_tampered_signature(production_with_key):
+    challenge = web_auth.issue_human_challenge(now=1_000)
+    proof = _human_proof(challenge)
+    proof["challengeId"] = proof["challengeId"][:-1] + ("0" if proof["challengeId"][-1] != "0" else "1")
+
+    assert web_auth.verify_human_proof(proof, now=1_001) is False
+
+
 def test_static_otp_test_mode_requires_human_verification_then_logs_in(api_client, production_with_key, monkeypatch):
     monkeypatch.setenv("AIVAN_WEB_STATIC_OTP_CODE", "123456")
     challenge = api_client.post("/api/myaivan/login/challenge").json()

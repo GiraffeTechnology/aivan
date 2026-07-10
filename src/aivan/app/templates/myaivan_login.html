@@ -95,6 +95,16 @@
         if (step === "code") codeInput.focus();
       }
 
+      function resetHumanVerification() {
+        humanProof = null;
+        humanButton.classList.remove("mv-human-ok");
+        humanButton.disabled = false;
+        humanButton.setAttribute("aria-pressed", "false");
+        humanLabel.textContent = t("login.human", "I'm human");
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+      }
+
       function setKeyMode(enabled) {
         emailLoginPanel.hidden = enabled;
         keyLoginPanel.hidden = !enabled;
@@ -118,13 +128,7 @@
       emailNextButton.addEventListener("click", function () {
         clearError();
         if (!emailInput.reportValidity()) return;
-        humanProof = null;
-        humanButton.classList.remove("mv-human-ok");
-        humanButton.disabled = false;
-        humanButton.setAttribute("aria-pressed", "false");
-        humanLabel.textContent = t("login.human", "I'm human");
-        sendCodeButton.disabled = true;
-        sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+        resetHumanVerification();
         setOtpStep("human");
       });
 
@@ -253,15 +257,25 @@
             body: JSON.stringify({ email: emailInput.value, humanProof: humanProof }),
           });
           var data = await resp.json().catch(function () { return {}; });
-          if (!resp.ok) throw new Error(data.detail || "Could not send dynamic password");
+          if (!resp.ok) {
+            var requestError = new Error(data.detail || "Could not send dynamic password");
+            requestError.requiresHumanVerification = resp.status === 403
+              && String(data.detail || "").toLowerCase().includes("human verification");
+            throw requestError;
+          }
           codeInput.disabled = false;
           submitButton.disabled = false;
           sendCodeButton.textContent = t("login.sent", "Dynamic password sent");
           if (data.debugCode) codeInput.value = data.debugCode;
           setOtpStep("code");
         } catch (e) {
-          sendCodeButton.disabled = false;
-          sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+          if (e.requiresHumanVerification) {
+            resetHumanVerification();
+            setOtpStep("human");
+          } else {
+            sendCodeButton.disabled = false;
+            sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+          }
           showError(e.message);
         }
       });

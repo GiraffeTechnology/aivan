@@ -153,15 +153,12 @@ def issue_human_challenge(*, now: float | None = None) -> dict:
     """
     current = now if now is not None else time.time()
     _cleanup_human_challenges(current)
-    challenge_id = _secrets.token_urlsafe(18)
+    token_id = _secrets.token_urlsafe(18)
     salt = _secrets.token_urlsafe(18)
     difficulty = human_challenge_difficulty()
     expires = int(current + human_challenge_ttl_seconds())
-    _HUMAN_CHALLENGES[challenge_id] = {
-        "salt": salt,
-        "difficulty": difficulty,
-        "expires": expires,
-    }
+    payload = f"{token_id}.{salt}.{difficulty}.{expires}"
+    challenge_id = f"{payload}.{_sign(f'myaivan-human:{payload}')}"
     return {
         "challengeId": challenge_id,
         "salt": salt,
@@ -184,18 +181,24 @@ def verify_human_proof(proof: dict | None, *, now: float | None = None) -> bool:
     digest = str(proof.get("digest") or "").lower()
     if not challenge_id or not nonce or not digest:
         return False
-    record = _HUMAN_CHALLENGES.get(challenge_id)
-    if not record:
+    parts = challenge_id.split(".")
+    if len(parts) != 5:
         return False
-    if (now if now is not None else time.time()) >= int(record["expires"]):
-        _HUMAN_CHALLENGES.pop(challenge_id, None)
+    token_id, salt, difficulty_raw, expires_raw, signature = parts
+    payload = f"{token_id}.{salt}.{difficulty_raw}.{expires_raw}"
+    if not hmac.compare_digest(_sign(f"myaivan-human:{payload}"), signature):
         return False
-    expected = _human_digest(challenge_id, str(record["salt"]), nonce)
-    prefix = "0" * int(record["difficulty"])
-    ok = hmac.compare_digest(expected, digest) and digest.startswith(prefix)
-    if ok:
-        _HUMAN_CHALLENGES.pop(challenge_id, None)
-    return ok
+    try:
+        difficulty = int(difficulty_raw)
+        expires = int(expires_raw)
+    except ValueError:
+        return False
+    if difficulty < 1 or difficulty > 8:
+        return False
+    if (now if now is not None else time.time()) >= expires:
+        return False
+    expected = _human_digest(challenge_id, salt, nonce)
+    return hmac.compare_digest(expected, digest) and digest.startswith("0" * difficulty)
 
 
 def normalize_email(email: str) -> str:
