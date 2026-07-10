@@ -9,16 +9,17 @@ All endpoints fail with structured errors; draft-state violations return 409.
 from __future__ import annotations
 
 import os
+import struct
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from aivan.db.session import get_db
 from aivan.utils.ids import new_id
 from aivan.web import auth as web_auth
 from aivan.web import service
-from aivan.web.email_outbound import email_status
+from aivan.web.email_outbound import email_configuration, email_status
 
 router = APIRouter()
 
@@ -33,6 +34,93 @@ def _upload_dir() -> str:
     return os.environ.get("AIVAN_WEB_UPLOAD_DIR", os.path.join("data", "web_uploads"))
 
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+
+def _png_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) >= 24 and raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return struct.unpack(">II", raw[16:24])
+    return None
+
+
+def _gif_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) >= 10 and raw[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", raw[6:10])
+    return None
+
+
+def _jpeg_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) < 4 or not raw.startswith(b"\xff\xd8"):
+        return None
+    pos = 2
+    while pos + 9 < len(raw):
+        if raw[pos] != 0xFF:
+            pos += 1
+            continue
+        marker = raw[pos + 1]
+        pos += 2
+        if marker in (0xD8, 0xD9):
+            continue
+        if pos + 2 > len(raw):
+            return None
+        length = struct.unpack(">H", raw[pos:pos + 2])[0]
+        if length < 2 or pos + length > len(raw):
+            return None
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB):
+            if length >= 7:
+                height, width = struct.unpack(">HH", raw[pos + 3:pos + 7])
+                return width, height
+            return None
+        pos += length
+    return None
+
+
+def _image_dimensions(raw: bytes) -> tuple[int, int] | None:
+    return _png_dimensions(raw) or _gif_dimensions(raw) or _jpeg_dimensions(raw)
+
+
+def _text_preview(raw: bytes, content_type: str, filename: str) -> str:
+    lower_name = filename.lower()
+    looks_text = (
+        content_type.startswith("text/")
+        or content_type in {"application/json", "application/xml", "application/csv"}
+        or lower_name.endswith((".txt", ".csv", ".md", ".json", ".xml", ".html", ".htm"))
+    )
+    if not looks_text:
+        return ""
+    try:
+        text = raw[:4096].decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = raw[:4096].decode("gb18030")
+        except UnicodeDecodeError:
+            return ""
+    text = " ".join(text.split())
+    return text[:500]
+
+
+def _upload_understanding(kind: str, filename: str, content_type: str, size_bytes: int, raw: bytes) -> dict:
+    if kind == "image":
+        dims = _image_dimensions(raw)
+        summary = f"Image uploaded: {filename} ({content_type}, {size_bytes} bytes)."
+        if dims:
+            summary = (
+                f"Image uploaded: {filename} ({content_type}, {dims[0]}x{dims[1]}, "
+                f"{size_bytes} bytes)."
+            )
+        return {"summary": summary, "dimensions": dims}
+
+    preview = _text_preview(raw, content_type, filename)
+    if preview:
+        return {
+            "summary": (
+                f"File uploaded: {filename} ({content_type}, {size_bytes} bytes). "
+                f"Text preview: {preview}"
+            ),
+            "textPreview": preview,
+        }
+    return {
+        "summary": f"File uploaded: {filename} ({content_type}, {size_bytes} bytes).",
+    }
 
 
 def _require_case(db: Session, case_id: str):
@@ -93,13 +181,16 @@ async def upload(case_id: str, file: UploadFile, db: Session = Depends(get_db)):
     upload_dir = _upload_dir()
     os.makedirs(upload_dir, exist_ok=True)
     safe_name = os.path.basename(file.filename or "upload.bin")
+    content_type = file.content_type or "application/octet-stream"
+    understanding = _upload_understanding(kind, safe_name, content_type, len(raw), raw)
     storage_path = os.path.join(upload_dir, f"{new_id()}_{safe_name}")
     with open(storage_path, "wb") as fh:
         fh.write(raw)
     record = service.add_attachment(
         db, case, kind=kind, filename=safe_name,
-        content_type=file.content_type or "application/octet-stream",
+        content_type=content_type,
         size_bytes=len(raw), storage_path=storage_path,
+        understanding=understanding,
     )
     state = service.case_state(db, case)
     state["attachmentId"] = record.attachment_id
@@ -138,8 +229,9 @@ def _draft_action(db: Session, case_id: str, draft_id: str, action):
 
 
 @router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/copied", dependencies=_PROTECTED)
-def draft_copied(case_id: str, draft_id: str, db: Session = Depends(get_db)):
-    case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.mark_copied(db, d))
+def draft_copied(case_id: str, draft_id: str, body: dict | None = None, db: Session = Depends(get_db)):
+    body_override = str((body or {}).get("bodyOverride") or "")
+    case, _ = _draft_action(db, case_id, draft_id, lambda c, d: service.mark_copied(db, d, body_override))
     return service.case_state(db, case)
 
 
@@ -156,12 +248,29 @@ def draft_reject(case_id: str, draft_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/myaivan/cases/{case_id}/drafts/{draft_id}/send-email", dependencies=_PROTECTED)
-def draft_send_email(case_id: str, draft_id: str, body: dict | None = None, db: Session = Depends(get_db)):
+def draft_send_email(
+    case_id: str,
+    draft_id: str,
+    request: Request,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+):
     case = _require_case(db, case_id)
     draft = _require_draft(db, case_id, draft_id)
     recipient = str((body or {}).get("recipient") or "")
+    email_api_key = str((body or {}).get("emailApiKey") or "")
+    body_override = str((body or {}).get("bodyOverride") or "")
+    login_email = web_auth.request_user_id(request)
     try:
-        draft, result = service.send_draft_email(db, case, draft, recipient=recipient)
+        draft, result = service.send_draft_email(
+            db,
+            case,
+            draft,
+            recipient=recipient,
+            login_email=login_email,
+            email_api_key=email_api_key,
+            body_override=body_override,
+        )
     except service.DraftStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     state = service.case_state(db, case)
@@ -175,8 +284,8 @@ def draft_send_email(case_id: str, draft_id: str, body: dict | None = None, db: 
 
 
 @router.get("/api/myaivan/email/status", dependencies=_PROTECTED)
-def get_email_status():
-    return {"status": email_status()}
+def get_email_status(request: Request):
+    return email_configuration(login_email=web_auth.request_user_id(request)).to_dict()
 
 
 @router.get("/api/myaivan/i18n/{lang}")
@@ -198,12 +307,42 @@ def backup_markdown(case_id: str, db: Session = Depends(get_db)):
 
 # ── Auth: login / logout ──────────────────────────────────────────────────────
 
+@router.post("/api/myaivan/login/challenge")
+def login_challenge():
+    """Issue a self-hosted human proof-of-work challenge for login."""
+    return web_auth.issue_human_challenge()
+
+
+@router.post("/api/myaivan/login/request-code")
+def request_login_code(body: dict):
+    """Send a 5-minute dynamic password to the requested email address."""
+    mode = web_auth.auth_mode()
+    if mode == "misconfigured":
+        raise HTTPException(
+            status_code=503,
+            detail="Server auth misconfigured: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET",
+        )
+    if mode == "open":
+        return {"sent": True, "mode": "open", "expiresInSeconds": web_auth.otp_ttl_seconds()}
+    if not web_auth.verify_human_proof((body or {}).get("humanProof")):
+        raise HTTPException(status_code=403, detail="Human verification is required")
+    try:
+        result = web_auth.issue_login_code(str((body or {}).get("email") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    if not result["sent"]:
+        raise HTTPException(status_code=503, detail=result["error"] or "Could not send dynamic password")
+    return result
+
+
 @router.post("/api/myaivan/login")
 def login(body: dict):
-    """Exchange the AIVAN access key for a session cookie.
+    """Exchange email + dynamic password for a session cookie.
 
-    Fails closed in misconfigured production; 401 on a wrong key. The i18n
-    catalog and this endpoint are the only unauthenticated API surface.
+    API key / bearer access remains available for API clients through the auth
+    dependency, but the browser login form uses email-delivered OTP only.
     """
     from fastapi.responses import JSONResponse
 
@@ -216,12 +355,33 @@ def login(body: dict):
     if mode == "open":
         return JSONResponse({"ok": True, "mode": "open"})
     key = str((body or {}).get("key") or "")
-    if not web_auth.verify_presented_key(key):
-        raise HTTPException(status_code=401, detail="Invalid access key")
-    response = JSONResponse({"ok": True, "mode": "session"})
+    if key:
+        if not web_auth.verify_presented_key(key):
+            raise HTTPException(status_code=401, detail="Invalid access key")
+        response = JSONResponse({"ok": True, "mode": "session", "method": "api_key", "userId": "api_key"})
+        response.set_cookie(
+            web_auth.SESSION_COOKIE,
+            web_auth.issue_session_token(user_id="api_key"),
+            max_age=web_auth.session_ttl_seconds(),
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/",
+        )
+        return response
+    email = str((body or {}).get("email") or "")
+    code = str((body or {}).get("code") or "")
+    try:
+        normalized_email = web_auth.normalize_email(email)
+        ok = web_auth.verify_login_code(email, code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid or expired dynamic password")
+    response = JSONResponse({"ok": True, "mode": "session", "userId": normalized_email})
     response.set_cookie(
         web_auth.SESSION_COOKIE,
-        web_auth.issue_session_token(),
+        web_auth.issue_session_token(user_id=normalized_email),
         max_age=web_auth.session_ttl_seconds(),
         httponly=True,
         samesite="lax",
@@ -256,7 +416,7 @@ def _page_guard(request: Request):
         return None
     if decision == "fail_closed":
         return PlainTextResponse(
-            "myaivan is unavailable: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET.",
+            "MyAIVAN is unavailable: production requires AIVAN_API_KEY or AIVAN_AUTH_SECRET.",
             status_code=503,
         )
     return RedirectResponse("/myaivan/login", status_code=303)
@@ -271,8 +431,20 @@ def myaivan_login(request: Request):
     if web_auth.auth_mode() == "misconfigured":
         return _page_guard(request)
     return _templates().TemplateResponse(
-        request, "myaivan_login.html", {"title": "myaivan — sign in"}
+        request, "myaivan_login.html", {"title": "MyAIVAN — sign in"}
     )
+
+
+@router.head("/myaivan/login")
+def myaivan_login_head(request: Request):
+    guard = _page_guard(request) if web_auth.auth_mode() == "misconfigured" else None
+    if guard is not None:
+        return guard
+    if web_auth.auth_mode() == "open":
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/myaivan", status_code=303)
+    return Response(status_code=200)
 
 
 @router.get("/myaivan", response_class=HTMLResponse)
@@ -281,8 +453,16 @@ def myaivan_welcome(request: Request):
     if guard is not None:
         return guard
     return _templates().TemplateResponse(
-        request, "myaivan_welcome.html", {"title": "myaivan — AIVAN digital trade assistant"}
+        request, "myaivan_welcome.html", {"title": "MyAIVAN — AIVAN digital trade assistant"}
     )
+
+
+@router.head("/myaivan")
+def myaivan_welcome_head(request: Request):
+    guard = _page_guard(request)
+    if guard is not None:
+        return guard
+    return Response(status_code=200)
 
 
 @router.get("/myaivan/work", response_class=HTMLResponse)
@@ -290,8 +470,21 @@ def myaivan_work(request: Request):
     guard = _page_guard(request)
     if guard is not None:
         return guard
+    email_config = email_configuration(login_email=web_auth.request_user_id(request))
     return _templates().TemplateResponse(
         request,
         "myaivan_work.html",
-        {"title": "myaivan — workspace", "email_status": email_status()},
+        {
+            "title": "MyAIVAN — workspace",
+            "email_status": email_status(),
+            "email_config": email_config.to_dict(),
+        },
     )
+
+
+@router.head("/myaivan/work")
+def myaivan_work_head(request: Request):
+    guard = _page_guard(request)
+    if guard is not None:
+        return guard
+    return Response(status_code=200)

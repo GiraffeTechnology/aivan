@@ -262,7 +262,9 @@ def add_attachment(
     content_type: str,
     size_bytes: int,
     storage_path: str,
+    understanding: dict | None = None,
 ) -> WebAttachmentRecord:
+    understanding = understanding or {}
     record = WebAttachmentRecord(
         attachment_id=f"att_{new_id()}",
         case_id=case.case_id,
@@ -274,15 +276,20 @@ def add_attachment(
     )
     db.add(record)
     add_message(db, case, "user", filename, message_type=kind,
-                meta={"attachmentId": record.attachment_id, "sizeBytes": size_bytes})
+                meta={"attachmentId": record.attachment_id, "sizeBytes": size_bytes,
+                      "contentType": content_type})
+    summary = understanding.get("summary") or (
+        f"Received {kind} “{filename}” ({size_bytes} bytes)."
+    )
     add_message(
         db, case, "aivan",
-        f"Received {kind} “{filename}” ({size_bytes} bytes). "
-        "Tell me what to do with it — summarize it, or draft a reply/inquiry based on it.",
-        message_type="text",
+        f"{summary} Tell me what to do with it: summarize it, extract trade facts, "
+        "or draft a reply/inquiry based on it.",
+        message_type="structured_summary",
+        meta={"attachmentId": record.attachment_id, "understanding": understanding},
     )
     log_event(db, case.case_id, f"{kind}_uploaded", filename,
-              meta={"attachmentId": record.attachment_id})
+              meta={"attachmentId": record.attachment_id, "understanding": understanding})
     _touch(case)
     db.commit()
     return record
@@ -324,14 +331,18 @@ def get_draft(db: Session, draft_id: str) -> WebOutboundDraftRecord | None:
     return db.get(WebOutboundDraftRecord, draft_id)
 
 
-def mark_copied(db: Session, draft: WebOutboundDraftRecord) -> WebOutboundDraftRecord:
+def mark_copied(db: Session, draft: WebOutboundDraftRecord, body_override: str = "") -> WebOutboundDraftRecord:
     if draft.status in ("rejected",):
         raise DraftStateError(f"draft {draft.draft_id} is rejected; regenerate it instead")
+    clean_body = (body_override or "").strip()
+    edited = bool(clean_body and clean_body != (draft.body or "").strip())
+    if edited:
+        draft.body = clean_body
     if draft.status == "draft":
         draft.status = "copied"
     draft.updated_at = utcnow()
     log_event(db, draft.case_id, "draft_copied", "Draft copied for manual paste",
-              meta={"draftId": draft.draft_id})
+              meta={"draftId": draft.draft_id, "edited": edited})
     db.commit()
     return draft
 
@@ -374,12 +385,18 @@ def send_draft_email(
     case: WebCaseRecord,
     draft: WebOutboundDraftRecord,
     recipient: str = "",
+    login_email: str = "",
+    email_api_key: str = "",
+    body_override: str = "",
 ) -> tuple[WebOutboundDraftRecord, EmailSendResult]:
     if draft.status in ("rejected", "email_sent", "manually_sent"):
         raise DraftStateError(f"draft {draft.draft_id} cannot be emailed from status {draft.status!r}")
     to = (recipient or draft.recipient or "").strip()
+    clean_body = (body_override or "").strip()
+    edited = bool(clean_body and clean_body != (draft.body or "").strip())
+    outbound_body = clean_body or draft.body
     log_event(db, draft.case_id, "email_send_requested", f"Email send requested to {to or '(unset)'}",
-              meta={"draftId": draft.draft_id})
+              meta={"draftId": draft.draft_id, "edited": edited})
 
     if not to:
         result = EmailSendResult(success=False, provider="none", error="recipient is required")
@@ -387,12 +404,16 @@ def send_draft_email(
         result = send_email(
             to=to,
             subject=draft.subject or "AIVAN outbound message",
-            body=draft.body,
+            body=outbound_body,
             case_id=case.case_id,
             draft_id=draft.draft_id,
+            login_email=login_email,
+            email_api_key=email_api_key,
         )
 
     if result.success:
+        if clean_body:
+            draft.body = clean_body
         draft.status = "email_sent"
         draft.recipient = to
         case.status = "sent"

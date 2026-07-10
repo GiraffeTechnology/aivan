@@ -1,11 +1,9 @@
 """UI string catalogs for the myaivan Web UI.
 
 English is the system/canonical language. ``en`` and ``zh`` catalogs are
-built in; any other language is produced by translating the English catalog
-through giraffe-language-skill (``POST /v1/outbound/render``), one string at a
-time, cached in-process. Translation is fail-soft: strings the service cannot
-translate stay English, and when the service is unavailable the whole catalog
-falls back to English — the UI must never break because translation is down.
+built in and are the only languages offered until the production
+giraffe-language-skill provider returns real translations. The UI must never
+offer a language option that silently renders English.
 """
 
 from __future__ import annotations
@@ -20,13 +18,29 @@ logger = logging.getLogger(__name__)
 CATALOG_EN: dict[str, str] = {
     "welcome.title": "Welcome back. What should your AIVAN handle today?",
     "welcome.tagline": (
-        "myaivan is your AIVAN digital trade assistant for inquiry management, "
+        "MyAIVAN is your AIVAN digital trade assistant for inquiry management, "
         "business communication, and human-confirmed outbound messages."
     ),
     "welcome.start": "Start Working",
+    "login.title": "Sign in to MyAIVAN",
+    "login.mode_email": "Email dynamic password",
+    "login.key_toggle": "Use API key login",
+    "login.email_toggle": "Use email dynamic password login",
+    "login.email_placeholder": "Email address",
+    "login.email_next": "Continue",
+    "login.human": "I'm human",
+    "login.verifying": "Verifying...",
+    "login.send_code": "Send dynamic password",
+    "login.sending": "Sending...",
+    "login.sent": "Dynamic password sent",
+    "login.code_placeholder": "6-digit dynamic password",
+    "login.submit": "Sign in",
+    "login.key_submit": "Sign in with key",
     "work.brand_sub": "AIVAN digital trade assistant",
     "work.backup": "Backup",
     "work.backup_tooltip": "Backup Case",
+    "work.logout": "Sign out",
+    "work.logout_tooltip": "Clear login session and return to login",
     "work.review_title": "Outbound review",
     "work.review_empty": (
         "AIVAN-generated outbound drafts will appear here for your review. "
@@ -44,6 +58,7 @@ CATALOG_EN: dict[str, str] = {
     "draft.copy_tooltip": "Copy for manual paste",
     "draft.email": "Email",
     "draft.email_tooltip": "Send by Email",
+    "draft.edited": "Edited",
     "draft.mark_sent": "Sent",
     "draft.mark_sent_tooltip": "Mark as manually sent",
     "draft.reject": "Reject",
@@ -63,17 +78,29 @@ CATALOG_EN: dict[str, str] = {
     "status.uploading": "Uploading…",
     "status.upload_failed": "Upload failed",
     "status.copied": "Copied — paste it into your IM tool (WeChat / WhatsApp / LINE / Wangwang), then click ✅.",
-    "status.copy_blocked": "Clipboard blocked — select the draft text and copy manually.",
+    "status.copy_blocked": "Clipboard blocked — the draft text is selected. Press Ctrl+C / Cmd+C, then paste manually.",
     "status.marked_sent": "Recorded as manually sent.",
     "status.rejected": "Draft rejected — tell AIVAN how to revise it.",
     "status.action_failed": "Action failed",
     "status.email_sending": "Sending email…",
     "status.email_sent": "Email sent via aivan-openclaw.",
+    "status.email_smtp": "Email sent via SMTP.",
     "status.email_mock": "Mock send recorded — no real email was delivered.",
     "status.email_failed": "Email failed",
     "status.email_not_configured": "Email sending is not configured. Please copy the draft manually.",
+    "status.email_api_key_saved": "Email password / API Key saved in this browser.",
+    "status.email_api_key_cleared": "Email password / API Key cleared from this browser.",
+    "settings.email_ready": "Email ready",
+    "settings.email_mode_missing": "Real email mode is not configured.",
+    "settings.email_smtp_missing": "SMTP sending settings are incomplete.",
+    "settings.email_pop3_missing": "POP3 receiving settings are incomplete.",
+    "settings.email_login_mismatch": "Login email must match the configured mailbox.",
+    "settings.email_key_missing": "Save the email password / API Key to enable Email.",
+    "settings.email_not_ready": "Email is not ready.",
     "status.backup_done": "Backup exported.",
     "status.backup_failed": "Backup failed",
+    "status.backup_loaded": "Last backup loaded into the input box. Review it before sending.",
+    "status.logging_out": "Signing out…",
     "status.voice_soon": "Voice input coming soon.",
     "status.init_failed": "Initialization failed",
     "lang.tooltip": "Switch language",
@@ -82,11 +109,27 @@ CATALOG_EN: dict[str, str] = {
 # Built-in curated Chinese catalog (product copy from the PRD).
 CATALOG_ZH: dict[str, str] = {
     "welcome.title": "欢迎回来。今天要让你的 AIVAN 处理哪一条询价？",
-    "welcome.tagline": "myaivan 是你的 AIVAN 数字业务员，用于管理询价、处理贸易信息收发，并在所有外发商务信息前进行人工确认。",
+    "welcome.tagline": "MyAIVAN 是你的 AIVAN 数字业务员，用于管理询价、处理贸易信息收发，并在所有外发商务信息前进行人工确认。",
     "welcome.start": "开始工作",
+    "login.title": "登录 MyAIVAN",
+    "login.mode_email": "邮箱动态密码",
+    "login.key_toggle": "使用 API Key 登录",
+    "login.email_toggle": "使用邮箱动态密码登录",
+    "login.email_placeholder": "邮箱地址",
+    "login.email_next": "继续",
+    "login.human": "我是人类",
+    "login.verifying": "验证中...",
+    "login.send_code": "发送动态密码",
+    "login.sending": "发送中...",
+    "login.sent": "动态密码已发送",
+    "login.code_placeholder": "6 位动态密码",
+    "login.submit": "登录",
+    "login.key_submit": "使用 Key 登录",
     "work.brand_sub": "AIVAN 数字业务员",
     "work.backup": "备份",
     "work.backup_tooltip": "备份当前案件",
+    "work.logout": "退出",
+    "work.logout_tooltip": "清除登录会话并返回登录页",
     "work.review_title": "外发审核",
     "work.review_empty": "AIVAN 生成的外发草稿会出现在这里，所有外发商务信息均需人工确认。",
     "work.paste": "粘贴",
@@ -101,6 +144,7 @@ CATALOG_ZH: dict[str, str] = {
     "draft.copy_tooltip": "复制，用于手动粘贴",
     "draft.email": "邮件",
     "draft.email_tooltip": "通过邮件外发",
+    "draft.edited": "已修改",
     "draft.mark_sent": "已发送",
     "draft.mark_sent_tooltip": "已粘贴并发送",
     "draft.reject": "不通过",
@@ -120,17 +164,29 @@ CATALOG_ZH: dict[str, str] = {
     "status.uploading": "上传中…",
     "status.upload_failed": "上传失败",
     "status.copied": "已复制，请粘贴到微信 / WhatsApp / LINE / 旺旺后回来点 ✅。",
-    "status.copy_blocked": "浏览器未允许写剪贴板，请手动选择草稿文本复制。",
+    "status.copy_blocked": "浏览器未允许写剪贴板，草稿正文已选中。请按 Ctrl+C / Cmd+C 后手动粘贴。",
     "status.marked_sent": "已记录为人工外发。",
     "status.rejected": "草稿已拒绝，请告诉 AIVAN 如何修改。",
     "status.action_failed": "操作失败",
     "status.email_sending": "正在外发邮件…",
     "status.email_sent": "邮件已通过 aivan-openclaw 外发。",
+    "status.email_smtp": "邮件已通过 SMTP 外发。",
     "status.email_mock": "MOCK 模式外发成功（未真实发送）。",
     "status.email_failed": "邮件外发失败",
     "status.email_not_configured": "邮件外发尚未配置，请复制草稿后手动发送。",
+    "status.email_api_key_saved": "邮件密码 / API Key 已保存在本浏览器。",
+    "status.email_api_key_cleared": "邮件密码 / API Key 已从本浏览器清除。",
+    "settings.email_ready": "邮件已就绪",
+    "settings.email_mode_missing": "真实邮件模式尚未配置。",
+    "settings.email_smtp_missing": "SMTP 外发设置不完整。",
+    "settings.email_pop3_missing": "POP3 收件设置不完整。",
+    "settings.email_login_mismatch": "登录邮箱必须与已配置邮箱一致。",
+    "settings.email_key_missing": "保存邮件密码 / API Key 后才可启用邮件按钮。",
+    "settings.email_not_ready": "邮件尚未就绪。",
     "status.backup_done": "备份已导出。",
     "status.backup_failed": "备份失败",
+    "status.backup_loaded": "已将上次备份读入输入框，请确认后再发送。",
+    "status.logging_out": "正在退出…",
     "status.voice_soon": "语音输入即将上线。",
     "status.init_failed": "初始化失败",
     "lang.tooltip": "切换语言",
@@ -138,19 +194,13 @@ CATALOG_ZH: dict[str, str] = {
 
 BUILTIN_CATALOGS: dict[str, dict[str, str]] = {"en": CATALOG_EN, "zh": CATALOG_ZH}
 
-# Languages offered by the UI switcher. Anything beyond en/zh is translated
-# on demand through giraffe-language-skill.
+# Languages offered by the UI switcher. Keep this list limited to catalogs that
+# are known to render translated UI. The deployed language-skill can run in mock
+# mode and return source text unchanged; do not expose those languages as
+# selectable until a real provider is configured.
 SUPPORTED_LANGUAGES: dict[str, str] = {
     "en": "English",
     "zh": "中文",
-    "ja": "日本語",
-    "ko": "한국어",
-    "es": "Español",
-    "fr": "Français",
-    "de": "Deutsch",
-    "pt": "Português",
-    "ru": "Русский",
-    "ar": "العربية",
 }
 
 _cache: dict[str, dict] = {}

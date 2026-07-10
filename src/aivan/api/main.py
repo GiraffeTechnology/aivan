@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -260,8 +260,18 @@ except Exception:
 def health():
     return {"status": "ok", "product": "AIVAN", "version": "0.2.0"}
 
-@app.get("/app", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
+def serve_root():
+    """myaivan.com is the user-facing AIVAN Web entry point."""
+    return RedirectResponse("/myaivan", status_code=303)
+
+
+@app.head("/")
+def serve_root_head():
+    return RedirectResponse("/myaivan", status_code=303)
+
+
+@app.get("/app", response_class=HTMLResponse)
 def serve_app(request: Request):
     return templates.TemplateResponse(request, "index.html", {"title": "AIVAN"})
 

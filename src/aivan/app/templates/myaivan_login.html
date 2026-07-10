@@ -4,41 +4,305 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ title }}</title>
-  <link rel="stylesheet" href="/static/myaivan.css">
+  <link rel="stylesheet" href="/static/myaivan.css?v=20260710-review-actions">
 </head>
 <body class="mv-welcome-body">
+  <div class="mv-lang-switch mv-lang-floating" title="Switch language" data-i18n-title="lang.tooltip">
+    <span class="mv-lang-icon" aria-hidden="true">🌐</span>
+    <select id="lang-select" aria-label="Switch language"></select>
+  </div>
   <main class="mv-welcome">
+    <img class="mv-giraffe-icon" src="/static/giraffe-icon-tight.png" alt="Giraffe Technology logo">
     <div class="mv-logo">AIVAN</div>
-    <h1 class="mv-welcome-title">Sign in to myaivan</h1>
-    <p class="mv-tagline">
-      Enter your AIVAN access key to continue. Sessions expire automatically.
-    </p>
+    <h1 class="mv-welcome-title" data-i18n="login.title">Sign in to MyAIVAN</h1>
+    <div class="mv-login-mode">
+      <span data-i18n="login.mode_email">Email dynamic password</span>
+      <button id="key-mode-toggle" type="button" class="mv-icon-btn" title="Use API key login"
+              aria-label="Use API key login" aria-pressed="false" data-i18n-title="login.key_toggle">🔑</button>
+    </div>
     <form id="login-form" class="mv-login-form">
-      <input id="login-key" type="password" placeholder="AIVAN access key" autocomplete="current-password" required>
-      <button type="submit" class="mv-start-btn">Sign in</button>
+      <div id="email-login-panel" class="mv-login-panel">
+        <div id="login-email-step" class="mv-login-step">
+          <input id="login-email" type="email" placeholder="Email address" autocomplete="email"
+                 data-i18n-placeholder="login.email_placeholder" required>
+          <button id="email-next" type="button" class="mv-start-btn" data-i18n="login.email_next">Continue</button>
+        </div>
+        <button id="human-check" type="button" class="mv-human-check" aria-pressed="false" hidden>
+          <span class="mv-human-box" aria-hidden="true"></span>
+          <span id="human-label" data-i18n="login.human">I'm human</span>
+        </button>
+        <button id="send-code" type="button" class="mv-secondary-btn" disabled
+                data-i18n="login.send_code" hidden>Send dynamic password</button>
+        <div id="login-code-step" class="mv-login-step" hidden>
+        <input id="login-code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+               placeholder="6-digit dynamic password" autocomplete="one-time-code"
+               data-i18n-placeholder="login.code_placeholder" required disabled>
+        <button id="login-submit" type="submit" class="mv-start-btn" disabled data-i18n="login.submit">Sign in</button>
+        </div>
+      </div>
+      <div id="key-login-panel" class="mv-login-panel" hidden>
+        <button id="key-login-submit" type="button" class="mv-start-btn"
+                data-i18n="login.key_submit">Sign in with key</button>
+      </div>
     </form>
     <p id="login-error" class="mv-login-error" hidden></p>
   </main>
+  <script src="/static/myaivan-i18n.js"></script>
   <script>
     (function () {
       "use strict";
       var form = document.getElementById("login-form");
       var errorLine = document.getElementById("login-error");
+      var emailStep = document.getElementById("login-email-step");
+      var emailNextButton = document.getElementById("email-next");
+      var codeStep = document.getElementById("login-code-step");
+      var emailInput = document.getElementById("login-email");
+      var codeInput = document.getElementById("login-code");
+      var humanButton = document.getElementById("human-check");
+      var humanLabel = document.getElementById("human-label");
+      var sendCodeButton = document.getElementById("send-code");
+      var submitButton = document.getElementById("login-submit");
+      var keyModeToggle = document.getElementById("key-mode-toggle");
+      var emailLoginPanel = document.getElementById("email-login-panel");
+      var keyLoginPanel = document.getElementById("key-login-panel");
+      var keySubmitButton = document.getElementById("key-login-submit");
+      var humanProof = null;
+
+      function t(key, fallback) {
+        return (window.MyaivanI18n && window.MyaivanI18n.t(key, fallback)) || fallback || key;
+      }
+
+      function showError(message) {
+        errorLine.textContent = message;
+        errorLine.hidden = false;
+      }
+
+      function clearError() {
+        errorLine.hidden = true;
+        errorLine.textContent = "";
+      }
+
+      function setOtpStep(step) {
+        emailStep.hidden = step !== "email";
+        humanButton.hidden = step !== "human";
+        sendCodeButton.hidden = step !== "send";
+        codeStep.hidden = step !== "code";
+        codeInput.disabled = step !== "code";
+        submitButton.disabled = step !== "code";
+        if (step === "email") emailInput.focus();
+        if (step === "human") humanButton.focus();
+        if (step === "send") sendCodeButton.focus();
+        if (step === "code") codeInput.focus();
+      }
+
+      function setKeyMode(enabled) {
+        emailLoginPanel.hidden = enabled;
+        keyLoginPanel.hidden = !enabled;
+        keyModeToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+        keyModeToggle.title = enabled
+          ? t("login.email_toggle", "Use email dynamic password login")
+          : t("login.key_toggle", "Use API key login");
+        keyModeToggle.setAttribute("aria-label", keyModeToggle.title);
+        if (enabled) {
+          keySubmitButton.focus();
+        } else {
+          setOtpStep("email");
+        }
+      }
+
+      keyModeToggle.addEventListener("click", function () {
+        clearError();
+        setKeyMode(keyLoginPanel.hidden);
+      });
+
+      emailNextButton.addEventListener("click", function () {
+        clearError();
+        if (!emailInput.reportValidity()) return;
+        humanProof = null;
+        humanButton.classList.remove("mv-human-ok");
+        humanButton.disabled = false;
+        humanButton.setAttribute("aria-pressed", "false");
+        humanLabel.textContent = t("login.human", "I'm human");
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+        setOtpStep("human");
+      });
+
+      function sha256Fallback(ascii) {
+        function rightRotate(value, amount) {
+          return (value >>> amount) | (value << (32 - amount));
+        }
+        var mathPow = Math.pow;
+        var maxWord = mathPow(2, 32);
+        var words = [];
+        var asciiBitLength = ascii.length * 8;
+        var hash = [];
+        var k = [];
+        var primeCounter = 0;
+        var isComposite = {};
+        for (var candidate = 2; primeCounter < 64; candidate += 1) {
+          if (!isComposite[candidate]) {
+            for (var i = 0; i < 313; i += candidate) {
+              isComposite[i] = candidate;
+            }
+            hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+            k[primeCounter] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+            primeCounter += 1;
+          }
+        }
+        ascii += "\x80";
+        while (ascii.length % 64 - 56) ascii += "\x00";
+        for (var j = 0; j < ascii.length; j += 1) {
+          words[j >> 2] |= ascii.charCodeAt(j) << ((3 - j) % 4 * 8);
+        }
+        words[words.length] = ((asciiBitLength / maxWord) | 0);
+        words[words.length] = asciiBitLength;
+        for (var block = 0; block < words.length;) {
+          var w = words.slice(block, block += 16);
+          var oldHash = hash.slice(0);
+          for (var round = 0; round < 64; round += 1) {
+            var w15 = w[round - 15];
+            var w2 = w[round - 2];
+            var a = hash[0];
+            var e = hash[4];
+            var temp1 = hash[7]
+              + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+              + ((e & hash[5]) ^ ((~e) & hash[6]))
+              + k[round]
+              + (w[round] = round < 16 ? w[round] : (
+                w[round - 16]
+                + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+                + w[round - 7]
+                + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
+              ) | 0);
+            var temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+              + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+            hash = [(temp1 + temp2) | 0].concat(hash);
+            hash[4] = (hash[4] + temp1) | 0;
+            hash.pop();
+          }
+          for (var h = 0; h < 8; h += 1) {
+            hash[h] = (hash[h] + oldHash[h]) | 0;
+          }
+        }
+        var result = "";
+        for (var word = 0; word < 8; word += 1) {
+          for (var byte = 3; byte + 1; byte -= 1) {
+            var b = (hash[word] >> (byte * 8)) & 255;
+            result += ((b < 16) ? "0" : "") + b.toString(16);
+          }
+        }
+        return result;
+      }
+
+      async function sha256Hex(text) {
+        if (!window.crypto || !crypto.subtle || !window.TextEncoder) {
+          return sha256Fallback(text);
+        }
+        var data = new TextEncoder().encode(text);
+        var hash = await crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hash)).map(function (b) {
+          return b.toString(16).padStart(2, "0");
+        }).join("");
+      }
+
+      async function solveChallenge(challenge) {
+        var prefix = "0".repeat(challenge.difficulty);
+        for (var nonce = 0; nonce < 5000000; nonce += 1) {
+          var digest = await sha256Hex(challenge.challengeId + ":" + challenge.salt + ":" + nonce);
+          if (digest.slice(0, challenge.difficulty) === prefix) {
+            return { challengeId: challenge.challengeId, nonce: String(nonce), digest: digest };
+          }
+          if (nonce > 0 && nonce % 500 === 0) {
+            await new Promise(function (resolve) { setTimeout(resolve, 0); });
+          }
+        }
+        throw new Error("Human verification timed out. Please try again.");
+      }
+
+      humanButton.addEventListener("click", async function () {
+        clearError();
+        humanButton.disabled = true;
+        humanLabel.textContent = t("login.verifying", "Verifying...");
+        try {
+          var resp = await fetch("/api/myaivan/login/challenge", { method: "POST" });
+          var challenge = await resp.json();
+          if (!resp.ok) throw new Error(challenge.detail || "Could not start human verification");
+          humanProof = await solveChallenge(challenge);
+          humanButton.classList.add("mv-human-ok");
+          humanButton.setAttribute("aria-pressed", "true");
+          humanLabel.textContent = t("login.human", "I'm human");
+          sendCodeButton.disabled = false;
+          setOtpStep("send");
+        } catch (e) {
+          humanProof = null;
+          humanButton.disabled = false;
+          humanLabel.textContent = t("login.human", "I'm human");
+          showError(e.message);
+        }
+      });
+
+      sendCodeButton.addEventListener("click", async function () {
+        clearError();
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = t("login.sending", "Sending...");
+        try {
+          var resp = await fetch("/api/myaivan/login/request-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: emailInput.value, humanProof: humanProof }),
+          });
+          var data = await resp.json().catch(function () { return {}; });
+          if (!resp.ok) throw new Error(data.detail || "Could not send dynamic password");
+          codeInput.disabled = false;
+          submitButton.disabled = false;
+          sendCodeButton.textContent = t("login.sent", "Dynamic password sent");
+          if (data.debugCode) codeInput.value = data.debugCode;
+          setOtpStep("code");
+        } catch (e) {
+          sendCodeButton.disabled = false;
+          sendCodeButton.textContent = t("login.send_code", "Send dynamic password");
+          showError(e.message);
+        }
+      });
+
       form.addEventListener("submit", async function (ev) {
         ev.preventDefault();
-        errorLine.hidden = true;
+        clearError();
+        submitButton.disabled = true;
         try {
           var resp = await fetch("/api/myaivan/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: document.getElementById("login-key").value }),
+            body: JSON.stringify({ email: emailInput.value, code: codeInput.value }),
           });
           var data = await resp.json().catch(function () { return {}; });
           if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
           window.location.href = "/myaivan/work";
         } catch (e) {
-          errorLine.textContent = e.message;
-          errorLine.hidden = false;
+          submitButton.disabled = false;
+          showError(e.message);
+        }
+      });
+
+      keySubmitButton.addEventListener("click", async function () {
+        clearError();
+        keySubmitButton.disabled = true;
+        try {
+          var key = "";
+          try { key = (localStorage.getItem("myaivan.apiKey") || "").trim(); } catch (e) { key = ""; }
+          if (!key) throw new Error("No API key saved on this computer.");
+          var resp = await fetch("/api/myaivan/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: key }),
+          });
+          var data = await resp.json().catch(function () { return {}; });
+          if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+          window.location.href = "/myaivan/work";
+        } catch (e) {
+          keySubmitButton.disabled = false;
+          showError(e.message);
         }
       });
     })();

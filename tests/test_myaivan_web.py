@@ -49,17 +49,66 @@ def _events(api_client, case_id: str) -> list[str]:
 
 # ── 1–2: welcome page & navigation ────────────────────────────────────────────
 
+def test_00_root_domain_entry_redirects_to_myaivan(api_client):
+    resp = api_client.get("/", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/myaivan"
+    head = api_client.head("/", follow_redirects=False)
+    assert head.status_code == 303
+    assert head.headers["location"] == "/myaivan"
+
+
 def test_01_welcome_page_renders(api_client):
+    assert api_client.head("/myaivan").status_code == 200
     resp = api_client.get("/myaivan")
     assert resp.status_code == 200
     # English is the canonical/system language in the markup…
     assert "Welcome back. What should your AIVAN handle today?" in resp.text
     assert "Start Working" in resp.text
+    assert "MyAIVAN is your AIVAN digital trade assistant" in resp.text
+    assert "/static/giraffe-icon-tight.png" in resp.text
+    assert 'class="mv-giraffe-icon mv-giraffe-icon-home"' in resp.text
+    assert (STATIC / "giraffe-icon-tight.png").is_file()
+    css = (STATIC / "myaivan.css").read_text()
+    assert ".mv-giraffe-icon" in css
+    assert ".mv-giraffe-icon-home" in css
+    assert ".mv-login-panel[hidden]" in css
+    assert ".mv-human-check[hidden]" in css
+    logo_css = css.split(".mv-giraffe-icon", 1)[1].split("}", 1)[0]
+    assert "vmin" in logo_css and "max-height" in logo_css and "height: auto" in logo_css
     assert 'data-i18n="welcome.title"' in resp.text
     # …and the required Chinese copy is served through the zh catalog.
     zh = api_client.get("/api/myaivan/i18n/zh").json()["strings"]
     assert zh["welcome.title"] == "欢迎回来。今天要让你的 AIVAN 处理哪一条询价？"
     assert zh["welcome.start"] == "开始工作"
+
+
+def test_login_page_uses_logo_email_otp_and_human_check(api_client, monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "test-key")
+    html = api_client.get("/myaivan/login").text
+    assert "/static/giraffe-icon-tight.png" in html
+    assert "mv-giraffe-icon-home" not in html
+    assert 'id="login-email"' in html
+    assert 'id="email-next"' in html
+    assert 'value="info@myaivan.com"' not in html
+    assert 'id="lang-select"' in html
+    assert "🌐" in html
+    assert "myaivan-i18n.js" in html
+    assert 'data-i18n="login.title"' in html
+    assert "sha256Fallback" in html
+    assert "!window.crypto || !crypto.subtle" in html
+    assert 'id="human-check"' in html and 'id="human-check" type="button" class="mv-human-check" aria-pressed="false" hidden' in html
+    assert 'id="send-code"' in html and 'hidden>Send dynamic password</button>' in html
+    assert 'id="login-code-step" class="mv-login-step" hidden' in html
+    assert 'id="login-code"' in html
+    assert 'id="key-mode-toggle"' in html
+    assert 'id="login-key"' not in html
+    assert "localStorage.getItem(\"myaivan.apiKey\")" in html
+    assert 'setOtpStep("human")' in html
+    assert 'setOtpStep("send")' in html
+    assert 'setOtpStep("code")' in html
+    assert "5-minute dynamic password we send you" not in html
 
 
 def test_02_start_working_navigates_to_conversation(api_client):
@@ -73,14 +122,65 @@ def test_02_start_working_navigates_to_conversation(api_client):
 
 def test_03_conversation_page_renders_three_areas(api_client):
     html = api_client.get("/myaivan/work").text
+    assert ">MyAIVAN<" in html
     assert 'id="conversation-stream"' in html   # top
+    assert 'id="stream-review-resizer"' in html
     assert 'id="review-area"' in html           # middle
+    assert 'id="review-input-resizer"' in html
     assert 'id="message-input"' in html         # bottom
     assert 'id="paste-btn"' in html
     assert 'id="file-input"' in html and 'id="image-input"' in html
     assert 'id="voice-btn"' in html
     assert 'id="send-btn"' in html
+    assert 'id="message-input" rows="4"' in html
     assert 'id="lang-select"' in html  # language switcher
+    assert 'id="logout-btn"' in html
+    assert 'data-i18n="work.logout"' in html
+    assert 'id="settings-toggle"' in html
+    assert 'id="settings-menu"' in html
+    assert 'id="settings-api-key"' in html
+    assert 'id="settings-email-api-key"' in html
+    assert 'data-email-smtp-configured=' in html
+    assert 'data-email-pop3-configured=' in html
+    assert 'data-email-login-matches=' in html
+    css = (STATIC / "myaivan.css").read_text()
+    input_css = css.split(".mv-input-row textarea", 1)[1].split("}", 1)[0]
+    assert "min-height" in input_css and "overflow-y: auto" in input_css
+    assert "row-resize" in css
+    js = (STATIC / "myaivan.js").read_text()
+    assert "myaivan.layoutHeights" in js
+    assert "myaivan.lastBackup" in js
+    assert "myaivan.lastBackupRestoredAt" in js
+    assert "stream-review-resizer" in js and "review-input-resizer" in js
+    assert "myaivan.apiKey" in js
+    assert "myaivan.emailApiKey" in js
+    assert "X-AIVAN-API-Key" in js
+    assert "contentEditable" in js
+    assert "mv-draft-icon-actions" in js
+    assert "bodyOverride" in js
+    assert "editTraceHtml" in js
+    assert "copyTextToClipboard" in js
+    assert 'document.execCommand("copy")' in js
+    assert 'document.addEventListener("copy", onCopy)' in js
+    assert 'ev.clipboardData.setData("text/plain", text)' in js
+    assert 'ta.style.top = "8px"' in js
+    assert 'top = "-1000px"' not in js
+    assert "if (!copied)" in js
+    assert '"/copied"' in js.split("if (!copied)", 1)[1]
+    assert 'querySelectorAll("button").forEach' not in js
+    assert 'card.querySelector(".mv-act-sent").disabled = true' in js
+    assert 'card.querySelector(".mv-act-reject").disabled = true' in js
+    assert "emailApiKey: storedEmailApiKey()" in js
+    assert "realEmailReady" in js
+    assert "AUTO_BACKUP_INTERVAL_MS = 10 * 60 * 1000" in js
+    assert "handleAuthFailure" in js
+    assert "rememberBackup" in js
+    assert 'API + "/logout"' in js
+    assert 'window.location.href = "/myaivan/login"' in js
+    assert "restoreLastBackupIntoInput" in js
+    assert "Last backup loaded into the input box" in js
+    assert "myaivan-autobackup-" in js
+    assert "authentication lost" in js
 
 
 def test_04_user_messages_align_right():
@@ -119,22 +219,41 @@ def test_07_file_upload_works(api_client):
     case_id = _new_case(api_client)
     resp = api_client.post(
         f"/api/myaivan/cases/{case_id}/uploads",
-        files={"file": ("spec.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")},
+        files={
+            "file": (
+                "spec.txt",
+                io.BytesIO(b"Buyer asks for 5000 cotton shirts to Tokyo within 45 days."),
+                "text/plain",
+            )
+        },
     )
     assert resp.status_code == 200
     state = resp.json()
     assert state["attachments"] and state["attachments"][0]["kind"] == "file"
+    summaries = [m for m in state["messages"] if m["role"] == "aivan" and m["type"] == "structured_summary"]
+    assert any("Text preview" in m["content"] for m in summaries)
+    assert any("5000 cotton shirts" in m["metadata"]["understanding"]["textPreview"] for m in summaries)
     assert "file_uploaded" in _events(api_client, case_id)
 
 
 def test_08_image_upload_works(api_client):
     case_id = _new_case(api_client)
+    png_1x1 = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00"
+        b"\x90wS\xde"
+    )
     resp = api_client.post(
         f"/api/myaivan/cases/{case_id}/uploads",
-        files={"file": ("sample.png", io.BytesIO(b"\x89PNG fake"), "image/png")},
+        files={"file": ("sample.png", io.BytesIO(png_1x1), "image/png")},
     )
     assert resp.status_code == 200
-    assert resp.json()["attachments"][0]["kind"] == "image"
+    state = resp.json()
+    assert state["attachments"][0]["kind"] == "image"
+    summaries = [m for m in state["messages"] if m["role"] == "aivan" and m["type"] == "structured_summary"]
+    assert any("1x1" in m["content"] for m in summaries)
     assert "image_uploaded" in _events(api_client, case_id)
 
 
@@ -162,9 +281,15 @@ def test_10_generated_draft_appears_in_review_area(api_client):
 def test_11_copy_marks_copied_and_audits(api_client):
     case_id = _new_case(api_client)
     draft = _make_draft(api_client, case_id)
-    resp = api_client.post(f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/copied")
+    edited_body = draft["body"] + "\nEdited before paste."
+    resp = api_client.post(
+        f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/copied",
+        json={"bodyOverride": edited_body},
+    )
     assert resp.status_code == 200
-    assert resp.json()["outboundDrafts"][-1]["status"] == "copied"
+    copied = resp.json()["outboundDrafts"][-1]
+    assert copied["status"] == "copied"
+    assert copied["body"] == edited_body
     assert "draft_copied" in _events(api_client, case_id)
 
 
@@ -214,6 +339,86 @@ def test_14_email_send_uses_adapter_mock_mode(api_client):
     assert state["outboundDrafts"][-1]["status"] == "email_sent"
     events = _events(api_client, case_id)
     assert "email_send_requested" in events and "email_sent" in events
+
+
+def test_14b_email_send_uses_configured_smtp(api_client, monkeypatch):
+    monkeypatch.setenv("AIVAN_EMAIL_SEND_MODE", "smtp")
+    monkeypatch.delenv("OPENCLAW_MOCK_MODE", raising=False)
+    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "info@myaivan.com")
+    monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.office365.com")
+    monkeypatch.setenv("AIVAN_SMTP_PORT", "587")
+    monkeypatch.setenv("AIVAN_SMTP_USE_SSL", "false")
+    monkeypatch.setenv("AIVAN_SMTP_USE_TLS", "true")
+    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "info@myaivan.com")
+    monkeypatch.delenv("AIVAN_SMTP_PASSWORD", raising=False)
+    monkeypatch.setenv("AIVAN_POP3_HOST", "outlook.office365.com")
+    monkeypatch.setenv("AIVAN_POP3_PORT", "995")
+    monkeypatch.setenv("AIVAN_POP3_USE_SSL", "true")
+    monkeypatch.setenv("AIVAN_POP3_USERNAME", "info@myaivan.com")
+    sent = {}
+
+    class _SMTP:
+        def __init__(self, host, port, timeout):
+            sent["host"] = host
+            sent["port"] = port
+            sent["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self):
+            sent["starttls"] = True
+
+        def login(self, username, password):
+            sent["username"] = username
+            sent["password"] = password
+
+        def send_message(self, msg, from_addr=None, to_addrs=None):
+            sent["from"] = msg["From"]
+            sent["to"] = msg["To"]
+            sent["envelope_from"] = from_addr
+            sent["envelope_to"] = to_addrs
+            sent["subject"] = msg["Subject"]
+            sent["body"] = msg.get_content()
+            return {}
+
+    monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP", _SMTP)
+    case_id = _new_case(api_client)
+    draft = _make_draft(api_client, case_id, " Please draft a reply for email.")
+    resp = api_client.post(
+        f"/api/myaivan/cases/{case_id}/drafts/{draft['id']}/send-email",
+        json={
+            "recipient": "buyer@example.com",
+            "emailApiKey": "office365-app-password",
+            "bodyOverride": "Clean edited email body without change marks.",
+        },
+    )
+    assert resp.status_code == 200
+    state = resp.json()
+    assert state["emailResult"]["success"] is True
+    assert state["emailResult"]["provider"] == "smtp"
+    assert state["outboundDrafts"][-1]["status"] == "email_sent"
+    assert sent["host"] == "smtp.office365.com"
+    assert sent["port"] == 587
+    assert sent["starttls"] is True
+    assert sent["from"] == "info@myaivan.com"
+    assert sent["envelope_from"] == "info@myaivan.com"
+    assert sent["envelope_to"] == ["buyer@example.com"]
+    assert sent["username"] == "info@myaivan.com"
+    assert sent["password"] == "office365-app-password"
+    assert "Clean edited email body without change marks." in sent["body"]
+    assert "mv-edit" not in sent["body"]
+
+    status = api_client.get("/api/myaivan/email/status").json()
+    assert status["status"] == "configured"
+    assert status["provider"] == "smtp"
+    assert status["accountEmail"] == "info@myaivan.com"
+    assert status["smtpConfigured"] is True
+    assert status["pop3Configured"] is True
+    assert status["requiresApiKey"] is True
 
 
 # ── 15: email unavailable state ───────────────────────────────────────────────
@@ -305,6 +510,7 @@ def test_20_product_copy_keeps_trade_assistant_positioning():
     work = (TEMPLATES / "myaivan_work.html").read_text()
     assert "digital trade assistant" in welcome
     assert "digital trade assistant" in work
+    assert "MyAIVAN is your AIVAN digital trade assistant" in welcome
     assert "数字业务员" in i18n.CATALOG_ZH["welcome.tagline"]
     assert "数字业务员" in i18n.CATALOG_ZH["work.brand_sub"]
 
