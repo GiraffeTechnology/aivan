@@ -18,6 +18,11 @@ LLM_PROVIDER_TIMEOUT = "LLM_PROVIDER_TIMEOUT"
 LLM_PROVIDER_CONNECTION_ERROR = "LLM_PROVIDER_CONNECTION_ERROR"
 LLM_PROVIDER_UNSUPPORTED_RESPONSE = "LLM_PROVIDER_UNSUPPORTED_RESPONSE"
 
+# Token-Guard specific codes.
+LLM_CONTEXT_OVERFLOW = "LLM_CONTEXT_OVERFLOW"
+LLM_BUSY = "LLM_BUSY"
+LLM_ABORTED = "LLM_ABORTED"
+
 # Codes that are safe to retry (transient / possibly-transient conditions).
 RETRYABLE_CODES = frozenset(
     {LLM_EMPTY_RESPONSE, LLM_PROVIDER_TIMEOUT, LLM_PROVIDER_CONNECTION_ERROR}
@@ -64,3 +69,67 @@ class LLMProviderError(RuntimeError):
             "manual_review_required": self.manual_review_required,
             "retryable": self.retryable,
         }
+
+
+class LlmContextOverflowError(LLMProviderError):
+    """Estimated prompt + output budget exceeds the context window.
+
+    Raised *before* any network request so an over-long prompt never reaches
+    Ollama. Carries the estimate so the business layer can decide how to
+    compress its input; the guard never silently truncates the prompt.
+    """
+
+    def __init__(self, est_prompt_tokens: int, num_predict: int, context_window: int,
+                 provider: str = "", model: str = ""):
+        self.est_prompt_tokens = est_prompt_tokens
+        self.num_predict = num_predict
+        self.context_window = context_window
+        detail = f"est_prompt={est_prompt_tokens},num_predict={num_predict},window={context_window}"
+        super().__init__(LLM_CONTEXT_OVERFLOW, provider=provider, model=model,
+                         retryable=False, detail=detail)
+
+
+class LlmBusyError(LLMProviderError):
+    """The single-slot concurrency gate could not be acquired in time.
+
+    Mapped by the API layer to 503 + a friendly retry message; the request is
+    never queued indefinitely behind a running inference.
+    """
+
+    def __init__(self, waited_s: float, provider: str = "", model: str = ""):
+        self.waited_s = waited_s
+        super().__init__(LLM_BUSY, provider=provider, model=model,
+                         retryable=True, detail=f"waited={waited_s:.1f}s")
+
+
+class LlmTimeoutError(LLMProviderError):
+    """Inference exceeded its wall-clock budget and was force-aborted.
+
+    ``partial_text`` holds whatever was streamed before the circuit-break, so
+    callers may surface or discard it; the guard never auto-retries or enlarges
+    the budget.
+    """
+
+    def __init__(self, timeout_s: float, partial_text: str = "", reason: str = "timeout",
+                 provider: str = "", model: str = ""):
+        self.timeout_s = timeout_s
+        self.partial_text = partial_text
+        self.reason = reason
+        super().__init__(LLM_PROVIDER_TIMEOUT, provider=provider, model=model,
+                         retryable=False, detail=f"{reason}={timeout_s:.1f}s")
+
+
+class LlmAbortedError(LLMProviderError):
+    """Inference was cancelled by an external signal (client disconnect).
+
+    Distinct from a timeout: the request was cut short because the caller went
+    away, not because it ran too long. The Ollama stream is closed so the model
+    stops generating.
+    """
+
+    def __init__(self, partial_text: str = "", reason: str = "client_disconnect",
+                 provider: str = "", model: str = ""):
+        self.partial_text = partial_text
+        self.reason = reason
+        super().__init__(LLM_ABORTED, provider=provider, model=model,
+                         retryable=False, detail=reason)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import os
 import secrets
@@ -186,6 +187,51 @@ def _run_skill_event(event_data: dict, db: Session) -> dict:
     return _skill_response(create_rfq_from_event(parse_openclaw_event(event_data), db))
 
 
+async def _run_skill_event_with_abort(event_data: dict, db: Session, request: Request) -> dict:
+    """Run the skill pipeline with backend-side abort on client disconnect.
+
+    This is the server's ``AbortController``: the synchronous RFQ pipeline runs
+    in a worker thread carrying a :class:`CancelToken` via contextvars, while the
+    event loop watches ``request.is_disconnected()``. If the frontend user
+    interrupts the conversation or closes the page, the token is aborted and the
+    Token Guard closes the in-flight Ollama stream so the model stops generating
+    instead of finishing a request nobody is waiting for.
+    """
+    from aivan.llm.cancellation import CancelToken, set_cancel_token, reset_cancel_token
+
+    token = CancelToken()
+    reset = set_cancel_token(token)  # copied into the worker thread's context
+    try:
+        work = asyncio.create_task(asyncio.to_thread(_run_skill_event, event_data, db))
+        watcher = asyncio.create_task(_watch_client_disconnect(request, token, work))
+        try:
+            return await work
+        finally:
+            watcher.cancel()
+            try:
+                await watcher
+            except (asyncio.CancelledError, Exception):
+                pass
+    finally:
+        reset_cancel_token(reset)
+
+
+async def _watch_client_disconnect(request: Request, token, work: asyncio.Task) -> None:
+    """Poll for client disconnect; abort the token so Ollama generation stops."""
+    try:
+        while not work.done():
+            try:
+                if await request.is_disconnected():
+                    token.abort("client_disconnect")
+                    return
+            except Exception:
+                # A receive-channel error is not itself a reason to abort work.
+                return
+            await asyncio.sleep(0.25)
+    except asyncio.CancelledError:
+        pass
+
+
 def _normalize_invoke_payload(raw: dict) -> dict:
     """Normalize any supported /invoke body into a native OpenClaw event dict.
 
@@ -289,7 +335,7 @@ async def invoke(request: Request, db: Session = Depends(get_db)):
                 "artifacts": [],
             },
         )
-    return _run_skill_event(event_data, db)
+    return await _run_skill_event_with_abort(event_data, db, request)
 
 
 @app.post("/api/openclaw/events")
