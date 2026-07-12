@@ -127,14 +127,15 @@ class LlmTokenGuard:
         joined = "\n".join(str(m.get("content", "")) for m in messages)
         return estimate_prompt_tokens(joined)
 
-    def _compute_timeout(self, est_prompt: int, num_predict: int) -> float:
+    def _compute_timeout(self, est_prompt: int, num_predict: int, profile: cfg.LlmProfile) -> float:
         computed = (
             cfg.load_time_buffer_s()
             + est_prompt / cfg.prompt_speed_tps()
             + num_predict / cfg.gen_speed_tps()
         ) * cfg.timeout_safety_factor()
-        # Supplement: a single inference may never exceed the absolute ceiling.
-        return min(computed, cfg.max_inference_timeout_s())
+        # Effective timeout = min(formula, per-profile ceiling, absolute backstop).
+        # profile_timeout_ceiling already clamps to max_inference_timeout_s.
+        return min(computed, cfg.profile_timeout_ceiling(profile))
 
     def stream_chat(
         self,
@@ -162,7 +163,7 @@ class LlmTokenGuard:
             raise LlmContextOverflowError(est_prompt, num_predict, window,
                                           provider=self.provider_name, model=model)
 
-        timeout_s = self._compute_timeout(est_prompt, num_predict)
+        timeout_s = self._compute_timeout(est_prompt, num_predict, profile)
         temp = profile.temperature if temperature is None else temperature
 
         body = {

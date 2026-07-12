@@ -92,15 +92,16 @@ def timeout_safety_factor() -> float:
 
 
 def max_inference_timeout_s() -> float:
-    """Absolute per-inference wall-clock ceiling.
+    """Absolute per-inference wall-clock ceiling — the final backstop.
 
-    Supplement to the base PRD: a single AI inference may never run longer than
-    this. The token-budget formula can propose a much larger timeout (minutes),
-    but the effective timeout is always ``min(computed, this)``. When it fires
-    the in-flight Ollama stream is force-aborted (circuit-break), so one runaway
-    request can never pin the production CPU for minutes.
+    No single inference may EVER run longer than this, whatever its profile or
+    token budget. The effective timeout is always
+    ``min(token-budget formula, profile ceiling, this)``; when it fires the
+    in-flight Ollama stream is force-aborted (circuit-break). This is the last
+    line of defence against a runaway request pinning the production CPU; normal
+    traffic is bounded well below it by the per-profile ceilings.
     """
-    return _env_float("LLM_MAX_INFERENCE_TIMEOUT_S", 60.0)
+    return _env_float("LLM_MAX_INFERENCE_TIMEOUT_S", 480.0)
 
 
 # ── Call profiles ───────────────────────────────────────────────────────────
@@ -119,6 +120,26 @@ PROFILES: dict[str, LlmProfile] = {
     "reasoning": LlmProfile("reasoning", think=True, num_predict=1024, temperature=0.2),
     "reasoning_max": LlmProfile("reasoning_max", think=True, num_predict=2048, temperature=0.2),
 }
+
+
+def _profile_base_ceiling(name: str) -> float:
+    """Per-profile wall-clock ceiling (seconds), read from env at call time.
+
+    Sized for the ~5 tok/s 9B production box so a profile can realistically emit
+    its ``num_predict`` budget before the ceiling (256 tok ~= 51s, 512 ~= 102s,
+    1024 ~= 205s, 2048 ~= 410s, plus load + prompt-eval). Interactive qa_* stay
+    tight for server responsiveness; reasoning* get headroom to complete.
+    """
+    if name == "reasoning":
+        return _env_float("LLM_REASONING_TIMEOUT_S", 240.0)
+    if name == "reasoning_max":
+        return _env_float("LLM_REASONING_MAX_TIMEOUT_S", 480.0)
+    return _env_float("LLM_QA_MAX_TIMEOUT_S", 90.0)
+
+
+def profile_timeout_ceiling(profile: LlmProfile) -> float:
+    """Per-profile ceiling, never above the absolute backstop."""
+    return min(_profile_base_ceiling(profile.name), max_inference_timeout_s())
 
 DEFAULT_PROFILE = "qa_standard"
 

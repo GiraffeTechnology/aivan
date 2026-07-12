@@ -8,11 +8,23 @@ an optional parameter — every local inference is routed through
 
 ## Why
 
-Production runs `qwen3.5:2b` on Ollama on a 4 vCPU / 16 GB CPU-only host with
+The production box is a 4 vCPU / 16 GB CPU-only host running Ollama with
 `OLLAMA_NUM_PARALLEL=1`. Without an output cap and a real cancel path, a single
 `think=true` request with no `num_predict` was observed generating >1500 tokens
 for up to ~12 minutes at ~250% CPU — effectively freezing the box. The guard
 removes that failure mode.
+
+> **Model reference — reconcile before merge.** The timeout/queue defaults
+> (`LLM_QA_MAX_TIMEOUT_S=90`, `LLM_QUEUE_WAIT_TIMEOUT_S=100`, per-profile
+> ceilings) are tuned against the **9B** model per the Token-Guard PRD
+> (`qwen3.5:9b`, Q4_K_M, ~5.3 tok/s) and the parallel stress test, where a
+> ~268-token reply took ~62s. However the AIVAN application default is
+> `OLLAMA_MODEL=qwen3.5:2b` (from earlier work). These disagree: if the box
+> actually serves **2b**, replies are much faster and the 90s ceiling is
+> generous; if it serves **9b**, 90s is the intended snug bound for `qa_*`. The
+> guard is correct either way (it only ever *bounds*), but the deployed
+> `OLLAMA_MODEL` and the measured speed must be reconciled. This doc describes
+> the 9B tuning basis.
 
 ## Guarantees (hard invariants)
 
@@ -54,31 +66,59 @@ Business code selects a **profile** by intent (never free-forms `think`/budget):
 | `reasoning`     | true  | 1024        | 0.2         | moderate reasoning               |
 | `reasoning_max` | true  | 2048        | 0.2         | complex reasoning (explicit)     |
 
-> Note: under the 90s hard cap on a ~5 tok/s CPU box, large budgets
-> (`reasoning`/`reasoning_max`) can hit the circuit-break and return `truncated`.
-> Server stability wins over completion — by design.
+### Per-profile wall-clock ceilings
+
+The wall-clock ceiling is **per profile**, not a single global 90s (which would
+make `reasoning`/`reasoning_max` unusable — at ~5 tok/s, 90s yields only
+~350–400 output tokens, so a 1024/2048-token budget could *never* complete and
+every reasoning call would end as a partial-text timeout). Defaults are sized so
+each profile can realistically emit its budget on the 9B CPU box:
+
+| profile         | num_predict | budget @≈5 tok/s | ceiling (env)                       |
+|-----------------|-------------|------------------|-------------------------------------|
+| `qa_short`      | 256         | ~51s             | `LLM_QA_MAX_TIMEOUT_S` = **90s**     |
+| `qa_standard`   | 512         | ~102s            | `LLM_QA_MAX_TIMEOUT_S` = **90s**     |
+| `reasoning`     | 1024        | ~205s            | `LLM_REASONING_TIMEOUT_S` = **240s** |
+| `reasoning_max` | 2048        | ~410s            | `LLM_REASONING_MAX_TIMEOUT_S` = **480s** |
+
+`qa_*` stay tight for interactive responsiveness (a `qa_standard` reply that
+runs past 90s is still force-truncated — but the observed natural stop is ~268
+tokens / ~62s, so real traffic completes). `reasoning*` get headroom to finish.
+Every ceiling is clamped by the **absolute backstop** `LLM_MAX_INFERENCE_TIMEOUT_S`
+(default **480s**): no single inference may ever exceed it, whatever the profile.
+
+> AIVAN's live pipeline maps every task to `qa_short`/`qa_standard`
+> (`TASK_PROFILE`), so in production every real inference is bounded at 90s. The
+> reasoning profiles exist for explicit opt-in and now complete rather than
+> silently truncating.
 
 ## Timeout chain (verified)
 
-For the local Ollama path the effective per-inference wall-clock is exactly
-`LLM_MAX_INFERENCE_TIMEOUT_S`, with nothing shorter undercutting it:
+Effective per-inference wall-clock = `min(budget formula, per-profile ceiling,
+absolute backstop)`, with nothing shorter undercutting it:
 
 | stage | value | note |
 |-------|-------|------|
 | budget formula | `(load_buffer + est_prompt/prompt_tps + num_predict/gen_tps) * safety` | can propose minutes |
-| **effective timeout** | `min(formula, LLM_MAX_INFERENCE_TIMEOUT_S)` = **90s** | the enforced ceiling |
-| httpx `read` / `write` / `pool` | = effective (90s) | bounds a *silent* hang |
+| per-profile ceiling | 90 / 240 / 480s | interactive vs reasoning |
+| absolute backstop | `LLM_MAX_INFERENCE_TIMEOUT_S` = 480s | final hard limit |
+| **effective timeout** | `min(formula, ceiling, backstop)` | e.g. **90s** for qa_* |
+| httpx `read` / `write` / `pool` | = effective | bounds a *silent* hang |
 | httpx `connect` | `min(10s, effective)` | connection setup only |
 | per-chunk deadline | `start + effective` | bounds a slow-but-streaming run |
-| queue wait (gate) | `LLM_QUEUE_WAIT_TIMEOUT_S` = 100s | separate from inference time |
+| queue wait (gate) | `LLM_QUEUE_WAIT_TIMEOUT_S` = 100s | separate, *before* inference starts |
 
 - `AIVAN_LLM_TIMEOUT_SECONDS` (30s) **no longer governs local Ollama** — it now
   applies only to the external, approval-gated providers. Local inference is
   bounded solely by the guard.
-- **External timeouts must be ≥ the cap.** Set nginx `proxy_read_timeout` and any
-  OpenClaw/runtime request timeout to ≥ 90s. If they fire first the client
-  disconnects, which the guard treats as a client-disconnect abort (Ollama stops
-  cleanly and the user gets a retry) — safe, but the reply is lost.
+- **Upstream timeout must cover queue wait + inference, not just inference.** A
+  queued request waits up to `LLM_QUEUE_WAIT_TIMEOUT_S` *before* its inference
+  starts, so set nginx `proxy_read_timeout` and any OpenClaw/runtime request
+  timeout to **≥ `LLM_QUEUE_WAIT_TIMEOUT_S` + (max profile ceiling in use) + margin**.
+  For the qa-only live pipeline that is `100 + 90 = 190s` → use ≥ ~210s; if
+  reasoning profiles are enabled, size against their ceilings. If the upstream
+  fires first the client disconnects and the guard aborts cleanly (Ollama stops,
+  user gets a retry) — safe, but a successfully-queued reply is lost.
 
 ## Concurrency & queue behavior
 
