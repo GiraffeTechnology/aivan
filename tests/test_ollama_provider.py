@@ -1,24 +1,28 @@
+import json
+
+import httpx
 import pytest
 
+from aivan.llm import guard as guard_mod
 from aivan.llm.gateway import get_provider, reset_provider
 from aivan.llm.providers.ollama_provider import OllamaProvider
 
 
-class _Response:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        return self.payload
+def _stream_response(content: str, done_reason: str = "stop") -> httpx.Response:
+    lines = [
+        json.dumps({"message": {"role": "assistant", "content": content}, "done": False}),
+        json.dumps({"done": True, "done_reason": done_reason}),
+    ]
+    return httpx.Response(200, content=("\n".join(lines) + "\n").encode())
 
 
 @pytest.fixture(autouse=True)
 def reset_llm_provider():
     reset_provider()
+    guard_mod.reset_gate()
     yield
+    guard_mod.set_test_transport(None)
+    guard_mod.reset_gate()
     reset_provider()
 
 
@@ -30,24 +34,18 @@ def test_gateway_selects_ollama_provider(monkeypatch):
     assert isinstance(provider, OllamaProvider)
 
 
-def test_ollama_provider_uses_native_chat_without_qwen_key(monkeypatch):
-    calls = []
+def test_ollama_provider_streams_guarded_chat(monkeypatch):
+    captured = {}
 
-    def fake_post(url, json, timeout):
-        calls.append({"url": url, "json": json, "timeout": timeout})
-        return _Response(
-            {
-                "message": {
-                    "role": "assistant",
-                    "content": '{"ok": true, "provider": "ollama"}',
-                }
-            }
-        )
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return _stream_response('{"ok": true, "provider": "ollama"}')
 
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:2b")
     monkeypatch.delenv("QWEN_API_KEY", raising=False)
-    monkeypatch.setattr("aivan.llm.providers.ollama_provider.httpx.post", fake_post)
+    guard_mod.set_test_transport(httpx.MockTransport(handler))
 
     result = OllamaProvider().complete_json(
         "ollama_smoke",
@@ -58,24 +56,27 @@ def test_ollama_provider_uses_native_chat_without_qwen_key(monkeypatch):
     )
 
     assert result == {"ok": True, "provider": "ollama"}
-    assert len(calls) == 1
-    assert calls[0]["url"] == "http://127.0.0.1:11434/api/chat"
-    assert calls[0]["json"]["model"] == "qwen3.5:2b"
-    assert calls[0]["json"]["stream"] is False
-    assert calls[0]["json"]["think"] is False
-    assert calls[0]["json"]["format"] == "json"
+    body = captured["body"]
+    assert captured["url"] == "http://127.0.0.1:11434/api/chat"
+    assert body["model"] == "qwen3.5:2b"
+    # Token Guard invariants on the wire body:
+    assert body["stream"] is True
+    assert body["think"] is False
+    assert body["format"] == "json"
+    assert "num_predict" in body["options"]
+    assert 1 <= body["options"]["num_predict"] <= 2048
 
 
-def test_ollama_provider_retries_and_hides_payload(monkeypatch):
+def test_ollama_provider_hides_payload_on_failure(monkeypatch):
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:2b")
-    monkeypatch.setenv("AIVAN_LLM_MAX_RETRIES", "0")
-    monkeypatch.setattr(
-        "aivan.llm.providers.ollama_provider.httpx.post",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")),
-    )
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network down")
+
+    guard_mod.set_test_transport(httpx.MockTransport(boom))
 
     with pytest.raises(RuntimeError) as exc:
-        OllamaProvider().complete_json("task", "system", "user", {})
+        OllamaProvider().complete_json("task", "system", "secret user prompt", {})
 
     assert "qwen3.5:2b" not in str(exc.value)
-    assert "user" not in str(exc.value)
+    assert "secret user prompt" not in str(exc.value)

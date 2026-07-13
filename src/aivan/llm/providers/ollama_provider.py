@@ -1,103 +1,83 @@
 import json
 import os
-from urllib.parse import urljoin
-
-import httpx
 
 from aivan.llm.base import LLMProvider
-from aivan.llm.config import get_llm_max_retries, get_llm_timeout
 from aivan.llm.errors import (
     LLM_EMPTY_RESPONSE,
     LLM_INVALID_JSON,
-    LLM_PROVIDER_CONNECTION_ERROR,
-    LLM_PROVIDER_TIMEOUT,
     LLM_PROVIDER_UNSUPPORTED_RESPONSE,
     LLMProviderError,
 )
+from aivan.llm.guard import LlmTokenGuard
+from aivan.llm.guard_config import resolve_profile
 from aivan.llm.json_utils import extract_json
 
 
 class OllamaProvider(LLMProvider):
+    """Local Ollama provider. All inference is routed through the Token Guard.
+
+    The provider never talks to the socket directly: it builds the chat messages
+    and hands them to :class:`LlmTokenGuard`, which forces a bounded
+    ``num_predict``, a streamed call, a wall-clock circuit-break, real
+    cancellation, and the single-slot concurrency gate. The provider's own job is
+    only to select a profile from the task and to classify the returned text into
+    a JSON object (or a typed failure requiring manual review).
+    """
+
     provider_name = "ollama"
 
     def __init__(self):
         self.base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
         self.model = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b")
-        self.timeout = get_llm_timeout()
-        self.max_retries = get_llm_max_retries()
+        self._guard = LlmTokenGuard(provider_name=self.provider_name)
 
     def _error(self, code: str, detail: str = "") -> LLMProviderError:
         # Never pass prompts, messages, or provider bodies into ``detail``.
         return LLMProviderError(code, provider=self.provider_name, model=self.model, detail=detail)
 
-    def complete_json(self, task: str, system_prompt: str, user_prompt: str, schema_hint: dict, temperature: float = 0.0) -> dict:
-        request_body = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt + "\n\nReturn valid JSON only."},
-                {"role": "user", "content": user_prompt},
-            ],
-            "stream": False,
-            "think": False,
-            "format": "json",
-            "options": {"temperature": temperature},
-        }
-        url = urljoin(self.base_url.rstrip("/") + "/", "api/chat")
+    def complete_json(
+        self,
+        task: str,
+        system_prompt: str,
+        user_prompt: str,
+        schema_hint: dict,
+        temperature: float = 0.0,
+    ) -> dict:
+        profile = resolve_profile(None, task)
+        messages = [
+            {"role": "system", "content": system_prompt + "\n\nReturn valid JSON only."},
+            {"role": "user", "content": user_prompt},
+        ]
 
-        attempts = self.max_retries + 1
-        empty_retry_used = False
-        last_error: LLMProviderError | None = None
+        # The guard raises its own typed control-flow errors (busy / timeout /
+        # aborted / context overflow) which propagate unchanged for the caller
+        # to handle. Everything below only deals with a *completed* stream.
+        result = self._guard.stream_chat(
+            base_url=self.base_url,
+            model=self.model,
+            messages=messages,
+            profile=profile,
+            response_format="json",
+            temperature=temperature,
+        )
 
-        for attempt in range(attempts):
-            # ── Transport ──────────────────────────────────────────────────
-            try:
-                response = httpx.post(url, json=request_body, timeout=self.timeout)
-                response.raise_for_status()
-            except httpx.TimeoutException as exc:
-                last_error = self._error(LLM_PROVIDER_TIMEOUT, type(exc).__name__)
-                continue
-            except httpx.HTTPStatusError as exc:
-                last_error = self._error(LLM_PROVIDER_CONNECTION_ERROR, f"http_{exc.response.status_code}")
-                continue
-            except Exception as exc:  # connection reset, DNS, transport, etc.
-                last_error = self._error(LLM_PROVIDER_CONNECTION_ERROR, type(exc).__name__)
-                continue
+        # A truncated JSON answer is unusable and must never be auto-retried or
+        # auto-enlarged — surface it as invalid for manual review.
+        if result.truncated:
+            raise self._error(LLM_INVALID_JSON, "truncated")
 
-            # ── Body extraction ────────────────────────────────────────────
-            try:
-                body = response.json()
-            except Exception:
-                body = None
-            content = ""
-            if isinstance(body, dict):
-                message = body.get("message") or {}
-                if isinstance(message, dict):
-                    content = message.get("content", "") or ""
-            content = content.strip() if isinstance(content, str) else ""
+        content = result.text.strip() if isinstance(result.text, str) else ""
+        if not content or content.lower() == "null":
+            raise self._error(LLM_EMPTY_RESPONSE, "empty_content")
 
-            # ── Empty body / whitespace / literal null → retry at most once ─
-            if not content or content.lower() == "null":
-                last_error = self._error(LLM_EMPTY_RESPONSE, "empty_content")
-                if not empty_retry_used and attempt < attempts - 1:
-                    empty_retry_used = True
-                    continue
-                raise last_error
-
-            # ── Parse + classify ───────────────────────────────────────────
-            status, value = _classify_content(content)
-            if status == "ok":
-                return value
-            if status == "empty":
-                # Model returned a valid but empty object ({}) — no assessment.
-                raise self._error(LLM_EMPTY_RESPONSE, "empty_object")
-            if status == "unsupported":
-                # Valid JSON that is not an object (array/string/number/bool).
-                raise self._error(LLM_PROVIDER_UNSUPPORTED_RESPONSE, "non_object_json")
-            # Malformed / truncated JSON — do not auto-fill; manual review.
-            raise self._error(LLM_INVALID_JSON, "unparseable")
-
-        # Exhausted retries on a transient transport/empty condition.
-        raise last_error or self._error(LLM_PROVIDER_CONNECTION_ERROR, "no_response")
+        status, value = _classify_content(content)
+        if status == "ok":
+            return value
+        if status == "empty":
+            raise self._error(LLM_EMPTY_RESPONSE, "empty_object")
+        if status == "unsupported":
+            raise self._error(LLM_PROVIDER_UNSUPPORTED_RESPONSE, "non_object_json")
+        raise self._error(LLM_INVALID_JSON, "unparseable")
 
 
 def _classify_content(content: str) -> tuple[str, dict]:

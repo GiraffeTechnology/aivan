@@ -4,7 +4,13 @@ Empty/malformed/non-object model output must be a typed failure requiring manual
 review — never a false success (main previously returned ``{}`` for garbage).
 Through the PR29 gateway this surfaces as provider_ok=false / local_call_failed,
 with NO external API and NO mock fallback.
+
+All local inference now goes through the Token Guard, which streams the call, so
+these tests drive the guard's injected mock transport (streamed Ollama JSONL)
+rather than patching a one-shot ``httpx.post``.
 """
+import json
+
 import httpx
 import pytest
 
@@ -17,41 +23,45 @@ from aivan.llm.errors import (
     LLMProviderError,
 )
 from aivan.llm import gateway
+from aivan.llm import guard as guard_mod
 from aivan.llm.gateway import llm_complete_json, reset_provider
 from aivan.llm.policy import LocalModelUnavailableError
 from aivan.llm.providers.ollama_provider import OllamaProvider
 
 
-class _Response:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        return self._payload
+def _stream_response(content: str, done_reason: str = "stop") -> httpx.Response:
+    """A completed Ollama /api/chat stream carrying ``content`` in one chunk."""
+    lines = [
+        json.dumps({"message": {"role": "assistant", "content": content}, "done": False}),
+        json.dumps({"done": True, "done_reason": done_reason}),
+    ]
+    return httpx.Response(200, content=("\n".join(lines) + "\n").encode())
 
 
-def _content_response(content):
-    return _Response({"message": {"role": "assistant", "content": content}})
+def _transport_returning(content: str, done_reason: str = "stop") -> httpx.MockTransport:
+    return httpx.MockTransport(lambda req: _stream_response(content, done_reason))
+
+
+def _transport_raising(exc: Exception) -> httpx.MockTransport:
+    def handler(req):
+        raise exc
+    return httpx.MockTransport(handler)
 
 
 @pytest.fixture(autouse=True)
-def _no_retries_and_reset(monkeypatch):
-    monkeypatch.setenv("AIVAN_LLM_MAX_RETRIES", "0")
+def _reset(monkeypatch):
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:2b")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     reset_provider()
+    guard_mod.reset_gate()
     yield
+    guard_mod.set_test_transport(None)
+    guard_mod.reset_gate()
     reset_provider()
 
 
-def _patch_post(monkeypatch, fn):
-    monkeypatch.setattr("aivan.llm.providers.ollama_provider.httpx.post", fn)
-
-
-def _expect_error(monkeypatch, post_fn, code):
-    _patch_post(monkeypatch, post_fn)
+def _expect_error(transport, code):
+    guard_mod.set_test_transport(transport)
     with pytest.raises(LLMProviderError) as exc:
         OllamaProvider().complete_json("trade_risk", "system", "secret user prompt", {})
     err = exc.value
@@ -65,65 +75,55 @@ def _expect_error(monkeypatch, post_fn, code):
 
 # ── empty / malformed / non-object -> typed error, not {} success ────────────
 
-def test_empty_output_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response(""), LLM_EMPTY_RESPONSE)
+def test_empty_output_raises_typed_error():
+    _expect_error(_transport_returning(""), LLM_EMPTY_RESPONSE)
 
 
-def test_whitespace_output_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response("  \n\t "), LLM_EMPTY_RESPONSE)
+def test_whitespace_output_raises_typed_error():
+    _expect_error(_transport_returning("  \n\t "), LLM_EMPTY_RESPONSE)
 
 
-def test_null_output_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response("null"), LLM_EMPTY_RESPONSE)
+def test_null_output_raises_typed_error():
+    _expect_error(_transport_returning("null"), LLM_EMPTY_RESPONSE)
 
 
-def test_empty_object_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response("{}"), LLM_EMPTY_RESPONSE)
+def test_empty_object_raises_typed_error():
+    _expect_error(_transport_returning("{}"), LLM_EMPTY_RESPONSE)
 
 
-def test_malformed_json_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response('{"a": 1'), LLM_INVALID_JSON)
+def test_malformed_json_raises_typed_error():
+    _expect_error(_transport_returning('{"a": 1'), LLM_INVALID_JSON)
 
 
-def test_json_array_is_unsupported(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response("[1,2,3]"), LLM_PROVIDER_UNSUPPORTED_RESPONSE)
+def test_json_array_is_unsupported():
+    _expect_error(_transport_returning("[1,2,3]"), LLM_PROVIDER_UNSUPPORTED_RESPONSE)
 
 
-def test_json_scalar_is_unsupported(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: _content_response('"a string"'), LLM_PROVIDER_UNSUPPORTED_RESPONSE)
+def test_json_scalar_is_unsupported():
+    _expect_error(_transport_returning('"a string"'), LLM_PROVIDER_UNSUPPORTED_RESPONSE)
 
 
-def test_timeout_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: (_ for _ in ()).throw(httpx.TimeoutException("t")), LLM_PROVIDER_TIMEOUT)
+def test_truncated_length_is_invalid_and_not_retried():
+    # done_reason=length -> partial JSON -> INVALID (manual review), never retried.
+    _expect_error(_transport_returning('{"a":', done_reason="length"), LLM_INVALID_JSON)
 
 
-def test_connection_error_raises_typed_error(monkeypatch):
-    _expect_error(monkeypatch, lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("refused")), LLM_PROVIDER_CONNECTION_ERROR)
+def test_timeout_raises_typed_error():
+    _expect_error(_transport_raising(httpx.ReadTimeout("t")), LLM_PROVIDER_TIMEOUT)
 
 
-def test_text_around_json_is_recovered(monkeypatch):
-    _patch_post(monkeypatch, lambda *a, **k: _content_response('Sure: {"risk": "low", "ok": true} done'))
+def test_connection_error_raises_typed_error():
+    _expect_error(_transport_raising(httpx.ConnectError("refused")), LLM_PROVIDER_CONNECTION_ERROR)
+
+
+def test_text_around_json_is_recovered():
+    guard_mod.set_test_transport(_transport_returning('Sure: {"risk": "low", "ok": true} done'))
     assert OllamaProvider().complete_json("t", "system", "user", {}) == {"risk": "low", "ok": True}
 
 
-def test_valid_json_still_passes(monkeypatch):
-    _patch_post(monkeypatch, lambda *a, **k: _content_response('{"ok": true}'))
+def test_valid_json_still_passes():
+    guard_mod.set_test_transport(_transport_returning('{"ok": true}'))
     assert OllamaProvider().complete_json("t", "system", "user", {}) == {"ok": True}
-
-
-def test_empty_output_retries_at_most_once(monkeypatch):
-    monkeypatch.setenv("AIVAN_LLM_MAX_RETRIES", "3")
-    reset_provider()
-    calls = {"n": 0}
-
-    def counting(*a, **k):
-        calls["n"] += 1
-        return _content_response("")
-
-    _patch_post(monkeypatch, counting)
-    with pytest.raises(LLMProviderError):
-        OllamaProvider().complete_json("t", "system", "user", {})
-    assert calls["n"] == 2  # original + exactly one retry despite max_retries=3
 
 
 # ── gateway: PR29-compatible (no mock fallback, no external) ─────────────────
