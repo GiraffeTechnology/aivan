@@ -1,0 +1,10 @@
+# Default ownership
+* @GiraffeTechnology
+
+# Security-sensitive surfaces
+/.github/ @GiraffeTechnology
+/src/aivan/api/ @GiraffeTechnology
+/src/aivan/llm/ @GiraffeTechnology
+/src/aivan/execution/ @GiraffeTechnology
+/integrations/ @GiraffeTechnology
+/SECURITY.md @GiraffeTechnology
