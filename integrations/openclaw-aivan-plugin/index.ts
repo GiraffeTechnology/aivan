@@ -39,6 +39,9 @@ type FetchPolicy = {
   retryable?: boolean;
   idempotencyKey?: string;
   traceId?: string;
+  participantId?: string;
+  participantRole?: string;
+  participantConversationRole?: string;
 };
 
 let registeredConfig: RuntimeConfig = {};
@@ -100,7 +103,43 @@ function buildHeaders(policy: FetchPolicy = {}): Record<string, string> {
   if (policy.traceId) {
     headers["X-AIVAN-Trace-ID"] = policy.traceId;
   }
+  if (policy.participantId) {
+    headers["X-AIVAN-Participant-ID"] = policy.participantId;
+  }
+  if (policy.participantRole) {
+    headers["X-AIVAN-Participant-Role"] = policy.participantRole;
+  }
+  if (policy.participantConversationRole) {
+    headers["X-AIVAN-Participant-Conversation-Role"] = policy.participantConversationRole;
+  }
   return headers;
+}
+
+function participantIdentity(event: {
+  channel: string;
+  channel_account_id?: string;
+  sender_id: string;
+  business_role?: string;
+  role_context?: string | Record<string, unknown> | null;
+  conversation_role?: string;
+}): { id: string; role: string; conversationRole: string } {
+  const rawRole = String(
+    event.business_role ??
+      (typeof event.role_context === "string" ? event.role_context : "buyer")
+  ).trim().toLowerCase();
+  const roleAliases: Record<string, string> = {
+    customer: "buyer", b_side: "buyer", buyer: "buyer",
+    seller: "supplier", m_side: "supplier", supplier: "supplier",
+    // Participant headers never grant internal/operator capabilities. The
+    // authenticated service identity carries those privileges separately.
+    operator: "buyer", user: "buyer", salesperson: "buyer", sales: "buyer",
+  };
+  const role = roleAliases[rawRole] ?? "buyer";
+  const conversationRole = event.conversation_role ??
+    (role === "buyer" ? "buyer_thread" : role === "supplier" ? "supplier_thread" : "internal_thread");
+  const participantKey = [event.channel, event.channel_account_id ?? "default", event.sender_id].join("\u001f");
+  const id = `ocp_${createHash("sha256").update(participantKey).digest("hex").slice(0, 48)}`;
+  return { id, role, conversationRole };
 }
 
 function errorMessage(data: unknown): string {
@@ -328,6 +367,7 @@ export async function forwardEvent(event: {
   const idempotencyKey =
     event.idempotency_key ??
     `oc_${createHash("sha256").update(stableIdentity).digest("hex").slice(0, 48)}`;
+  const participant = participantIdentity(event);
   const result = await safeFetch(
     "/invoke",
     {
@@ -338,6 +378,9 @@ export async function forwardEvent(event: {
       retryable: true,
       idempotencyKey,
       traceId: event.source_trace_id,
+      participantId: participant.id,
+      participantRole: participant.role,
+      participantConversationRole: participant.conversationRole,
     }
   );
   if (!result.ok) {
@@ -846,3 +889,4 @@ export function register(api: any): void {
     process.stderr.write(`[aivan] register() error: ${String(err)}\n`);
   }
 }
+

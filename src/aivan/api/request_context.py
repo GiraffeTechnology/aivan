@@ -31,6 +31,9 @@ class RequestContext:
     conversation_role: str
     execution_mode: str
     channel_account_id: str
+    participant_actor_id: str
+    participant_role_context: str
+    participant_conversation_role: str
     authorization_basis: str
     production: bool
 
@@ -179,6 +182,17 @@ def resolve_request_context(request: Request) -> RequestContext:
         channel_account_id=_safe_identifier(
             _header(request, "X-AIVAN-Channel-Account-ID"), field="channel_account_id"
         ),
+        participant_actor_id=_safe_identifier(
+            _header(request, "X-AIVAN-Participant-ID"), field="participant_actor_id"
+        ),
+        participant_role_context=_safe_identifier(
+            _header(request, "X-AIVAN-Participant-Role"),
+            field="participant_role_context",
+        ),
+        participant_conversation_role=_safe_identifier(
+            _header(request, "X-AIVAN-Participant-Conversation-Role"),
+            field="participant_conversation_role",
+        ),
         authorization_basis=authorization_basis,
         production=production,
     )
@@ -194,28 +208,20 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
     if body_tenant and body_tenant != context.tenant_id:
         raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
 
-    body_role = str(event.get("role_context", "") or "").strip()
-    if context.production and body_role and not context.role_context:
+    body_role = str(event.get("business_role") or event.get("role_context") or "").strip()
+    if context.production and body_role and not context.participant_role_context:
         raise HTTPException(status_code=403, detail={"error": "UNTRUSTED_ROLE_CONTEXT"})
-    if context.role_context:
-        event["role_context"] = context.role_context
 
     body_account = str(event.get("channel_account_id", "") or "").strip()
     if context.production and body_account and not context.channel_account_id:
         raise HTTPException(status_code=403, detail={"error": "UNTRUSTED_CHANNEL_ACCOUNT"})
     if context.channel_account_id:
         event["channel_account_id"] = context.channel_account_id
-    if context.actor_id:
-        event["actor_id"] = context.actor_id
-
     body_conversation_role = str(event.get("conversation_role", "") or "").strip()
-    if context.production and body_conversation_role and not context.conversation_role:
+    if context.production and body_conversation_role and not context.participant_conversation_role:
         raise HTTPException(
             status_code=403, detail={"error": "UNTRUSTED_CONVERSATION_ROLE"}
         )
-    if context.conversation_role:
-        event["conversation_role"] = context.conversation_role
-
     if context.production and not context.actor_id:
         raise HTTPException(
             status_code=400,
@@ -226,17 +232,28 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
             status_code=400,
             detail={"error": "ACTOR_ROLE_REQUIRED", "field": "business_role"},
         )
+    if context.production and not context.participant_actor_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "PARTICIPANT_ID_REQUIRED", "field": "participant_actor_id"},
+        )
+    if context.production and not context.participant_role_context:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "PARTICIPANT_ROLE_REQUIRED", "field": "participant_role_context"},
+        )
 
     from aivan.domain.roles import RoleAuthorizationError, normalize_actor_identity
 
-    body_actor_id = str(event.get("actor_id") or "").strip()
+    explicit_body_actor_id = str(event.get("actor_id") or "").strip()
+    body_actor_id = explicit_body_actor_id or str(event.get("sender_id") or "").strip()
     try:
         identity = normalize_actor_identity(
-            actor_id=context.actor_id
+            actor_id=context.participant_actor_id
             or body_actor_id
             or str(event.get("sender_id") or "local-actor"),
-            business_role=context.role_context or body_role,
-            conversation_role=context.conversation_role or body_conversation_role,
+            business_role=context.participant_role_context or body_role,
+            conversation_role=context.participant_conversation_role or body_conversation_role,
             execution_mode=context.execution_mode or str(event.get("mode") or "auto"),
             authorization_basis=context.authorization_basis,
         )
@@ -250,7 +267,22 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
     # Keep the authenticated operator separate from the external participant.
     # A sender is usable for participant/audit binding but is not promoted to a
     # trusted operator capable of receiving internal control notifications.
-    event["actor_id"] = context.actor_id or body_actor_id or None
+    event["actor_id"] = identity.actor_id
+    local_operator_roles = {"user", "owner", "operator", "sales", "salesperson"}
+    local_command_sender = (
+        body_actor_id
+        if not context.production
+        and body_role.lower() in local_operator_roles
+        and str(event.get("mode") or "").lower() in {"user", "command"}
+        else ""
+    )
+    local_body_actor_id = (
+        explicit_body_actor_id or local_command_sender
+    ) if not context.production else ""
+    event["authenticated_actor_id"] = context.actor_id or local_body_actor_id or None
+    event["authenticated_actor_role"] = context.role_context or (
+        body_role if local_body_actor_id else ""
+    )
     event["business_role"] = identity.business_role.value
     event["conversation_role"] = identity.conversation_role.value
     event["execution_mode"] = identity.execution_mode.value
@@ -301,3 +333,4 @@ def actor_identity_from_context(
             status_code=status,
             detail={"error": exc.code, "reason": exc.reason},
         ) from exc
+

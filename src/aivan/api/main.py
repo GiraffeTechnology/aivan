@@ -38,7 +38,7 @@ def _load_supplier_registry_on_startup() -> int:
     from aivan.sourcing.supplier_registry import load_from_db
 
     with db_session() as db:
-        return load_from_db(db)
+        return load_from_db(db, tenant_id=None)
 
 
 @asynccontextmanager
@@ -702,43 +702,43 @@ def get_project_state(project_id: str, db: Session = Depends(get_db), context: R
     }
 
 @app.post("/api/suppliers/import")
-def import_suppliers(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def import_suppliers(body: dict, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     csv_content = body.get("csv_content", "")
     if not csv_content:
         raise HTTPException(status_code=400, detail="csv_content required")
     from aivan.sourcing.supplier_importer import import_from_csv
-    count, errors = import_from_csv(csv_content, db)
+    count, errors = import_from_csv(csv_content, db, tenant_id=context.tenant_id)
     db.commit()
     return {"imported": count, "errors": errors}
 
 @app.get("/api/suppliers")
-def list_suppliers(db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def list_suppliers(db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.sourcing.supplier_registry import list_active
-    suppliers = list_active()
+    suppliers = list_active(tenant_id=context.tenant_id)
     return {"suppliers": [s.model_dump() for s in suppliers], "total": len(suppliers)}
 
 @app.post("/api/suppliers/match")
-def match_suppliers(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def match_suppliers(body: dict, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.schemas.requirement import BuyerRequirement
     from aivan.sourcing.supplier_matcher import match_suppliers_for_requirement
     req = BuyerRequirement(**body)
-    matches = match_suppliers_for_requirement(req, limit=10)
+    matches = match_suppliers_for_requirement(req, limit=10, tenant_id=context.tenant_id)
     return {"matches": [{"supplier": m.supplier.model_dump(), "match_score": m.match_score, "match_reason": m.match_reason} for m in matches]}
 
 @app.get("/api/platforms")
-def list_platforms(_: RequestContext = Depends(_require_api_key)):
+def list_platforms(context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import list_all_platforms
-    platforms = list_all_platforms()
+    platforms = list_all_platforms(tenant_id=context.tenant_id)
     return {"platforms": [p.model_dump() for p in platforms]}
 
 @app.get("/api/platforms/whitelist")
-def list_whitelist(_: RequestContext = Depends(_require_api_key)):
+def list_whitelist(context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import list_trusted_platforms
-    platforms = list_trusted_platforms()
+    platforms = list_trusted_platforms(tenant_id=context.tenant_id)
     return {"trusted_platforms": [p.model_dump() for p in platforms]}
 
 @app.post("/api/platforms/whitelist")
-def add_platform_to_whitelist(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def add_platform_to_whitelist(body: dict, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.models import TrustedPlatform
     from aivan.platforms.platform_registry import add_platform
     from aivan.utils.time_utils import utcnow_iso
@@ -751,35 +751,35 @@ def add_platform_to_whitelist(body: dict, db: Session = Depends(get_db), _: None
         created_at=utcnow_iso(),
         updated_at=utcnow_iso(),
     )
-    add_platform(platform)
+    add_platform(platform, tenant_id=context.tenant_id)
     return {"added": platform.model_dump()}
 
 @app.get("/api/platforms/suggestions")
-def list_platform_suggestions(_: RequestContext = Depends(_require_api_key)):
+def list_platform_suggestions(context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import list_suggestions
-    sugs = list_suggestions()
+    sugs = list_suggestions(tenant_id=context.tenant_id)
     return {"suggestions": [s.model_dump() for s in sugs]}
 
 @app.post("/api/platforms/suggestions/{suggestion_id}/approve")
-def approve_platform_suggestion(suggestion_id: str, _: RequestContext = Depends(_require_api_key)):
+def approve_platform_suggestion(suggestion_id: str, context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import approve_suggestion
-    sug = approve_suggestion(suggestion_id)
+    sug = approve_suggestion(suggestion_id, tenant_id=context.tenant_id)
     if not sug:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return {"suggestion_id": suggestion_id, "status": "approved"}
 
 @app.post("/api/platforms/suggestions/{suggestion_id}/reject")
-def reject_platform_suggestion(suggestion_id: str, _: RequestContext = Depends(_require_api_key)):
+def reject_platform_suggestion(suggestion_id: str, context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import reject_suggestion
-    sug = reject_suggestion(suggestion_id)
+    sug = reject_suggestion(suggestion_id, tenant_id=context.tenant_id)
     if not sug:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return {"suggestion_id": suggestion_id, "status": "rejected"}
 
 @app.post("/api/platforms/suggestions/{suggestion_id}/block")
-def block_platform_suggestion(suggestion_id: str, _: RequestContext = Depends(_require_api_key)):
+def block_platform_suggestion(suggestion_id: str, context: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import block_suggestion
-    sug = block_suggestion(suggestion_id)
+    sug = block_suggestion(suggestion_id, tenant_id=context.tenant_id)
     if not sug:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return {"suggestion_id": suggestion_id, "status": "blocked"}
@@ -904,7 +904,7 @@ def run_project_gltg(
         strategy = RFQStrategy(**strategy_payload)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
-    giraffe = GiraffeDBClient(db).build_context(requirement, customer_id=project.customer_id)
+    giraffe = GiraffeDBClient(db, tenant_id=context.tenant_id).build_context(requirement, customer_id=project.customer_id)
     simulation = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
     payload["strategy"] = strategy.model_dump()
     payload["gltg_simulation"] = simulation.model_dump()
@@ -1019,7 +1019,7 @@ def transition_project_case(
 def update_user_preferences(
     body: dict,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     from aivan.db.repositories.preference_repo import UserPreferenceRepository
     user_id = body.get("user_id")
@@ -1033,6 +1033,7 @@ def update_user_preferences(
         value=value,
         source=body.get("source", "api"),
         confidence=float(body.get("confidence", 0.5)),
+        tenant_id=context.tenant_id,
     )
     db.commit()
     return {"preference": _serialize_preference(record)}
@@ -1042,11 +1043,11 @@ def update_user_preferences(
 def get_user_preferences(
     user_id: str | None = None,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     from aivan.db.repositories.preference_repo import UserPreferenceRepository
     repo = UserPreferenceRepository(db)
-    records = repo.list_for_user(user_id) if user_id else repo.list_all()
+    records = repo.list_for_user(user_id, tenant_id=context.tenant_id) if user_id else repo.list_all(tenant_id=context.tenant_id)
     return {"preferences": [_serialize_preference(record) for record in records]}
 
 
@@ -1056,7 +1057,7 @@ def get_project_events(project_id: str, db: Session = Depends(get_db), context: 
         raise HTTPException(status_code=404, detail="Project not found")
     from aivan.db.repositories.event_repo import ExecutionEventRepository
     repo = ExecutionEventRepository(db)
-    events = repo.list_for_project(project_id)
+    events = repo.list_for_project(project_id, tenant_id=context.tenant_id)
     return {"project_id": project_id, "events": [
         {"event_id": e.event_id, "event_type": e.event_type, "summary": e.summary, "created_at": str(e.created_at)}
         for e in events
@@ -1071,42 +1072,42 @@ def get_project_options(project_id: str, db: Session = Depends(get_db), context:
     return {"project_id": project_id, "selected_option": project.selected_option_json}
 
 @app.post("/api/openclaw/accounts/register")
-def register_account(body: dict, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def register_account(body: dict, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.openclaw.account_delegation import register_account
     try:
-        account = register_account(db, body)
+        account = register_account(db, body, tenant_id=context.tenant_id)
         db.commit()
         return account.model_dump()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/openclaw/accounts")
-def list_accounts(db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def list_accounts(db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.openclaw.account_delegation import list_accounts
-    accounts = list_accounts(db)
+    accounts = list_accounts(db, tenant_id=context.tenant_id)
     return {"accounts": [a.model_dump() for a in accounts]}
 
 @app.get("/api/openclaw/accounts/{account_connection_id}")
-def get_account(account_connection_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def get_account(account_connection_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db)
-    account = repo.get(account_connection_id)
+    account = repo.get(account_connection_id, tenant_id=context.tenant_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     return {"account_connection_id": account.account_connection_id, "platform": account.platform, "status": account.status, "permissions": account.permissions_json}
 
 @app.post("/api/openclaw/accounts/{account_connection_id}/revoke")
-def revoke_account(account_connection_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def revoke_account(account_connection_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.openclaw.account_delegation import revoke_account
-    revoked = revoke_account(db, account_connection_id)
+    revoked = revoke_account(db, account_connection_id, tenant_id=context.tenant_id)
     db.commit()
     return {"account_connection_id": account_connection_id, "revoked": revoked}
 
 @app.get("/api/openclaw/accounts/{account_connection_id}/permissions")
-def get_account_permissions(account_connection_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def get_account_permissions(account_connection_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db)
-    account = repo.get(account_connection_id)
+    account = repo.get(account_connection_id, tenant_id=context.tenant_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     return {"account_connection_id": account_connection_id, "permissions": account.permissions_json, "allowed_actions": account.allowed_actions_json}

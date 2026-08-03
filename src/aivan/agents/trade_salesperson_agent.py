@@ -20,6 +20,7 @@ from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.execution.event_log import append_event
 from aivan.utils.ids import new_project_id
 from aivan.utils.time_utils import utcnow_iso
+from aivan.utils.tenant import tenant_for_new_record
 
 @dataclass
 class AgentTurnResult:
@@ -46,11 +47,12 @@ def handle_trade_salesperson_event(
     if not project_id:
         project_id = get_project_id(event.conversation_id)
 
-    project = project_repo.get(project_id) if project_id else None
+    tenant_id = tenant_for_new_record(event.tenant_id or None)
+    project = project_repo.get(project_id, tenant_id=tenant_id) if project_id else None
 
     if not project:
         # Try by conversation_id in DB (handles cross-session restarts and test isolation)
-        project = project_repo.get_by_conversation(event.conversation_id)
+        project = project_repo.get_by_conversation(event.conversation_id, tenant_id=tenant_id)
         if project:
             project_id = project.project_id
             bind_conversation(event.conversation_id, project_id)
@@ -62,6 +64,7 @@ def handle_trade_salesperson_event(
             channel=event.channel,
             channel_account_id=event.channel_account_id,
             customer_display_name=event.sender_display_name,
+            tenant_id=tenant_id,
         )
         project_id = p.project_id
         project = p
@@ -123,7 +126,7 @@ def _handle_customer_message(event, project_id, project, db_session) -> AgentTur
             requirement=req,
         )
 
-    matches = match_suppliers_for_requirement(req, limit=10)
+    matches = match_suppliers_for_requirement(req, limit=10, tenant_id=event.tenant_id or "legacy")
     append_event(db_session, project_id, "SUPPLIER_MATCHED", f"Found {len(matches)} supplier matches", actor="supplier_matcher")
 
     drafts_created = []
@@ -132,7 +135,7 @@ def _handle_customer_message(event, project_id, project, db_session) -> AgentTur
     if len(matches) < 3:
         queries = build_marketplace_queries(req)
         marketplace_candidates = []
-        if is_platform_trusted("alibaba"):
+        if is_platform_trusted("alibaba", tenant_id=event.tenant_id or "legacy"):
             for query in queries[:2]:
                 result = search_alibaba(query, platform="alibaba")
                 marketplace_candidates.extend(result.candidates)
@@ -265,3 +268,4 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
         buyer_options=options,
         lead_time_estimates=[lt],
     )
+

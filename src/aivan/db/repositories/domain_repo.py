@@ -40,6 +40,28 @@ class CaseDomainRepository:
         )
 
     @staticmethod
+    def authenticated_identity_for_event(event: OpenClawEvent) -> ActorIdentity:
+        """Identity for authorizing internal actions (commands, approvals).
+
+        The participant identity (``identity_for_event``) reflects the external
+        sender for Case/thread modeling and is deliberately never trusted with
+        internal capabilities — the OpenClaw plugin forces it to buyer/supplier
+        for every event. Internal command and approval events must instead be
+        authorized against the authenticated service actor that Core itself
+        verified, falling back to the participant identity only when no
+        authenticated actor role is present (e.g. local/dev compatibility).
+        """
+        business_role = event.authenticated_actor_role or event.business_role or event.role_context
+        actor_id = event.authenticated_actor_id or event.actor_id or event.sender_id or "system"
+        return normalize_actor_identity(
+            actor_id=actor_id,
+            business_role=business_role,
+            conversation_role=None,
+            execution_mode=event.execution_mode or event.mode,
+            authorization_basis=event.authorization_basis or "event_boundary",
+        )
+
+    @staticmethod
     def _message_source_id(event: OpenClawEvent) -> str:
         if event.message_id:
             return event.message_id
@@ -150,6 +172,8 @@ class CaseDomainRepository:
                 source_trace_id=event.source_trace_id,
                 actor_id=identity.actor_id,
                 actor_role=identity.business_role.value,
+                asserted_by_actor_id=event.authenticated_actor_id or "",
+                asserted_by_actor_role=event.authenticated_actor_role or "",
                 conversation_role=identity.conversation_role.value,
                 message_type=event.message_type,
                 payload_digest=hashlib.sha256(
@@ -281,3 +305,4 @@ class CaseDomainRepository:
         )
         self.db.flush()
         return decision
+

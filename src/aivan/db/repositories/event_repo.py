@@ -14,7 +14,7 @@ class ExecutionEventRepository:
         payload: dict = None,
         actor: str = "system",
         *,
-        tenant_id: str = "legacy",
+        tenant_id: str | None = None,
         source_trace_id: str = "",
         actor_id: str = "",
         actor_role: str = "",
@@ -24,6 +24,10 @@ class ExecutionEventRepository:
         after: dict | None = None,
         rejection_reason: str = "",
     ) -> ExecutionEventRecord:
+        if tenant_id is None:
+            from aivan.db.models.project import Project
+            project = self.db.query(Project).filter(Project.project_id == project_id).first()
+            tenant_id = project.tenant_id if project is not None else "legacy"
         record = ExecutionEventRecord(
             event_id=f"ev_{new_id()}",
             tenant_id=tenant_id,
@@ -45,7 +49,9 @@ class ExecutionEventRepository:
         self.db.flush()
         return record
 
-    def list_for_project(self, project_id: str, limit: int = 100) -> list[ExecutionEventRecord]:
-        return self.db.query(ExecutionEventRecord).filter(
-            ExecutionEventRecord.project_id == project_id
-        ).order_by(ExecutionEventRecord.created_at.asc()).limit(limit).all()
+    def list_for_project(self, project_id: str, limit: int = 100, *, tenant_id: str | None = None) -> list[ExecutionEventRecord]:
+        query = self.db.query(ExecutionEventRecord).filter(ExecutionEventRecord.project_id == project_id)
+        if tenant_id is not None:
+            query = query.filter(ExecutionEventRecord.tenant_id == tenant_id)
+        return query.order_by(ExecutionEventRecord.created_at.asc()).limit(limit).all()
+

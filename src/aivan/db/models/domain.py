@@ -93,6 +93,8 @@ class CaseMessageRecord(Base):
     source_trace_id: Mapped[str] = mapped_column(String(255), default="", index=True)
     actor_id: Mapped[str] = mapped_column(String(128), index=True)
     actor_role: Mapped[str] = mapped_column(String(64), index=True)
+    asserted_by_actor_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    asserted_by_actor_role: Mapped[str] = mapped_column(String(64), default="", index=True)
     conversation_role: Mapped[str] = mapped_column(String(64), index=True)
     message_type: Mapped[str] = mapped_column(String(64), default="text")
     payload_digest: Mapped[str] = mapped_column(String(64), default="")
@@ -138,3 +140,4 @@ class AuditLogRecord(Base):
     after_json: Mapped[dict] = mapped_column(JSON, default=dict)
     rejection_reason: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+

@@ -209,8 +209,14 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     if classification.event_type == "supplier_reply":
         return _handle_supplier_reply_event(event, classification, db)
     if classification.event_type == "user_command":
-        _require_event_capability(event, classification, Capability.EXECUTE_COMMAND, db)
-        _require_event_capability(event, classification, Capability.UPDATE_STRATEGY, db)
+        _require_event_capability(
+            event, classification, Capability.EXECUTE_COMMAND, db,
+            use_authenticated_actor=True,
+        )
+        _require_event_capability(
+            event, classification, Capability.UPDATE_STRATEGY, db,
+            use_authenticated_actor=True,
+        )
     elif classification.event_type in {
         "customer_new_inquiry",
         "customer_followup",
@@ -218,7 +224,10 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     }:
         _require_event_capability(event, classification, Capability.CREATE_INQUIRY, db)
     elif classification.event_type == "approval_response":
-        _require_event_capability(event, classification, Capability.APPROVE_OUTBOUND, db)
+        _require_event_capability(
+            event, classification, Capability.APPROVE_OUTBOUND, db,
+            use_authenticated_actor=True,
+        )
     if classification.event_type in {"internal_status_request", "approval_response", "unknown"}:
         return _record_non_rfq_event(event, classification, db)
 
@@ -242,7 +251,7 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     # ---- Dependency-guarded execution --------------------------------- #
     try:
         strategy = interpret_strategy(event.message_text)
-        giraffe = GiraffeDBClient(db).build_context(
+        giraffe = GiraffeDBClient(db, tenant_id=event.tenant_id or "legacy").build_context(
             requirement=requirement,
             customer_id=project.customer_id,
             user_id=event.actor_id or event.sender_id,
@@ -293,7 +302,12 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     if giraffe_db_graph:
         project_payload["giraffe_db_graph"] = giraffe_db_graph
     ProjectRepository(db).update_requirement(project.project_id, project_payload)
-    _learn_strategy_preference(event.actor_id or event.sender_id or "default", strategy, db)
+    _learn_strategy_preference(
+        event.actor_id or event.sender_id or "default",
+        strategy,
+        db,
+        tenant_id=event.tenant_id or "legacy",
+    )
 
     event_repo = ExecutionEventRepository(db)
     event_repo.append(
@@ -377,8 +391,14 @@ def _require_event_capability(
     classification: EventClassification,
     capability: Capability,
     db: Session,
+    *,
+    use_authenticated_actor: bool = False,
 ):
-    identity = CaseDomainRepository.identity_for_event(event)
+    identity = (
+        CaseDomainRepository.authenticated_identity_for_event(event)
+        if use_authenticated_actor
+        else CaseDomainRepository.identity_for_event(event)
+    )
     try:
         require_capability(identity, capability)
     except RoleAuthorizationError as exc:
@@ -738,7 +758,7 @@ def _create_supplier_email_drafts(
     return draft_ids
 
 
-def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session) -> None:
+def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session, *, tenant_id: str = "legacy") -> None:
     UserPreferenceRepository(db).upsert(
         user_id=user_id,
         preference_type="supplier_strategy",
@@ -751,6 +771,7 @@ def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session)
         },
         source="explicit_user_instruction",
         confidence=0.78,
+        tenant_id=tenant_id,
     )
 
 
@@ -804,12 +825,13 @@ def _user_control_channel_and_target(event: OpenClawEvent, db: Session) -> tuple
     role = (event.role_context or "").lower()
     normalized_channel = normalize_channel(event.channel)
     notification_channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
+    authenticated_actor_id = event.authenticated_actor_id or ""
     if role in {"user", "owner", "operator", "sales", "salesperson"} or event.mode in {"user", "command"}:
-        target = event.actor_id or event.sender_id
+        target = authenticated_actor_id
         if target:
             return notification_channel or "im", target, True, "verified_user_sender"
-    if event.actor_id:
-        return notification_channel or "im", event.actor_id, True, "verified_actor_id"
+    if authenticated_actor_id:
+        return notification_channel or "im", authenticated_actor_id, True, "verified_actor_id"
     owner_user_id = _owner_user_id_for_event(event, db)
     if owner_user_id:
         channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
@@ -826,6 +848,7 @@ def _owner_user_id_for_event(event: OpenClawEvent, db: Session) -> str:
     account = db.query(OpenClawAccountRecord).filter(
         OpenClawAccountRecord.channel == event.channel,
         OpenClawAccountRecord.channel_account_id == event.channel_account_id,
+        OpenClawAccountRecord.tenant_id == (event.tenant_id or "legacy"),
         OpenClawAccountRecord.status == "connected",
     ).first()
     return account.owner_user_id if account and account.owner_user_id else ""
