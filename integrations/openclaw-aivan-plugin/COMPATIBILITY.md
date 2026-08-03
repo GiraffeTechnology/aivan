@@ -20,3 +20,17 @@ they are not assumed compatible.
 All three AIVAN artifacts use the same minor version. A `0.3.x` SKILL must not be
 paired with a plugin older than `0.3.0`, because the earlier plugin does not expose
 the formal six-tool Gateway contract or the shared intent boundary.
+
+## Stage 3 identity limitation
+
+Stage 3 uses one static OpenClaw service identity per plugin process. The trusted
+identity headers are populated from `AIVAN_TENANT_ID`, `AIVAN_ACTOR_ID`,
+`AIVAN_ROLE_CONTEXT`, `AIVAN_CONVERSATION_ROLE`, and `AIVAN_EXECUTION_MODE`.
+They are not derived from an individual inbound WeChat participant.
+
+Consequently, this release must not be represented as production-ready for
+multi-participant role attribution. If AIVAN Core runs with `AIVAN_ENV=production`,
+the service identity variables are required and every event is attributed to that
+single configured identity. Per-channel and per-participant trusted identity
+binding is a Stage 4 delivery requirement. Core RBAC and the human approval gate
+remain authoritative; Stage 3 does not bypass either control.

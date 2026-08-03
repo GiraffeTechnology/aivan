@@ -112,6 +112,24 @@ def test_stage3_versions_and_compatibility_are_aligned():
     assert package["openclaw"]["build"]["openclawVersion"] == "2026.7.2"
     assert package["openclaw"]["build"]["pluginSdkVersion"] == "2026.6.8"
     assert release["openclawBaseline"]["commit"] == "1e06fd443033b8aa2fd638ee66b7fdad1168b8aa"
+    lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+    assert re.search(r'(?ms)^name = "aivan"\nversion = "0\.3\.0"$', lock)
+
+
+def test_stage3_documents_static_service_identity_limit():
+    readme = (PLUGIN_DIR / "README.md").read_text(encoding="utf-8")
+    compatibility = (PLUGIN_DIR / "COMPATIBILITY.md").read_text(encoding="utf-8")
+    evidence = (ROOT / "docs" / "stage3" / "STAGE3_E2E_EVIDENCE.md").read_text(
+        encoding="utf-8"
+    )
+    release = json.loads((PLUGIN_DIR / "release-manifest.json").read_text(encoding="utf-8"))
+    for variable in ("AIVAN_TENANT_ID", "AIVAN_ACTOR_ID", "AIVAN_ROLE_CONTEXT"):
+        assert variable in readme
+        assert variable in compatibility
+    assert "Stage 4" in compatibility
+    assert "multi-participant" in evidence
+    assert "static service identity" in release["knownLimitations"][0]
+    assert release["provenance"]["buildCommand"] == "npm ci && npm run build"
 
 
 def test_skill_and_harness_share_intent_boundary_and_pass_through():
