@@ -55,8 +55,9 @@ class GiraffeDBClient:
     integration boundary.
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, *, tenant_id: str = "legacy"):
         self.db = db
+        self.tenant_id = tenant_id
 
     def build_context(
         self,
@@ -93,7 +94,7 @@ class GiraffeDBClient:
     def query_suppliers(self, requirement: BuyerRequirement) -> list[SupplierProfile]:
         from aivan.sourcing.supplier_registry import list_active
 
-        registry_suppliers = list_active()
+        registry_suppliers = list_active(tenant_id=self.tenant_id)
         category = (requirement.category or "").lower()
         material = (requirement.fabric_material or requirement.material_spec or "").lower()
         candidates = []
@@ -137,7 +138,7 @@ class GiraffeDBClient:
             return [{"user_id": "default", "preference": "require_email_approval_for_counterparty_messages"}]
         from aivan.db.repositories.preference_repo import UserPreferenceRepository
 
-        records = UserPreferenceRepository(self.db).list_for_user(user_id)
+        records = UserPreferenceRepository(self.db).list_for_user(user_id, tenant_id=self.tenant_id)
         if records:
             return [
                 {
@@ -339,3 +340,4 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         "decision_option_id": decision["decision_option_id"],
         "comparison_snapshot_id": comparison["comparison_snapshot_id"],
     }
+

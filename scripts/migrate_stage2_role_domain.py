@@ -49,12 +49,33 @@ ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "after_json": "JSON",
         "rejection_reason": "TEXT",
     },
+    "openclaw_accounts": {
+        "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+    },
+    "user_preferences": {
+        "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+    },
+    "suppliers": {
+        "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+    },
+    "platforms": {
+        "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+    },
+    "case_messages": {
+        "asserted_by_actor_id": "VARCHAR(128) NOT NULL DEFAULT ''",
+        "asserted_by_actor_role": "VARCHAR(64) NOT NULL DEFAULT ''",
+    },
 }
 
 INDEXED_COLUMNS: dict[str, tuple[str, ...]] = {
     "projects": ("case_state", "source_trace_id"),
     "inquiry_drafts": ("participant_id", "source_trace_id", "approval_id"),
     "execution_events": ("tenant_id", "source_trace_id", "actor_id"),
+    "openclaw_accounts": ("tenant_id",),
+    "user_preferences": ("tenant_id",),
+    "suppliers": ("tenant_id",),
+    "platforms": ("tenant_id",),
+    "case_messages": ("asserted_by_actor_id", "asserted_by_actor_role"),
 }
 
 
@@ -157,3 +178,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

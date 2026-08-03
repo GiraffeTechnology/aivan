@@ -64,7 +64,31 @@ function buildHeaders(policy = {}) {
     if (policy.traceId) {
         headers["X-AIVAN-Trace-ID"] = policy.traceId;
     }
+    if (policy.participantId) {
+        headers["X-AIVAN-Participant-ID"] = policy.participantId;
+    }
+    if (policy.participantRole) {
+        headers["X-AIVAN-Participant-Role"] = policy.participantRole;
+    }
+    if (policy.participantConversationRole) {
+        headers["X-AIVAN-Participant-Conversation-Role"] = policy.participantConversationRole;
+    }
     return headers;
+}
+function participantIdentity(event) {
+    const rawRole = String(event.business_role ??
+        (typeof event.role_context === "string" ? event.role_context : "buyer")).trim().toLowerCase();
+    const roleAliases = {
+        customer: "buyer", b_side: "buyer", buyer: "buyer",
+        seller: "supplier", m_side: "supplier", supplier: "supplier",
+        operator: "sales", user: "sales", salesperson: "sales", sales: "sales",
+    };
+    const role = roleAliases[rawRole] ?? "buyer";
+    const conversationRole = event.conversation_role ??
+        (role === "buyer" ? "buyer_thread" : role === "supplier" ? "supplier_thread" : "internal_thread");
+    const participantKey = [event.channel, event.channel_account_id ?? "default", event.sender_id].join("\u001f");
+    const id = `ocp_${createHash("sha256").update(participantKey).digest("hex").slice(0, 48)}`;
+    return { id, role, conversationRole };
 }
 function errorMessage(data) {
     if (typeof data === "string" && data.trim())
@@ -233,6 +257,7 @@ export async function forwardEvent(event) {
     ].join("\u001f");
     const idempotencyKey = event.idempotency_key ??
         `oc_${createHash("sha256").update(stableIdentity).digest("hex").slice(0, 48)}`;
+    const participant = participantIdentity(event);
     const result = await safeFetch("/invoke", {
         method: "POST",
         body: JSON.stringify({ ...event, idempotency_key: idempotencyKey }),
@@ -240,6 +265,9 @@ export async function forwardEvent(event) {
         retryable: true,
         idempotencyKey,
         traceId: event.source_trace_id,
+        participantId: participant.id,
+        participantRole: participant.role,
+        participantConversationRole: participant.conversationRole,
     });
     if (!result.ok) {
         return {
@@ -628,3 +656,4 @@ export function register(api) {
         process.stderr.write(`[aivan] register() error: ${String(err)}\n`);
     }
 }
+

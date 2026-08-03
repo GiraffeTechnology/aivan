@@ -5,7 +5,7 @@ from aivan.sourcing.supplier_models import SupplierProfile
 from aivan.sourcing.supplier_registry import register_supplier
 from aivan.utils.ids import new_supplier_id
 
-def import_from_csv(content: str, db_session=None) -> tuple[int, list[str]]:
+def import_from_csv(content: str, db_session=None, *, tenant_id: str = "legacy") -> tuple[int, list[str]]:
     """Import suppliers from CSV string. Returns (count, errors)."""
     reader = csv.DictReader(io.StringIO(content))
     imported = 0
@@ -65,7 +65,7 @@ def import_from_csv(content: str, db_session=None) -> tuple[int, list[str]]:
                 active=row.get("active", "true").strip().lower() != "false",
             )
 
-            register_supplier(profile)
+            register_supplier(profile, tenant_id=tenant_id)
 
             if db_session is not None:
                 from aivan.db.repositories.supplier_repo import SupplierRepository
@@ -96,13 +96,14 @@ def import_from_csv(content: str, db_session=None) -> tuple[int, list[str]]:
                     "risk_tags_json": profile.risk_tags,
                     "notes": profile.notes,
                     "active": profile.active,
-                })
+                }, tenant_id=tenant_id)
             imported += 1
         except Exception as e:
             errors.append(f"Row {i+1}: {e}")
 
     return imported, errors
 
-def import_from_csv_file(path: str, db_session=None) -> tuple[int, list[str]]:
+def import_from_csv_file(path: str, db_session=None, *, tenant_id: str = "legacy") -> tuple[int, list[str]]:
     with open(path, "r", encoding="utf-8") as f:
-        return import_from_csv(f.read(), db_session)
+        return import_from_csv(f.read(), db_session, tenant_id=tenant_id)
+

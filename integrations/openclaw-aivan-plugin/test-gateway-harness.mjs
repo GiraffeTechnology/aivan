@@ -15,6 +15,7 @@ let mode = "success";
 let invokeCount = 0;
 let lastEvent = null;
 let lastIdempotencyKey = null;
+let lastHeaders = null;
 let previousIdempotencyKey = null;
 const reply = "RFQ accepted for supplier sourcing.";
 
@@ -30,6 +31,7 @@ const server = createServer((request, response) => {
     if (request.url === "/invoke" && request.method === "POST") {
       invokeCount += 1;
       lastIdempotencyKey = request.headers["idempotency-key"] ?? null;
+      lastHeaders = request.headers;
       lastEvent = JSON.parse(body || "{}");
       if (mode === "transient" && invokeCount === 1) return json(503, { detail: "retry me" });
       if (mode === "error") return json(422, { detail: "mock request error" });
@@ -100,6 +102,12 @@ invokeCount = 0;
 const forwarded = (await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-1", sender_id: "buyer-1", message_text: "RFQ for shirts", message_id: "message-1" })).details;
 assert("forwardEvent retries one transient failure", forwarded.accepted === true && invokeCount === 2);
 assert("forwardEvent sends stable idempotency header", typeof lastIdempotencyKey === "string" && lastIdempotencyKey === lastEvent.idempotency_key);
+assert("forwardEvent separates authenticated service from pseudonymous participant", typeof lastHeaders["x-aivan-participant-id"] === "string" && lastHeaders["x-aivan-participant-id"].startsWith("ocp_") && lastHeaders["x-aivan-participant-id"] !== process.env.AIVAN_ACTOR_ID);
+assert("forwardEvent asserts canonical buyer participant role", lastHeaders["x-aivan-participant-role"] === "buyer" && lastHeaders["x-aivan-participant-conversation-role"] === "buyer_thread");
+const firstParticipant = lastHeaders["x-aivan-participant-id"];
+await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-3", sender_id: "supplier-1", message_text: "Quote", message_id: "message-3", business_role: "supplier" });
+assert("different sender gets a different stable participant identity", lastHeaders["x-aivan-participant-id"] !== firstParticipant);
+assert("supplier participant is routed to supplier thread", lastHeaders["x-aivan-participant-role"] === "supplier" && lastHeaders["x-aivan-participant-conversation-role"] === "supplier_thread");
 assert("openDashboard tool callable", (await invokeTool("aivan.openDashboard")).details.url.endsWith("/app"));
 assert("getPendingDrafts tool callable", (await invokeTool("aivan.getPendingDrafts", { project_id: "project-1" })).details.drafts.length === 1);
 assert("approveDraft tool callable", (await invokeTool("aivan.approveDraft", { draft_id: "draft-1" })).details.approved === true);
@@ -121,3 +129,4 @@ globalThis.fetch = originalFetch;
 await new Promise((resolve) => server.close(resolve));
 console.log(`GATEWAY STAGE3 TEST: ${failed === 0 ? "PASS" : "FAIL"} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);
+

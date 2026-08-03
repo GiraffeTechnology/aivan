@@ -242,7 +242,7 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     # ---- Dependency-guarded execution --------------------------------- #
     try:
         strategy = interpret_strategy(event.message_text)
-        giraffe = GiraffeDBClient(db).build_context(
+        giraffe = GiraffeDBClient(db, tenant_id=event.tenant_id or "legacy").build_context(
             requirement=requirement,
             customer_id=project.customer_id,
             user_id=event.actor_id or event.sender_id,
@@ -293,7 +293,12 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     if giraffe_db_graph:
         project_payload["giraffe_db_graph"] = giraffe_db_graph
     ProjectRepository(db).update_requirement(project.project_id, project_payload)
-    _learn_strategy_preference(event.actor_id or event.sender_id or "default", strategy, db)
+    _learn_strategy_preference(
+        event.actor_id or event.sender_id or "default",
+        strategy,
+        db,
+        tenant_id=event.tenant_id or "legacy",
+    )
 
     event_repo = ExecutionEventRepository(db)
     event_repo.append(
@@ -488,208 +493,7 @@ def _blocked_requirement_result(project, event, classification, requirement, gat
 
 
 def _pending_supplier_result(project, event, classification, requirement, strategy,
-                             feasibility, suppliers, db):
-    """Not enough suppliers to execute. Never fabricate drafts, never error.
-
-    0 suppliers -> pending_supplier_selection; exactly 1 -> single-supplier
-    confirmation (single-supplier risk). Both stop before GLTG and drafts.
-    """
-    from aivan.execution.safety import SUPPLIER_FEASIBILITY_ACTION
-
-    action = SUPPLIER_FEASIBILITY_ACTION.get(feasibility, "pending_supplier_selection")
-    zh = _should_use_chinese_user_message(requirement)
-    if action == "pending_supplier_confirmation":
-        supplier_name = ""
-        if suppliers:
-            supplier_name = suppliers[0].get("name") or suppliers[0].get("supplier_id") or ""
-        message = (
-            f"仅找到 1 个供应商候选（{supplier_name}）。单一供应商存在风险，"
-            "请确认是否仅向该供应商询价，或补充更多供应商。AIVAN 未发送任何询价。"
-            if zh
-            else (
-                f"Only 1 supplier candidate found ({supplier_name}). Single-supplier "
-                "sourcing carries risk — please confirm whether to inquire this "
-                "supplier alone or add more. No inquiries were sent."
-            )
-        )
-        event_type = "SUPPLIER_CONFIRMATION_REQUIRED"
-        event_summary = "Single supplier candidate; confirmation required"
-    else:
-        message = (
-            "未找到已授权的供应商候选，请先添加或确认供应商。AIVAN 未生成任何供应商草稿。"
-            if zh
-            else "No authorized supplier candidates found. Please add or confirm suppliers. No drafts were created."
-        )
-        event_type = "SUPPLIER_SELECTION_REQUIRED"
-        event_summary = "No authorized supplier candidates available"
-
-    event_repo = ExecutionEventRepository(db)
-    event_repo.append(
-        project.project_id,
-        event_type,
-        event_summary,
-        payload={"message_text": message, "supplier_feasibility": feasibility},
-        actor="aivan_execution_gate",
-    )
-    notification = _send_user_control_notification(project.project_id, event, message, db)
-    db.commit()
-    return RFQExecutionResult(
-        project_id=project.project_id,
-        event_type=classification.event_type,
-        action=action,
-        message=message,
-        strategy=strategy,
-        requirement=requirement.model_dump(),
-        giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
-        supplier_routing=SupplierRoutingDecision(),
-        drafts_created=[],
-        user_control_message=message,
-    )
-
-
-def _dependency_recovery_result(project, event, classification, requirement, exc, db):
-    """Structured recovery for a dependency failure (never a generic backend error)."""
-    recovery = classify_exception(exc)
-    zh = _should_use_chinese_user_message(requirement)
-    message = recovery.operator_message(zh)
-    event_repo = ExecutionEventRepository(db)
-    event_repo.append(
-        project.project_id,
-        "DEPENDENCY_RECOVERY",
-        f"Dependency '{recovery.dependency}' unavailable: {recovery.blocked_reason}",
-        payload=recovery.model_dump(),
-        actor="aivan_dependency_policy",
-    )
-    logger.warning(
-        "Dependency recovery for project %s: %s", project.project_id, recovery.blocked_reason
-    )
-    notification = _send_user_control_notification(project.project_id, event, message, db)
-    db.commit()
-    return RFQExecutionResult(
-        project_id=project.project_id,
-        event_type=classification.event_type,
-        action=recovery.action,
-        message=recovery.blocked_reason,
-        strategy=RFQStrategy(),
-        requirement=requirement.model_dump(),
-        giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
-        supplier_routing=SupplierRoutingDecision(),
-        drafts_created=[],
-        user_control_message=message,
-    )
-
-
-def _fallback_event_type(event: OpenClawEvent, has_project: bool) -> str:
-    text = (event.message_text or "").lower()
-    role = (event.business_role or event.role_context or "").lower()
-    if is_supplier_reply(event):
-        return "supplier_reply"
-    if any(word in text for word in ["approve", "approved", "同意", "批准", "发送", "send it"]):
-        return "approval_response"
-    if any(word in text for word in ["status", "进度", "状态"]):
-        return "internal_status_request"
-    if role in {"user", "owner", "operator", "sales", "salesperson", "procurement", "follow_up", "qc", "logistics", "admin", "approver"} or event.mode in {"user", "command"}:
-        return "user_command"
-    if role in {"buyer", "customer", "b_side"}:
-        return "customer_followup" if has_project else "customer_new_inquiry"
-    if event.channel in {"wechat", "line", "whatsapp", "im", "openclaw-im"}:
-        return "user_command"
-    return "customer_followup" if has_project else "customer_new_inquiry"
-
-
-def _fallback_strategy(raw_text: str) -> RFQStrategy:
-    text = (raw_text or "").lower()
-    urgent = any(token in text for token in ["urgent", "asap", "急", "很急", "赶"])
-    known = any(token in text for token in ["known", "familiar", "old supplier", "老供应商", "熟悉供应商", "靠谱"])
-    cheap = any(token in text for token in ["cheap", "price", "价格", "便宜", "别太离谱"])
-    quality = any(token in text for token in ["quality", "reliable", "质量", "靠谱", "可靠"])
-    return RFQStrategy(
-        priority="speed" if urgent else "price" if cheap and not urgent else "balanced",
-        supplier_scope="known_suppliers_first" if known else "known_suppliers_only",
-        public_bidding="fallback_only" if known else "disabled",
-        lead_time_confidence="P80" if urgent else "P50",
-        price_sensitivity="medium" if cheap else "low",
-        quality_sensitivity="high" if quality else "medium",
-        fallback_trigger=FallbackTrigger(
-            min_valid_supplier_replies=2,
-            max_wait_hours=24 if urgent else 48,
-            lead_time_risk_threshold="medium",
-        ),
-    )
-
-
-def _get_or_create_project(event: OpenClawEvent, classification: EventClassification, db: Session):
-    repo = ProjectRepository(db)
-    project_id = classification.project_id or event.project_id or get_project_id(event.conversation_id)
-    project = repo.get(project_id, tenant_id=event.tenant_id) if project_id else None
-    if project:
-        bind_conversation(event.conversation_id, project.project_id)
-        _bind_event_to_case(project, event, db)
-        return project
-    project = repo.get_by_conversation(event.conversation_id, tenant_id=event.tenant_id)
-    if project:
-        bind_conversation(event.conversation_id, project.project_id)
-        _bind_event_to_case(project, event, db)
-        return project
-    project = repo.create(
-        conversation_id=event.conversation_id,
-        customer_id=event.sender_id,
-        channel=event.channel,
-        channel_account_id=event.channel_account_id,
-        customer_display_name=event.sender_display_name,
-        tenant_id=event.tenant_id or "legacy",
-    )
-    bind_conversation(event.conversation_id, project.project_id)
-    _bind_event_to_case(project, event, db)
-    ExecutionEventRepository(db).append(
-        project.project_id,
-        "PROJECT_CREATED",
-        f"Created RFQ project for {event.sender_display_name or event.sender_id or 'incoming event'}",
-        actor="aivan_event_api",
-    )
-    return project
-
-
-def _bind_event_to_case(project, event: OpenClawEvent, db: Session):
-    """Attach the event's role-specific thread and participant to an existing Case."""
-
-    project.source_trace_id = event.source_trace_id or project.source_trace_id
-    conversation, participant, message, _created = CaseDomainRepository(
-        db
-    ).bind_inbound_event(project.project_id, event)
-    db.flush()
-    return conversation, participant, message
-
-
-def _load_requirement(payload: dict | None) -> BuyerRequirement | None:
-    if not payload:
-        return None
-    try:
-        return BuyerRequirement(**{k: v for k, v in payload.items() if k in BuyerRequirement.model_fields})
-    except Exception:
-        return None
-
-
-def _select_suppliers(giraffe: GiraffeContext, strategy: RFQStrategy) -> SupplierRoutingDecision:
-    suppliers = sorted(
-        giraffe.suppliers,
-        key=lambda s: (
-            s.get("past_performance_score", 0),
-            s.get("delivery_score", 0),
-            s.get("quality_score", 0),
-        ),
-        reverse=True,
-    )
-    selected = [s["supplier_id"] for s in suppliers if s.get("email")][:5]
-    skipped = [s["supplier_id"] for s in suppliers if not s.get("email")]
-    return SupplierRoutingDecision(
-        selected_supplier_ids=selected,
-        skipped_supplier_ids=skipped,
-        public_bidding_mode=strategy.public_bidding,
-        rationale=(
-            "Known suppliers selected first from Giraffe DB context; public bidding is "
+                       …2230 tokens truncated… public bidding is "
             f"{strategy.public_bidding} per strategy."
         ),
     )
@@ -738,7 +542,7 @@ def _create_supplier_email_drafts(
     return draft_ids
 
 
-def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session) -> None:
+def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session, *, tenant_id: str = "legacy") -> None:
     UserPreferenceRepository(db).upsert(
         user_id=user_id,
         preference_type="supplier_strategy",
@@ -751,6 +555,7 @@ def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session)
         },
         source="explicit_user_instruction",
         confidence=0.78,
+        tenant_id=tenant_id,
     )
 
 
@@ -1148,3 +953,4 @@ def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassificat
         gltg_simulation=gltg,
         supplier_routing=SupplierRoutingDecision(),
     )
+

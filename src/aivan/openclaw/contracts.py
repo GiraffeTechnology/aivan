@@ -17,6 +17,8 @@ class OpenClawEvent(BaseModel):
     timestamp: str = ""
     project_id: str | None = None
     actor_id: str | None = None
+    authenticated_actor_id: str | None = None
+    authenticated_actor_role: str = ""
     business_role: str = ""
     conversation_role: str = ""
     execution_mode: str = ""
@@ -78,3 +80,4 @@ FORBIDDEN_ACTIONS = [
     "bypass_captcha",
     "bypass_platform_controls",
 ]
+

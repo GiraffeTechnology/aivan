@@ -5,8 +5,8 @@ from aivan.platforms.whitelist import get_built_in_platforms
 from aivan.utils.time_utils import utcnow_iso
 from aivan.utils.ids import new_suggestion_id
 
-_platforms: dict[str, TrustedPlatform] = {}
-_suggestions: dict[str, PlatformSuggestion] = {}
+_platforms: dict[tuple[str, str], TrustedPlatform] = {}
+_suggestions: dict[tuple[str, str], PlatformSuggestion] = {}
 _lock = threading.Lock()
 _initialized = False
 
@@ -16,43 +16,44 @@ def _ensure_init():
         with _lock:
             if not _initialized:
                 for pid, p in get_built_in_platforms().items():
-                    _platforms[pid] = p
+                    _platforms[("*", pid)] = p
                 _initialized = True
 
-def get_platform(platform_id: str) -> TrustedPlatform | None:
+def get_platform(platform_id: str, *, tenant_id: str = "legacy") -> TrustedPlatform | None:
     _ensure_init()
-    return _platforms.get(platform_id)
+    return _platforms.get((tenant_id, platform_id)) or _platforms.get(("*", platform_id))
 
-def list_all_platforms() -> list[TrustedPlatform]:
+def list_all_platforms(*, tenant_id: str = "legacy") -> list[TrustedPlatform]:
     _ensure_init()
-    return list(_platforms.values())
+    return [p for (scope, _), p in _platforms.items() if scope in {"*", tenant_id}]
 
-def list_trusted_platforms() -> list[TrustedPlatform]:
+def list_trusted_platforms(*, tenant_id: str = "legacy") -> list[TrustedPlatform]:
     _ensure_init()
-    return [p for p in _platforms.values() if p.status in ("built_in", "trusted")]
+    return [p for p in list_all_platforms(tenant_id=tenant_id) if p.status in ("built_in", "trusted")]
 
-def is_platform_trusted(platform_id: str) -> bool:
+def is_platform_trusted(platform_id: str, *, tenant_id: str = "legacy") -> bool:
     _ensure_init()
-    p = _platforms.get(platform_id)
+    p = get_platform(platform_id, tenant_id=tenant_id)
     return p is not None and p.status in ("built_in", "trusted")
 
-def is_platform_blocked(platform_id: str) -> bool:
+def is_platform_blocked(platform_id: str, *, tenant_id: str = "legacy") -> bool:
     _ensure_init()
-    p = _platforms.get(platform_id)
+    p = get_platform(platform_id, tenant_id=tenant_id)
     return p is not None and p.status == "blocked"
 
-def add_platform(platform: TrustedPlatform) -> TrustedPlatform:
+def add_platform(platform: TrustedPlatform, *, tenant_id: str = "legacy") -> TrustedPlatform:
     _ensure_init()
     with _lock:
-        if platform.platform_id in _platforms and _platforms[platform.platform_id].built_in:
-            return _platforms[platform.platform_id]
-        _platforms[platform.platform_id] = platform
+        built_in = _platforms.get(("*", platform.platform_id))
+        if built_in and built_in.built_in:
+            return built_in
+        _platforms[(tenant_id, platform.platform_id)] = platform
     return platform
 
-def update_platform_status(platform_id: str, status: str) -> TrustedPlatform | None:
+def update_platform_status(platform_id: str, status: str, *, tenant_id: str = "legacy") -> TrustedPlatform | None:
     _ensure_init()
     with _lock:
-        p = _platforms.get(platform_id)
+        p = _platforms.get((tenant_id, platform_id))
         if p and not p.built_in:
             p.status = status
             p.updated_at = utcnow_iso()
@@ -60,7 +61,7 @@ def update_platform_status(platform_id: str, status: str) -> TrustedPlatform | N
                 p.user_confirmed = True
     return p
 
-def suggest_platform(domain: str, reason: str, display_name: str = "") -> PlatformSuggestion:
+def suggest_platform(domain: str, reason: str, display_name: str = "", *, tenant_id: str = "legacy") -> PlatformSuggestion:
     _ensure_init()
     platform_id = f"suggested_{domain.replace('.', '_')}"
     sug = PlatformSuggestion(
@@ -73,10 +74,10 @@ def suggest_platform(domain: str, reason: str, display_name: str = "") -> Platfo
         created_at=utcnow_iso(),
     )
     with _lock:
-        _suggestions[sug.suggestion_id] = sug
-        if platform_id not in _platforms:
+        _suggestions[(tenant_id, sug.suggestion_id)] = sug
+        if (tenant_id, platform_id) not in _platforms:
             from aivan.platforms.models import TrustedPlatform
-            _platforms[platform_id] = TrustedPlatform(
+            _platforms[(tenant_id, platform_id)] = TrustedPlatform(
                 platform_id=platform_id,
                 display_name=display_name or domain,
                 status="pending_review",
@@ -86,32 +87,32 @@ def suggest_platform(domain: str, reason: str, display_name: str = "") -> Platfo
             )
     return sug
 
-def list_suggestions() -> list[PlatformSuggestion]:
+def list_suggestions(*, tenant_id: str = "legacy") -> list[PlatformSuggestion]:
     _ensure_init()
-    return list(_suggestions.values())
+    return [s for (scope, _), s in _suggestions.items() if scope == tenant_id]
 
-def approve_suggestion(suggestion_id: str) -> PlatformSuggestion | None:
+def approve_suggestion(suggestion_id: str, *, tenant_id: str = "legacy") -> PlatformSuggestion | None:
     _ensure_init()
-    sug = _suggestions.get(suggestion_id)
+    sug = _suggestions.get((tenant_id, suggestion_id))
     if sug:
         sug.status = "approved"
-        update_platform_status(sug.platform_id, "trusted")
+        update_platform_status(sug.platform_id, "trusted", tenant_id=tenant_id)
     return sug
 
-def reject_suggestion(suggestion_id: str) -> PlatformSuggestion | None:
+def reject_suggestion(suggestion_id: str, *, tenant_id: str = "legacy") -> PlatformSuggestion | None:
     _ensure_init()
-    sug = _suggestions.get(suggestion_id)
+    sug = _suggestions.get((tenant_id, suggestion_id))
     if sug:
         sug.status = "rejected"
-        update_platform_status(sug.platform_id, "rejected")
+        update_platform_status(sug.platform_id, "rejected", tenant_id=tenant_id)
     return sug
 
-def block_suggestion(suggestion_id: str) -> PlatformSuggestion | None:
+def block_suggestion(suggestion_id: str, *, tenant_id: str = "legacy") -> PlatformSuggestion | None:
     _ensure_init()
-    sug = _suggestions.get(suggestion_id)
+    sug = _suggestions.get((tenant_id, suggestion_id))
     if sug:
         sug.status = "blocked"
-        update_platform_status(sug.platform_id, "blocked")
+        update_platform_status(sug.platform_id, "blocked", tenant_id=tenant_id)
     return sug
 
 def reset_registry():
@@ -120,3 +121,4 @@ def reset_registry():
         _platforms.clear()
         _suggestions.clear()
         _initialized = False
+

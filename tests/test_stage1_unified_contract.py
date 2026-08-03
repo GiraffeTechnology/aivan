@@ -68,6 +68,9 @@ def _headers(**overrides):
         "Idempotency-Key": "delivery-stage1-001",
         "X-AIVAN-Role-Context": "buyer",
         "X-AIVAN-Actor-ID": "buyer-001",
+        "X-AIVAN-Participant-ID": "participant-buyer-001",
+        "X-AIVAN-Participant-Role": "buyer",
+        "X-AIVAN-Participant-Conversation-Role": "buyer_thread",
         "X-AIVAN-Channel-Account-ID": "wechat-account-01",
     }
     headers.update(overrides)
@@ -129,7 +132,7 @@ def test_cross_tenant_body_and_header_are_rejected(client):
 
 def test_body_role_and_channel_account_are_not_trusted_in_production(client):
     headers = _headers()
-    headers.pop("X-AIVAN-Role-Context")
+    headers.pop("X-AIVAN-Participant-Role")
     headers.pop("X-AIVAN-Channel-Account-ID")
     role = client.post("/invoke", json=_event(role_context="admin"), headers=headers)
     assert role.status_code == 403
@@ -140,3 +143,4 @@ def test_body_role_and_channel_account_are_not_trusted_in_production(client):
     )
     assert account.status_code == 403
     assert account.json()["detail"]["error"] == "UNTRUSTED_CHANNEL_ACCOUNT"
+

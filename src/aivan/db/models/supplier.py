@@ -7,6 +7,7 @@ class SupplierRecord(Base):
     __tablename__ = "suppliers"
 
     supplier_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     name: Mapped[str] = mapped_column(String(256), index=True)
     company_type: Mapped[str] = mapped_column(String(128), default="")
     categories_json: Mapped[list] = mapped_column(JSON, default=list)
@@ -34,3 +35,4 @@ class SupplierRecord(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+

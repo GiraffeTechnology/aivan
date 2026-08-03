@@ -150,6 +150,8 @@ class CaseDomainRepository:
                 source_trace_id=event.source_trace_id,
                 actor_id=identity.actor_id,
                 actor_role=identity.business_role.value,
+                asserted_by_actor_id=event.authenticated_actor_id or "",
+                asserted_by_actor_role=event.authenticated_actor_role or "",
                 conversation_role=identity.conversation_role.value,
                 message_type=event.message_type,
                 payload_digest=hashlib.sha256(
@@ -281,3 +283,4 @@ class CaseDomainRepository:
         )
         self.db.flush()
         return decision
+
