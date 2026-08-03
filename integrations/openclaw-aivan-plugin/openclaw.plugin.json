@@ -2,7 +2,7 @@
   "id": "openclaw-aivan",
   "name": "AIVAN OpenClaw Bridge",
   "description": "OpenClaw bridge for forwarding IM/email/marketplace events to the local AIVAN service with human approval.",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "activation": {
     "onStartup": true
   },
@@ -12,11 +12,40 @@
       "aivanBaseUrl": {
         "type": "string",
         "default": "http://127.0.0.1:8765"
+      },
+      "connectTimeoutMs": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 30000,
+        "default": 3000
+      },
+      "readTimeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 120000,
+        "default": 15000
+      },
+      "maxRetries": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2,
+        "default": 1
       }
     },
     "additionalProperties": false
   },
   "contracts": {
-    "tools": []
+    "tools": [
+      "aivan.health",
+      "aivan.forwardEvent",
+      "aivan.openDashboard",
+      "aivan.getPendingDrafts",
+      "aivan.approveDraft",
+      "aivan.rejectDraft"
+    ],
+    "toolMetadata": {
+      "aivan.approveDraft": { "optional": true },
+      "aivan.rejectDraft": { "optional": true }
+    }
   }
 }

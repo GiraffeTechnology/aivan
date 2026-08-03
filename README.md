@@ -1,6 +1,6 @@
 # AIVAN — Private-Domain AI Trade Execution Worker
 
-`Python 3.11+` | `AIVAN v0.2.0` | `Standalone Product` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
+`Python 3.11+` | `AIVAN v0.3.0` | `Standalone Product` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
 
 AIVAN is a private-domain AI trade execution worker for high-stakes RFQ and quote workflows.
 
@@ -113,7 +113,7 @@ Supplier-side events are never misclassified as new buyer inquiries;
 
 ```text
 Current product role: standalone private-domain trade execution worker
-Current package: AIVAN v0.2.0
+Current package: AIVAN v0.3.0
 Primary runtime: FastAPI + local DB + OpenClaw bridge
 Primary channel path: OpenClaw normalized events
 GLTG integration: v1 HTTP client, v2 contract target

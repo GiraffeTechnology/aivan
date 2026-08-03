@@ -14,6 +14,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 PLUGIN_DIR = ROOT / "integrations" / "openclaw-aivan-plugin"
+EXPECTED_TOOLS = [
+    "aivan.health", "aivan.forwardEvent", "aivan.openDashboard",
+    "aivan.getPendingDrafts", "aivan.approveDraft", "aivan.rejectDraft",
+]
 
 PASS = "\033[32mPASS\033[0m"
 FAIL = "\033[31mFAIL\033[0m"
@@ -52,7 +56,7 @@ check("dist/index.js exists", dist_js.is_file(),
 check("dist/index.d.ts exists", dist_dts.is_file(),
       "run: cd integrations/openclaw-aivan-plugin && npm run build")
 if dist_js.is_file():
-    dist_js_text = dist_js.read_text()
+    dist_js_text = dist_js.read_text(encoding="utf-8")
     check("dist/index.js contains export function register",
           "export function register" in dist_js_text,
           "register() entry point missing from compiled output")
@@ -63,7 +67,7 @@ section("package.json metadata")
 pkg_path = PLUGIN_DIR / "package.json"
 pkg: dict = {}
 if pkg_path.is_file():
-    pkg = json.loads(pkg_path.read_text())
+    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
 
 check("name is @giraffetechnology/openclaw-aivan",
       pkg.get("name") == "@giraffetechnology/openclaw-aivan")
@@ -104,7 +108,7 @@ check('exports["."]["import"] points to dist/index.js',
       f"got: {dot_export.get('import')!r}")
 
 # ── OpenClaw compatibility metadata ───────────────────────────────────────────
-section("OpenClaw 2026.6.9 compatibility metadata")
+section("OpenClaw compatibility metadata")
 oc = pkg.get("openclaw", {})
 check("openclaw.compat.pluginApi present",
       bool(oc.get("compat", {}).get("pluginApi")))
@@ -143,7 +147,7 @@ section("openclaw.plugin.json")
 manifest_path = PLUGIN_DIR / "openclaw.plugin.json"
 manifest: dict = {}
 if manifest_path.is_file():
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
 check("id field present", bool(manifest.get("id")))
 check('id is "openclaw-aivan"', manifest.get("id") == "openclaw-aivan")
@@ -161,12 +165,33 @@ contracts = manifest.get("contracts", {})
 check("contracts.tools is present (tool-plugin metadata synced)",
       "tools" in contracts,
       "run: openclaw plugins build --entry ./dist/index.js")
+check("contracts.tools enumerates exactly six AIVAN tools",
+      contracts.get("tools") == EXPECTED_TOOLS,
+      f"got: {contracts.get('tools')!r}")
+tool_metadata = contracts.get("toolMetadata", {})
+check("approval and rejection tools are explicitly optional",
+      tool_metadata.get("aivan.approveDraft", {}).get("optional") is True
+      and tool_metadata.get("aivan.rejectDraft", {}).get("optional") is True)
+
+section("Stage 3 version and provenance")
+release_path = PLUGIN_DIR / "release-manifest.json"
+compatibility_path = PLUGIN_DIR / "COMPATIBILITY.md"
+boundary_path = PLUGIN_DIR / "intent-boundary.json"
+check("release-manifest.json exists", release_path.is_file())
+check("COMPATIBILITY.md exists", compatibility_path.is_file())
+check("intent-boundary.json exists", boundary_path.is_file())
+if release_path.is_file():
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    check("Core, Plugin, and SKILL release versions align",
+          pkg.get("version") == manifest.get("version") == release.get("release") == "0.3.0")
+    check("OpenClaw baseline commit is pinned",
+          release.get("openclawBaseline", {}).get("commit") == "1e06fd443033b8aa2fd638ee66b7fdad1168b8aa")
 
 # ── .gitignore must exclude node_modules but not dist ─────────────────────────
 section("gitignore — node_modules excluded, dist NOT excluded")
 gitignore_path = PLUGIN_DIR / ".gitignore"
 if gitignore_path.is_file():
-    gi_lines = [l.strip() for l in gitignore_path.read_text().splitlines() if l.strip() and not l.startswith("#")]
+    gi_lines = [l.strip() for l in gitignore_path.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
     check("node_modules/ in .gitignore", "node_modules/" in gi_lines or "node_modules" in gi_lines)
     check("dist/ NOT in .gitignore (dist must be committed)",
           "dist/" not in gi_lines and "dist" not in gi_lines,
@@ -176,7 +201,7 @@ else:
 
 # ── Environment variables and security ────────────────────────────────────────
 section("Source security checks")
-index_text = (PLUGIN_DIR / "index.ts").read_text() if (PLUGIN_DIR / "index.ts").is_file() else ""
+index_text = (PLUGIN_DIR / "index.ts").read_text(encoding="utf-8") if (PLUGIN_DIR / "index.ts").is_file() else ""
 check("No hardcoded API key in index.ts",
       "sk-" not in index_text and "Authorization" not in index_text)
 check("AIVAN_API_KEY sent as X-AIVAN-API-Key header", "X-AIVAN-API-Key" in index_text)
@@ -186,12 +211,12 @@ check("export function register present in index.ts",
       "export function register" in index_text)
 
 section("Environment variables documented")
-readme_text = (PLUGIN_DIR / "README.md").read_text() if (PLUGIN_DIR / "README.md").is_file() else ""
+readme_text = (PLUGIN_DIR / "README.md").read_text(encoding="utf-8") if (PLUGIN_DIR / "README.md").is_file() else ""
 check("AIVAN_BASE_URL documented in README", "AIVAN_BASE_URL" in readme_text)
 check("AIVAN_API_KEY documented in README", "AIVAN_API_KEY" in readme_text)
 
 section("Security policy")
-sec_text = (PLUGIN_DIR / "SECURITY.md").read_text() if (PLUGIN_DIR / "SECURITY.md").is_file() else ""
+sec_text = (PLUGIN_DIR / "SECURITY.md").read_text(encoding="utf-8") if (PLUGIN_DIR / "SECURITY.md").is_file() else ""
 check("No credential storage clause present", "credential" in sec_text.lower())
 check("Human approval clause present", "human approval" in sec_text.lower())
 check("No bypassing anti-bot clause present", "anti-bot" in sec_text.lower())
@@ -203,7 +228,7 @@ section("Skill listing")
 skill_path = ROOT / "skills" / "aivan-trade-salesperson" / "SKILL.md"
 check("skills/aivan-trade-salesperson/SKILL.md exists", skill_path.is_file())
 if skill_path.is_file():
-    skill_text = skill_path.read_text()
+    skill_text = skill_path.read_text(encoding="utf-8")
     check("Skill slug defined", "aivan-trade-salesperson" in skill_text)
     check("Human approval requirement documented in skill", "human approval" in skill_text.lower())
     check("AIVAN_BASE_URL documented in skill", "AIVAN_BASE_URL" in skill_text)

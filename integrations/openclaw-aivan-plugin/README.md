@@ -93,6 +93,14 @@ clawhub package link .
 |---|---|---|---|
 | `AIVAN_BASE_URL` | Yes | `http://127.0.0.1:8765` | URL of the local AIVAN server |
 | `AIVAN_API_KEY` | No | *(none)* | Optional API key sent as `X-AIVAN-API-Key` header; set in AIVAN `.env` to enable auth |
+| `AIVAN_CONNECT_TIMEOUT_MS` | No | `3000` | Explicit connection timeout in milliseconds |
+| `AIVAN_READ_TIMEOUT_MS` | No | `15000` | Explicit response-read timeout in milliseconds |
+| `AIVAN_MAX_RETRIES` | No | `1` | Bounded retries (0-2) for idempotent calls only |
+
+`aivan.forwardEvent` supplies a stable `Idempotency-Key`, so connection, 429 and
+5xx failures can be retried without duplicating an inbound event. Approval and
+rejection actions are never automatically retried. Failures are returned as
+user-visible `AIVAN_*` error codes with a `retryable` flag.
 
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
 
