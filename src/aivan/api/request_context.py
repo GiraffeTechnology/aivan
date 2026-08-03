@@ -245,7 +245,8 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
 
     from aivan.domain.roles import RoleAuthorizationError, normalize_actor_identity
 
-    body_actor_id = str(event.get("actor_id") or event.get("sender_id") or "").strip()
+    explicit_body_actor_id = str(event.get("actor_id") or "").strip()
+    body_actor_id = explicit_body_actor_id or str(event.get("sender_id") or "").strip()
     try:
         identity = normalize_actor_identity(
             actor_id=context.participant_actor_id
@@ -267,8 +268,21 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
     # A sender is usable for participant/audit binding but is not promoted to a
     # trusted operator capable of receiving internal control notifications.
     event["actor_id"] = identity.actor_id
-    event["authenticated_actor_id"] = context.actor_id or None
-    event["authenticated_actor_role"] = context.role_context or ""
+    local_operator_roles = {"user", "owner", "operator", "sales", "salesperson"}
+    local_command_sender = (
+        body_actor_id
+        if not context.production
+        and body_role.lower() in local_operator_roles
+        and str(event.get("mode") or "").lower() in {"user", "command"}
+        else ""
+    )
+    local_body_actor_id = (
+        explicit_body_actor_id or local_command_sender
+    ) if not context.production else ""
+    event["authenticated_actor_id"] = context.actor_id or local_body_actor_id or None
+    event["authenticated_actor_role"] = context.role_context or (
+        body_role if local_body_actor_id else ""
+    )
     event["business_role"] = identity.business_role.value
     event["conversation_role"] = identity.conversation_role.value
     event["execution_mode"] = identity.execution_mode.value

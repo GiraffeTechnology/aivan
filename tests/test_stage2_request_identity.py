@@ -116,4 +116,25 @@ def test_local_legacy_alias_is_normalized_without_granting_admin():
     assert event["business_role"] == "sales"
     assert event["conversation_role"] == "internal_thread"
     assert event["execution_mode"] == "command"
+    assert event["authenticated_actor_id"] == "body-sender"
+    assert event["authenticated_actor_role"] == "operator"
+
+
+def test_local_explicit_actor_remains_compatible_without_promoting_sender():
+    context = _context(
+        actor_id="",
+        role_context="",
+        conversation_role="",
+        execution_mode="",
+        authorization_basis="local_compatibility",
+        production=False,
+        participant_actor_id="",
+        participant_role_context="",
+        participant_conversation_role="",
+    )
+    explicit = apply_trusted_identity(
+        _event(actor_id="local-user", role_context="operator", mode="command"), context
+    )
+    assert explicit["authenticated_actor_id"] == "local-user"
+    assert explicit["authenticated_actor_role"] == "operator"
 
