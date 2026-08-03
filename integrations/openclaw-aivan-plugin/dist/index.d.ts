@@ -102,4 +102,3 @@ declare const pluginEntry: any;
 export default pluginEntry;
 export declare function isTradeSourcingIntent(params: any): boolean;
 export declare function register(api: any): void;
-

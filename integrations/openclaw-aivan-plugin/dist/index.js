@@ -658,4 +658,3 @@ export function register(api) {
         process.stderr.write(`[aivan] register() error: ${String(err)}\n`);
     }
 }
-
