@@ -136,3 +136,28 @@ def resolve_service_tenant_id() -> str:
     :func:`resolve_service_tenant`.
     """
     return resolve_service_tenant(context="service_tenant_id")
+
+
+def tenant_for_new_record(explicit: str | None = None) -> str:
+    """Return the tenant stamp for a newly created local record.
+
+    Request/application services should always pass ``explicit``.  The env and
+    test fallbacks keep direct repository tooling and existing tests compatible;
+    ``legacy`` is reserved for offline migration/backfill code.
+    """
+
+    if explicit and explicit.strip():
+        return explicit.strip()
+    configured = next(
+        (
+            os.environ[name].strip()
+            for name in _SERVICE_TENANT_ENV_VARS
+            if os.environ.get(name) and os.environ[name].strip()
+        ),
+        None,
+    )
+    if configured:
+        return configured
+    if is_test_mode() and _test_tenant():
+        return _test_tenant() or "legacy"
+    return "legacy"

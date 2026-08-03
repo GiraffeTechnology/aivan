@@ -44,9 +44,16 @@ def client_and_session():
 
 @pytest.fixture(autouse=True)
 def clear_api_key():
-    os.environ.pop("AIVAN_API_KEY", None)
+    names = ("AIVAN_API_KEY", "AIVAN_TENANT_ID", "AIVAN_TENANT_API_KEYS", "AIVAN_ENV")
+    saved = {name: os.environ.get(name) for name in names}
+    for name in names:
+        os.environ.pop(name, None)
     yield
-    os.environ.pop("AIVAN_API_KEY", None)
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 def _seed_draft(Session) -> str:
@@ -80,6 +87,15 @@ def test_get_draft_by_id_returns_200(client_and_session):
     assert data["draft_id"] == draft_id
 
 
+def test_get_draft_short_alias_returns_same_contract(client_and_session):
+    client, Session = client_and_session
+    draft_id = _seed_draft(Session)
+    canonical = client.get(f"/api/openclaw/drafts/{draft_id}")
+    alias = client.get(f"/api/drafts/{draft_id}")
+    assert alias.status_code == 200
+    assert alias.json() == canonical.json()
+
+
 def test_get_draft_nonexistent_returns_404(client_and_session):
     client, _ = client_and_session
     resp = client.get("/api/openclaw/drafts/nonexistent-draft-id-xyz")
@@ -110,3 +126,18 @@ def test_get_draft_requires_api_key_when_configured(client_and_session):
     os.environ["AIVAN_API_KEY"] = "secret-key-abc"
     resp = client.get(f"/api/openclaw/drafts/{draft_id}")
     assert resp.status_code == 401
+
+
+def test_get_draft_rejects_cross_tenant_access(client_and_session):
+    client, Session = client_and_session
+    draft_id = _seed_draft(Session)
+    os.environ["AIVAN_API_KEY"] = "secret-key-abc"
+    os.environ["AIVAN_TENANT_ID"] = "tenant-a"
+    response = client.get(
+        f"/api/drafts/{draft_id}",
+        headers={
+            "X-AIVAN-API-Key": "secret-key-abc",
+            "X-AIVAN-Tenant-ID": "tenant-a",
+        },
+    )
+    assert response.status_code == 404

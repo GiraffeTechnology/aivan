@@ -4,6 +4,9 @@ from aivan.openclaw.contracts import OpenClawEvent
 def parse_openclaw_event(data: dict) -> OpenClawEvent:
     """Parse an incoming OpenClaw event dict into an OpenClawEvent."""
     return OpenClawEvent(
+        tenant_id=data.get("tenant_id", ""),
+        source_trace_id=data.get("source_trace_id", ""),
+        idempotency_key=data.get("idempotency_key", ""),
         source=data.get("source", "openclaw"),
         channel=data.get("channel", ""),
         channel_account_id=data.get("channel_account_id", ""),

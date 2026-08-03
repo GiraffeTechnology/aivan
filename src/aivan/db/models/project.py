@@ -7,6 +7,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     project_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     conversation_id: Mapped[str] = mapped_column(String(128), index=True)
     channel: Mapped[str] = mapped_column(String(64), default="")
     channel_account_id: Mapped[str] = mapped_column(String(128), default="")

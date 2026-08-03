@@ -1,6 +1,9 @@
 from pydantic import BaseModel, Field
 
 class OpenClawEvent(BaseModel):
+    tenant_id: str = ""
+    source_trace_id: str = ""
+    idempotency_key: str = ""
     source: str = "openclaw"
     channel: str = ""
     channel_account_id: str = ""

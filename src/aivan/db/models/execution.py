@@ -28,6 +28,7 @@ class ProcessedInboundEvent(Base):
     __tablename__ = "processed_inbound_events"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     # Unique so a concurrent duplicate also collides at the DB level.
     idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     project_id: Mapped[str] = mapped_column(String(64), default="", index=True)

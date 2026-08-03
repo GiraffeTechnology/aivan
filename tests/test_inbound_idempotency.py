@@ -50,6 +50,19 @@ def test_key_is_stable_and_distinct():
     assert k1 == k2 and k1 != k3
 
 
+def test_explicit_idempotency_key_is_tenant_scoped():
+    common = dict(
+        source="openclaw", channel="wechat", channel_account_id="a",
+        conversation_id="c", message_id="m", explicit_idempotency_key="delivery-42",
+    )
+    assert build_inbound_idempotency_key(tenant_id="tenant-a", **common) == (
+        build_inbound_idempotency_key(tenant_id="tenant-a", **common)
+    )
+    assert build_inbound_idempotency_key(tenant_id="tenant-a", **common) != (
+        build_inbound_idempotency_key(tenant_id="tenant-b", **common)
+    )
+
+
 def test_event_without_stable_identity_is_not_deduplicated():
     # No message id AND no conversation id -> no key -> processed without dedup.
     assert build_inbound_idempotency_key(source="openclaw", channel="wechat",
@@ -84,6 +97,30 @@ def test_duplicate_inbound_event_creates_no_new_drafts_or_events(db):
     assert len(DraftRepository(db).list_for_project(project_id)) == drafts_before
     assert len(ExecutionEventRepository(db).list_for_project(project_id)) == events_before
     assert _project_count(db) == projects_before
+
+
+def test_explicit_idempotency_key_prevents_duplicate_side_effects(db):
+    first = create_rfq_from_event(
+        _event(message_id="one", conversation_id="conv-explicit", tenant_id="tenant-a",
+               idempotency_key="delivery-42"),
+        db,
+    )
+    counts = (
+        _project_count(db),
+        len(DraftRepository(db).list_for_project(first.project_id)),
+        len(ExecutionEventRepository(db).list_for_project(first.project_id)),
+    )
+    second = create_rfq_from_event(
+        _event(message_id="different", conversation_id="other", tenant_id="tenant-a",
+               idempotency_key="delivery-42"),
+        db,
+    )
+    assert second.project_id == first.project_id
+    assert counts == (
+        _project_count(db),
+        len(DraftRepository(db).list_for_project(first.project_id)),
+        len(ExecutionEventRepository(db).list_for_project(first.project_id)),
+    )
 
 
 def test_distinct_messages_are_processed_independently(db):

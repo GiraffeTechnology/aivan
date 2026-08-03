@@ -7,6 +7,7 @@ class InquiryDraftRecord(Base):
     __tablename__ = "inquiry_drafts"
 
     draft_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     project_id: Mapped[str] = mapped_column(String(64), index=True)
     conversation_id: Mapped[str] = mapped_column(String(128), default="")
     channel: Mapped[str] = mapped_column(String(64), default="")
