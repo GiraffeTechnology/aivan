@@ -91,6 +91,7 @@ def test_package_entry_points_resolve_to_committed_dist():
     assert dot.get("types") == "./dist/index.d.ts"
     assert (PLUGIN_DIR / "dist" / "index.js").is_file(), "committed dist/index.js missing"
     assert (PLUGIN_DIR / "dist" / "index.d.ts").is_file(), "committed dist/index.d.ts missing"
+    assert (PLUGIN_DIR / "dist" / "intent-boundary.json").is_file(), "runtime intent boundary missing"
 
 
 def test_openclaw_extensions_point_to_dist_entry():

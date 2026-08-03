@@ -29,10 +29,11 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('node:fs').copyFileSync('intent-boundary.json','dist/intent-boundary.json')\"",
     "typecheck": "tsc --noEmit",
     "test": "node test-gateway-harness.mjs",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "prepack": "npm run build"
   },
   "files": [
     "dist/",

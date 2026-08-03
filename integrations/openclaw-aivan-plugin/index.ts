@@ -323,7 +323,7 @@ export async function forwardEvent(event: {
     event.channel,
     event.channel_account_id ?? "default",
     event.conversation_id,
-    event.message_id ?? event.timestamp ?? event.message_text,
+    event.message_id ?? event.message_text,
   ].join("\u001f");
   const idempotencyKey =
     event.idempotency_key ??
@@ -351,8 +351,15 @@ export async function forwardEvent(event: {
   const d = result.data as Record<string, unknown>;
   if (d["status"] === "error") {
     const failSoft = mapError(503, d);
+    const degradedReply = d["reply_text"]
+      ? String(d["reply_text"])
+      : d["output"]
+        ? String(d["output"])
+        : undefined;
     return {
       accepted: false,
+      reply_text: degradedReply,
+      output: d["output"] ? String(d["output"]) : undefined,
       error: errorMessage(d),
       error_code: String(d["error_code"] ?? failSoft.code),
       retryable: Boolean(d["retryable"] ?? failSoft.retryable),
@@ -580,6 +587,7 @@ export function isTradeSourcingIntent(params: any): boolean {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractSessionContext(params: any): {
   conversation_id?: string;
+  message_id?: string;
   sender_id?: string;
   channel?: string;
   project_id?: string;
@@ -587,6 +595,7 @@ function extractSessionContext(params: any): {
 } {
   const ctx: {
     conversation_id?: string;
+    message_id?: string;
     sender_id?: string;
     channel?: string;
     project_id?: string;
@@ -596,6 +605,14 @@ function extractSessionContext(params: any): {
   const sessionId: unknown =
     params?.sessionId ?? params?.session?.id ?? params?.sessionKey;
   if (sessionId != null) ctx.conversation_id = String(sessionId);
+
+  const messageId: unknown =
+    params?.messageId ??
+    params?.message?.id ??
+    params?.event?.message_id ??
+    params?.metadata?.message_id ??
+    params?.session?.latestUserMessage?.id;
+  if (messageId != null) ctx.message_id = String(messageId);
 
   const senderId: unknown =
     params?.senderId ??
@@ -749,10 +766,24 @@ export function register(api: any): void {
           }
 
           const ctx = extractSessionContext(params);
+          const stableMessageId =
+            ctx.message_id ??
+            `ocmsg_${createHash("sha256")
+              .update(
+                [
+                  ctx.channel ?? "openclaw-weixin",
+                  ctx.conversation_id ?? "unknown",
+                  ctx.sender_id ?? "unknown",
+                  prompt,
+                ].join("\u001f")
+              )
+              .digest("hex")
+              .slice(0, 48)}`;
           const event: Parameters<typeof forwardEvent>[0] = {
             source: "openclaw",
             channel: ctx.channel ?? "openclaw-weixin",
             conversation_id: ctx.conversation_id ?? "unknown",
+            message_id: stableMessageId,
             sender_id: ctx.sender_id ?? "unknown",
             message_text: prompt,
             message_type: "text",
@@ -783,6 +814,9 @@ export function register(api: any): void {
             process.stderr.write(
               `[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`
             );
+            if (result.reply_text) {
+              return buildSuccessResult(params, result.reply_text);
+            }
             return buildPassThroughResult(params);
           }
 

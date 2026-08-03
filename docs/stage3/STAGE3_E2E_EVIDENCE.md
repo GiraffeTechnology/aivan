@@ -2,7 +2,7 @@
 
 Date: 2026-08-03
 
-Five consecutive Gateway runs completed successfully. Each run executed 16
+Five consecutive Gateway runs completed successfully after review fixes. Each run executed 18
 assertions and covered:
 
 1. exact six-tool enumeration;
@@ -14,8 +14,10 @@ assertions and covered:
 7. one controlled retry after a transient 503;
 8. stable idempotency header/body key;
 9. user-visible structured error mapping.
+10. stable Harness message idempotency across redelivery;
+11. preservation of HTTP-200 fail-soft replies for the end user.
 
-Result: `5/5 PASS`, `80/80 assertions`, `0 failures`.
+Result: `5/5 PASS`, `90/90 assertions`, `0 failures`.
 
 The test server is deterministic and local. It uses no business records,
 channel credentials, LLM keys, passwords, or external APIs. Approval and

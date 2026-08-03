@@ -51,10 +51,17 @@ check("SECURITY.md exists", (PLUGIN_DIR / "SECURITY.md").is_file())
 section("Compiled dist output (install-time artifacts)")
 dist_js = PLUGIN_DIR / "dist" / "index.js"
 dist_dts = PLUGIN_DIR / "dist" / "index.d.ts"
+dist_boundary = PLUGIN_DIR / "dist" / "intent-boundary.json"
 check("dist/index.js exists", dist_js.is_file(),
       "run: cd integrations/openclaw-aivan-plugin && npm run build")
 check("dist/index.d.ts exists", dist_dts.is_file(),
       "run: cd integrations/openclaw-aivan-plugin && npm run build")
+check("dist/intent-boundary.json exists", dist_boundary.is_file(),
+      "runtime JSON import must ship beside dist/index.js")
+if dist_boundary.is_file():
+    check("dist intent boundary is byte-identical to source contract",
+          dist_boundary.read_bytes() == (PLUGIN_DIR / "intent-boundary.json").read_bytes(),
+          "run npm run build; the explicit post-tsc copy must be preserved")
 if dist_js.is_file():
     dist_js_text = dist_js.read_text(encoding="utf-8")
     check("dist/index.js contains export function register",

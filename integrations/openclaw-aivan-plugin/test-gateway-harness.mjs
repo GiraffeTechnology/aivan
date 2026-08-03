@@ -15,6 +15,7 @@ let mode = "success";
 let invokeCount = 0;
 let lastEvent = null;
 let lastIdempotencyKey = null;
+let previousIdempotencyKey = null;
 const reply = "RFQ accepted for supplier sourcing.";
 
 const server = createServer((request, response) => {
@@ -89,6 +90,9 @@ assert("supports accepts shared trade-sourcing intent", harness.supports(trade).
 mode = "success";
 const attempt = await harness.runAttempt(trade);
 assert("trade attempt returns AIVAN reply", attempt.assistantTexts[0] === reply);
+previousIdempotencyKey = lastIdempotencyKey;
+await harness.runAttempt(trade);
+assert("Harness redelivery keeps a stable message idempotency key", lastIdempotencyKey === previousIdempotencyKey);
 
 assert("health tool callable", (await invokeTool("aivan.health")).details.healthy === true);
 mode = "transient";
@@ -105,6 +109,14 @@ mode = "error";
 invokeCount = 0;
 const mapped = (await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-2", sender_id: "buyer-2", message_text: "RFQ", message_id: "message-2" })).details;
 assert("user-visible error mapping returned", mapped.accepted === false && mapped.error_code === "AIVAN_REQUEST_FAILED" && mapped.retryable === false);
+
+mode = "fail-soft";
+// Exercise the HTTP-200 degraded-response path without treating it as pass-through.
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => new Response(JSON.stringify({ status: "error", reply_text: "AIVAN is temporarily unavailable.", error_code: "DEPENDENCY_UNAVAILABLE", retryable: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+const degraded = await harness.runAttempt(trade);
+assert("HTTP 200 fail-soft reply remains user-visible", degraded.assistantTexts[0] === "AIVAN is temporarily unavailable.");
+globalThis.fetch = originalFetch;
 
 await new Promise((resolve) => server.close(resolve));
 console.log(`GATEWAY STAGE3 TEST: ${failed === 0 ? "PASS" : "FAIL"} (${passed} passed, ${failed} failed)`);
