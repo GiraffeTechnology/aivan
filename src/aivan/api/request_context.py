@@ -229,10 +229,12 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
 
     from aivan.domain.roles import RoleAuthorizationError, normalize_actor_identity
 
+    body_actor_id = str(event.get("actor_id") or "").strip()
     try:
         identity = normalize_actor_identity(
             actor_id=context.actor_id
-            or str(event.get("actor_id") or event.get("sender_id") or "local-actor"),
+            or body_actor_id
+            or str(event.get("sender_id") or "local-actor"),
             business_role=context.role_context or body_role,
             conversation_role=context.conversation_role or body_conversation_role,
             execution_mode=context.execution_mode or str(event.get("mode") or "auto"),
@@ -245,7 +247,10 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
             detail={"error": exc.code, "reason": exc.reason},
         ) from exc
 
-    event["actor_id"] = identity.actor_id
+    # Keep the authenticated operator separate from the external participant.
+    # A sender is usable for participant/audit binding but is not promoted to a
+    # trusted operator capable of receiving internal control notifications.
+    event["actor_id"] = context.actor_id or body_actor_id or None
     event["business_role"] = identity.business_role.value
     event["conversation_role"] = identity.conversation_role.value
     event["execution_mode"] = identity.execution_mode.value

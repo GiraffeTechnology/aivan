@@ -65,15 +65,24 @@ def test_case_domain_keeps_buyer_and_supplier_in_distinct_threads(db_session):
     buyer_binding = repo.bind_inbound_event(project.project_id, buyer)
     supplier_binding = repo.bind_inbound_event(project.project_id, supplier)
     duplicate_binding = repo.bind_inbound_event(project.project_id, supplier)
+    buyer_followup = buyer.model_copy(update={"message_id": "buyer-message-2"})
+    buyer_followup_binding = repo.bind_inbound_event(
+        project.project_id, buyer_followup
+    )
 
     assert buyer_binding[0].case_id == supplier_binding[0].case_id == project.project_id
     assert buyer_binding[0].conversation_record_id != supplier_binding[0].conversation_record_id
     assert buyer_binding[1].participant_id != supplier_binding[1].participant_id
     assert duplicate_binding[2].message_record_id == supplier_binding[2].message_record_id
     assert duplicate_binding[3] is False
+    assert (
+        buyer_followup_binding[0].conversation_record_id
+        == buyer_binding[0].conversation_record_id
+    )
+    assert buyer_followup_binding[1].participant_id == buyer_binding[1].participant_id
     assert db_session.query(CaseConversationRecord).count() == 2
     assert db_session.query(CaseParticipantRecord).count() == 2
-    assert db_session.query(CaseMessageRecord).count() == 2
+    assert db_session.query(CaseMessageRecord).count() == 3
 
 
 def test_bound_supplier_thread_resolves_original_case_without_new_rfq(db_session):

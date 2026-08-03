@@ -12,7 +12,13 @@ from aivan.db.models.domain import (
     CaseMessageRecord,
     CaseParticipantRecord,
 )
-from aivan.domain.roles import ActorIdentity, normalize_actor_identity
+from aivan.domain.roles import (
+    ActorIdentity,
+    CaseState,
+    TransitionDecision,
+    authorize_transition,
+    normalize_actor_identity,
+)
 from aivan.openclaw.contracts import OpenClawEvent
 from aivan.utils.ids import new_id
 
@@ -236,3 +242,42 @@ class CaseDomainRepository:
         self.db.add(record)
         self.db.flush()
         return record
+
+    def transition_case(
+        self,
+        *,
+        project,
+        after: CaseState | str,
+        identity: ActorIdentity,
+        source_trace_id: str,
+    ) -> TransitionDecision:
+        """Authorize, apply, and audit one Case state transition atomically."""
+
+        before = CaseState(project.case_state or CaseState.INQUIRY)
+        try:
+            decision = authorize_transition(before, after, identity)
+        except Exception as exc:
+            self.record_audit(
+                tenant_id=project.tenant_id,
+                case_id=project.project_id,
+                event_type="CASE_STATE_TRANSITION_REJECTED",
+                identity=identity,
+                source_trace_id=source_trace_id,
+                before={"case_state": before.value},
+                after={"case_state": str(after)},
+                rejection_reason=getattr(exc, "reason", str(exc)),
+            )
+            raise
+        project.case_state = decision.after.value
+        project.source_trace_id = source_trace_id or project.source_trace_id
+        self.record_audit(
+            tenant_id=project.tenant_id,
+            case_id=project.project_id,
+            event_type="CASE_STATE_TRANSITION",
+            identity=identity,
+            source_trace_id=source_trace_id,
+            before={"case_state": decision.before.value},
+            after={"case_state": decision.after.value},
+        )
+        self.db.flush()
+        return decision

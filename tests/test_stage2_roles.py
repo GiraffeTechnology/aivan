@@ -134,3 +134,29 @@ def test_invalid_state_jump_is_rejected_even_for_admin():
     with pytest.raises(RoleAuthorizationError) as exc:
         authorize_transition(CaseState.INQUIRY, CaseState.COMPLETED, admin)
     assert exc.value.code == "INVALID_CASE_TRANSITION"
+
+
+def test_operator_alias_can_execute_command_but_cannot_approve():
+    operator = normalize_actor_identity(
+        actor_id="operator-1",
+        business_role="operator",
+        execution_mode="command",
+        authorization_basis="operator_session",
+    )
+    assert operator.business_role == BusinessRole.SALES
+    require_capability(operator, Capability.EXECUTE_COMMAND)
+    with pytest.raises(RoleAuthorizationError):
+        require_capability(operator, Capability.APPROVE_OUTBOUND)
+
+
+@pytest.mark.parametrize("role", ["buyer", "supplier", "sales", "qc", "logistics", "auditor"])
+def test_unprivileged_roles_cannot_select_supplier_or_commit_lead_time(role):
+    identity = normalize_actor_identity(
+        actor_id=f"{role}-1",
+        business_role=role,
+        execution_mode="command",
+        authorization_basis="test_binding",
+    )
+    for capability in (Capability.SELECT_SUPPLIER, Capability.COMMIT_LEAD_TIME):
+        with pytest.raises(RoleAuthorizationError):
+            require_capability(identity, capability)

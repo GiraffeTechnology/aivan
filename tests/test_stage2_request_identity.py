@@ -91,7 +91,8 @@ def test_local_legacy_alias_is_normalized_without_granting_admin():
     event = apply_trusted_identity(
         _event(role_context="operator", mode="command"), context
     )
-    assert event["actor_id"] == "body-sender"
+    assert event["actor_id"] is None
+    assert event["sender_id"] == "body-sender"
     assert event["business_role"] == "sales"
     assert event["conversation_role"] == "internal_thread"
     assert event["execution_mode"] == "command"

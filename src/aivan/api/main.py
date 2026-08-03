@@ -451,6 +451,16 @@ def _do_approve_draft(
         before={"draft_id": draft.draft_id, "status": "pending_approval"},
         after={"draft_id": draft.draft_id, "status": "approved"},
     )
+    project = ProjectRepository(db).get(
+        draft.project_id, tenant_id=draft.tenant_id
+    )
+    if project is not None and project.case_state == "awaiting_approval":
+        CaseDomainRepository(db).transition_case(
+            project=project,
+            after="approved",
+            identity=identity,
+            source_trace_id=context.trace_id,
+        )
     from aivan.openclaw.outbound_approval import send_if_approved
     response = send_if_approved(draft_id, db)
     db.commit()
@@ -779,7 +789,7 @@ def list_projects(db: Session = Depends(get_db), context: RequestContext = Depen
     repo = ProjectRepository(db)
     projects = repo.list_all(limit=50, tenant_id=context.tenant_id)
     return {"projects": [
-        {"project_id": p.project_id, "status": p.status, "category": p.category, "customer_id": p.customer_id, "created_at": str(p.created_at)}
+        {"project_id": p.project_id, "status": p.status, "case_state": p.case_state, "category": p.category, "customer_id": p.customer_id, "created_at": str(p.created_at)}
         for p in projects
     ]}
 
@@ -792,6 +802,7 @@ def get_project(project_id: str, db: Session = Depends(get_db), context: Request
     return {
         "project_id": project.project_id,
         "status": project.status,
+        "case_state": project.case_state,
         "category": project.category,
         "customer_id": project.customer_id,
         "requirement": project.requirement_json,
@@ -824,11 +835,20 @@ def update_project_strategy(
     project = project_repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    identity = actor_identity_from_context(context, default_mode="command")
+    _authorize_project_capability(
+        project=project,
+        identity=identity,
+        capability_name="update_strategy",
+        source_trace_id=context.trace_id,
+        db=db,
+    )
     try:
         strategy = RFQStrategy(**body)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
     requirement = dict(project.requirement_json or {})
+    previous_strategy = requirement.get("strategy", {})
     requirement["strategy"] = strategy.model_dump()
     project_repo.update_requirement(project_id, requirement)
     from aivan.db.repositories.event_repo import ExecutionEventRepository
@@ -838,6 +858,14 @@ def update_project_strategy(
         f"Strategy updated to priority={strategy.priority}, scope={strategy.supplier_scope}",
         payload=strategy.model_dump(),
         actor="api",
+        tenant_id=project.tenant_id,
+        source_trace_id=context.trace_id,
+        actor_id=identity.actor_id,
+        actor_role=identity.business_role.value,
+        conversation_role=identity.conversation_role.value,
+        authorization_basis=identity.authorization_basis,
+        before={"strategy": previous_strategy},
+        after={"strategy": strategy.model_dump()},
     )
     db.commit()
     return {"project_id": project_id, "strategy": strategy.model_dump()}
@@ -858,6 +886,14 @@ def run_project_gltg(
     project = project_repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    identity = actor_identity_from_context(context, default_mode="command")
+    _authorize_project_capability(
+        project=project,
+        identity=identity,
+        capability_name="update_strategy",
+        source_trace_id=context.trace_id,
+        db=db,
+    )
     payload = dict(project.requirement_json or {})
     try:
         requirement = BuyerRequirement(**{k: v for k, v in payload.items() if k in BuyerRequirement.model_fields})
@@ -880,9 +916,103 @@ def run_project_gltg(
         f"{strategy.lead_time_confidence} lead time={simulation.selected_confidence_days} days",
         payload=simulation.model_dump(),
         actor="gltg",
+        tenant_id=project.tenant_id,
+        source_trace_id=context.trace_id,
+        actor_id=identity.actor_id,
+        actor_role=identity.business_role.value,
+        conversation_role=identity.conversation_role.value,
+        authorization_basis=identity.authorization_basis,
     )
     db.commit()
     return {"project_id": project_id, "gltg_simulation": simulation.model_dump()}
+
+
+def _authorize_project_capability(
+    *, project, identity, capability_name: str, source_trace_id: str, db: Session
+) -> None:
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.domain.roles import Capability, RoleAuthorizationError, require_capability
+
+    capability = Capability(capability_name)
+    try:
+        require_capability(identity, capability)
+    except RoleAuthorizationError as exc:
+        CaseDomainRepository(db).record_audit(
+            tenant_id=project.tenant_id,
+            case_id=project.project_id,
+            event_type="PROJECT_ACTION_REJECTED",
+            identity=identity,
+            source_trace_id=source_trace_id,
+            before={"case_state": project.case_state},
+            rejection_reason=exc.reason,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={"error": exc.code, "reason": exc.reason},
+        ) from exc
+
+
+@app.post("/api/projects/{project_id}/transition")
+def transition_project_case(
+    project_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.db.repositories.event_repo import ExecutionEventRepository
+    from aivan.domain.roles import CaseState, RoleAuthorizationError
+
+    project = ProjectRepository(db).get(project_id, tenant_id=context.tenant_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    identity = actor_identity_from_context(context, default_mode="update")
+    requested_state = str((body or {}).get("case_state") or "").strip()
+    try:
+        after = CaseState(requested_state)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_CASE_STATE", "case_state": requested_state},
+        ) from exc
+    before = project.case_state
+    try:
+        decision = CaseDomainRepository(db).transition_case(
+            project=project,
+            after=after,
+            identity=identity,
+            source_trace_id=context.trace_id,
+        )
+    except RoleAuthorizationError as exc:
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={"error": exc.code, "reason": exc.reason},
+        ) from exc
+    ExecutionEventRepository(db).append(
+        project.project_id,
+        "CASE_STATE_TRANSITION",
+        f"Case state changed from {decision.before.value} to {decision.after.value}",
+        tenant_id=project.tenant_id,
+        source_trace_id=context.trace_id,
+        actor_id=identity.actor_id,
+        actor_role=identity.business_role.value,
+        conversation_role=identity.conversation_role.value,
+        authorization_basis=identity.authorization_basis,
+        before={"case_state": before},
+        after={"case_state": project.case_state},
+    )
+    db.commit()
+    return {
+        "project_id": project.project_id,
+        "before": decision.before.value,
+        "after": decision.after.value,
+        "actor_id": identity.actor_id,
+        "actor_role": identity.business_role.value,
+        "source_trace_id": context.trace_id,
+        "authorization_basis": identity.authorization_basis,
+    }
 
 
 @app.post("/api/user-preferences/update")
