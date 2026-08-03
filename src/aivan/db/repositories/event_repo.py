@@ -25,8 +25,8 @@ class ExecutionEventRepository:
         rejection_reason: str = "",
     ) -> ExecutionEventRecord:
         if tenant_id is None:
-            from aivan.db.models.project import ProjectRecord
-            project = self.db.query(ProjectRecord).filter(ProjectRecord.project_id == project_id).first()
+            from aivan.db.models.project import Project
+            project = self.db.query(Project).filter(Project.project_id == project_id).first()
             tenant_id = project.tenant_id if project is not None else "legacy"
         record = ExecutionEventRecord(
             event_id=f"ev_{new_id()}",
