@@ -28,7 +28,10 @@ class RequestContext:
     idempotency_key: str
     actor_id: str
     role_context: str
+    conversation_role: str
+    execution_mode: str
     channel_account_id: str
+    authorization_basis: str
     production: bool
 
 
@@ -150,6 +153,15 @@ def resolve_request_context(request: Request) -> RequestContext:
     idempotency_key = _safe_identifier(
         _header(request, "Idempotency-Key"), field="idempotency_key"
     )
+    if tenant_keys:
+        authorization_basis = "tenant_api_key"
+    elif api_key:
+        authorization_basis = "deployment_api_key"
+    elif auth_secret:
+        authorization_basis = "service_auth_secret"
+    else:
+        authorization_basis = "local_compatibility"
+
     context = RequestContext(
         tenant_id=tenant_id,
         trace_id=trace_id,
@@ -158,9 +170,16 @@ def resolve_request_context(request: Request) -> RequestContext:
         role_context=_safe_identifier(
             _header(request, "X-AIVAN-Role-Context"), field="role_context"
         ),
+        conversation_role=_safe_identifier(
+            _header(request, "X-AIVAN-Conversation-Role"), field="conversation_role"
+        ),
+        execution_mode=_safe_identifier(
+            _header(request, "X-AIVAN-Execution-Mode"), field="execution_mode"
+        ),
         channel_account_id=_safe_identifier(
             _header(request, "X-AIVAN-Channel-Account-ID"), field="channel_account_id"
         ),
+        authorization_basis=authorization_basis,
         production=production,
     )
     request.state.aivan_context = context
@@ -189,8 +208,91 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
     if context.actor_id:
         event["actor_id"] = context.actor_id
 
+    body_conversation_role = str(event.get("conversation_role", "") or "").strip()
+    if context.production and body_conversation_role and not context.conversation_role:
+        raise HTTPException(
+            status_code=403, detail={"error": "UNTRUSTED_CONVERSATION_ROLE"}
+        )
+    if context.conversation_role:
+        event["conversation_role"] = context.conversation_role
+
+    if context.production and not context.actor_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "ACTOR_ID_REQUIRED", "field": "actor_id"},
+        )
+    if context.production and not context.role_context:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "ACTOR_ROLE_REQUIRED", "field": "business_role"},
+        )
+
+    from aivan.domain.roles import RoleAuthorizationError, normalize_actor_identity
+
+    try:
+        identity = normalize_actor_identity(
+            actor_id=context.actor_id
+            or str(event.get("actor_id") or event.get("sender_id") or "local-actor"),
+            business_role=context.role_context or body_role,
+            conversation_role=context.conversation_role or body_conversation_role,
+            execution_mode=context.execution_mode or str(event.get("mode") or "auto"),
+            authorization_basis=context.authorization_basis,
+        )
+    except RoleAuthorizationError as exc:
+        status = 403 if exc.code == "CONVERSATION_ROLE_MISMATCH" else 400
+        raise HTTPException(
+            status_code=status,
+            detail={"error": exc.code, "reason": exc.reason},
+        ) from exc
+
+    event["actor_id"] = identity.actor_id
+    event["business_role"] = identity.business_role.value
+    event["conversation_role"] = identity.conversation_role.value
+    event["execution_mode"] = identity.execution_mode.value
+    event["authorization_basis"] = identity.authorization_basis
+    # Compatibility aliases are canonicalized at the boundary.
+    event["role_context"] = identity.business_role.value
+    event["mode"] = identity.execution_mode.value
+
     event["tenant_id"] = context.tenant_id
     event["source_trace_id"] = context.trace_id
     if context.idempotency_key:
         event["idempotency_key"] = context.idempotency_key
     return event
+
+
+def actor_identity_from_context(
+    context: RequestContext, *, default_mode: str = "command"
+):
+    """Build an authorized business identity for non-event API operations.
+
+    Local development retains an explicit admin compatibility identity. Production
+    never infers either actor or role from a request body.
+    """
+
+    from aivan.domain.roles import RoleAuthorizationError, normalize_actor_identity
+
+    if context.production and not context.actor_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "ACTOR_ID_REQUIRED", "field": "actor_id"},
+        )
+    if context.production and not context.role_context:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "ACTOR_ROLE_REQUIRED", "field": "business_role"},
+        )
+    try:
+        return normalize_actor_identity(
+            actor_id=context.actor_id or "local-compatibility-actor",
+            business_role=context.role_context or "admin",
+            conversation_role=context.conversation_role or None,
+            execution_mode=context.execution_mode or default_mode,
+            authorization_basis=context.authorization_basis,
+        )
+    except RoleAuthorizationError as exc:
+        status = 403 if exc.code == "CONVERSATION_ROLE_MISMATCH" else 400
+        raise HTTPException(
+            status_code=status,
+            detail={"error": exc.code, "reason": exc.reason},
+        ) from exc

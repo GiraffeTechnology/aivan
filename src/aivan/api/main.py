@@ -20,6 +20,7 @@ from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
 from aivan.api.request_context import (
     RequestContext,
+    actor_identity_from_context,
     apply_trusted_identity,
     resolve_request_context,
 )
@@ -368,49 +369,158 @@ async def create_rfq_from_event_api(
     return await _invoke_application_service(request, db, context)
 
 
+def _authorize_draft_action(
+    *, draft, identity, capability, source_trace_id: str, db: Session
+) -> None:
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.domain.roles import RoleAuthorizationError, require_capability
+
+    try:
+        require_capability(identity, capability)
+    except RoleAuthorizationError as exc:
+        domain_repo = CaseDomainRepository(db)
+        domain_repo.record_approval(
+            tenant_id=draft.tenant_id,
+            case_id=draft.project_id,
+            draft_id=draft.draft_id,
+            identity=identity,
+            source_trace_id=source_trace_id,
+            status="authorization_rejected",
+            requested_by_actor_id=draft.created_by_actor_id,
+            requested_by_actor_role=draft.created_by_actor_role,
+            rejection_reason=exc.reason,
+        )
+        domain_repo.record_audit(
+            tenant_id=draft.tenant_id,
+            case_id=draft.project_id,
+            event_type="DRAFT_ACTION_REJECTED",
+            identity=identity,
+            source_trace_id=source_trace_id,
+            before={"draft_id": draft.draft_id, "status": draft.status},
+            rejection_reason=exc.reason,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={"error": exc.code, "reason": exc.reason},
+        ) from exc
+
+
 def _do_approve_draft(
-    draft_id: str, body: dict | None, db: Session, tenant_id: str
+    draft_id: str, db: Session, context: RequestContext
 ) -> dict:
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.domain.roles import Capability
+
     repo = DraftRepository(db)
-    draft = repo.get(draft_id, tenant_id=tenant_id)
+    draft = repo.get(draft_id, tenant_id=context.tenant_id)
     if draft is None:
         raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found")
+    identity = actor_identity_from_context(context, default_mode="approval")
+    _authorize_draft_action(
+        draft=draft,
+        identity=identity,
+        capability=Capability.APPROVE_OUTBOUND,
+        source_trace_id=context.trace_id,
+        db=db,
+    )
     if draft.status != "pending_approval":
         raise HTTPException(
             status_code=409,
             detail=f"Draft {draft_id} cannot be approved: current status is '{draft.status}'",
         )
-    approved_by = (body or {}).get("approved_by", "user")
-    repo.approve(draft_id, approved_by)
+    approval = CaseDomainRepository(db).record_approval(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        draft_id=draft.draft_id,
+        identity=identity,
+        source_trace_id=context.trace_id,
+        status="approved",
+        requested_by_actor_id=draft.created_by_actor_id,
+        requested_by_actor_role=draft.created_by_actor_role,
+    )
+    repo.approve(draft_id, identity.actor_id)
+    draft.approval_id = approval.approval_id
+    draft.authorization_basis = identity.authorization_basis
+    CaseDomainRepository(db).record_audit(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        event_type="DRAFT_APPROVED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={"draft_id": draft.draft_id, "status": "pending_approval"},
+        after={"draft_id": draft.draft_id, "status": "approved"},
+    )
     from aivan.openclaw.outbound_approval import send_if_approved
     response = send_if_approved(draft_id, db)
     db.commit()
     return {"draft_id": draft_id, "status": "approved", "sent": response.success, "error": response.error}
 
 
-def _do_reject_draft(draft_id: str, db: Session, tenant_id: str) -> dict:
+def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.domain.roles import Capability
+
     repo = DraftRepository(db)
-    draft = repo.get(draft_id, tenant_id=tenant_id)
+    draft = repo.get(draft_id, tenant_id=context.tenant_id)
     if draft is None:
         raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found")
+    identity = actor_identity_from_context(context, default_mode="approval")
+    _authorize_draft_action(
+        draft=draft,
+        identity=identity,
+        capability=Capability.APPROVE_OUTBOUND,
+        source_trace_id=context.trace_id,
+        db=db,
+    )
     if draft.status != "pending_approval":
         raise HTTPException(
             status_code=409,
             detail=f"Draft {draft_id} cannot be rejected: current status is '{draft.status}'",
         )
     repo.reject(draft_id)
+    CaseDomainRepository(db).record_approval(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        draft_id=draft.draft_id,
+        identity=identity,
+        source_trace_id=context.trace_id,
+        status="rejected",
+        requested_by_actor_id=draft.created_by_actor_id,
+        requested_by_actor_role=draft.created_by_actor_role,
+    )
+    CaseDomainRepository(db).record_audit(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        event_type="DRAFT_REJECTED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={"draft_id": draft.draft_id, "status": "pending_approval"},
+        after={"draft_id": draft.draft_id, "status": "rejected"},
+    )
     db.commit()
     return {"draft_id": draft_id, "status": "rejected"}
 
 
-def _do_retry_draft(draft_id: str, db: Session, tenant_id: str) -> dict:
+def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.domain.roles import Capability
+
     repo = DraftRepository(db)
-    draft = repo.get(draft_id, tenant_id=tenant_id)
+    draft = repo.get(draft_id, tenant_id=context.tenant_id)
     if draft is None:
         raise HTTPException(
             status_code=404,
             detail={"error": "not_found", "draft_id": draft_id},
         )
+    identity = actor_identity_from_context(context, default_mode="approval")
+    _authorize_draft_action(
+        draft=draft,
+        identity=identity,
+        capability=Capability.SEND_OUTBOUND,
+        source_trace_id=context.trace_id,
+        db=db,
+    )
     if draft.status != "send_failed":
         raise HTTPException(
             status_code=409,
@@ -423,7 +533,17 @@ def _do_retry_draft(draft_id: str, db: Session, tenant_id: str) -> dict:
         )
     from aivan.execution.approval_state import approve_and_send
 
-    result = approve_and_send(draft_id, db, approved_by=draft.approved_by or "user")
+    result = approve_and_send(draft_id, db, approved_by=identity.actor_id)
+    CaseDomainRepository(db).record_audit(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        event_type="DRAFT_SEND_RETRIED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={"draft_id": draft.draft_id, "status": "send_failed"},
+        after={"draft_id": draft.draft_id, "status": result.status},
+        rejection_reason=result.error or "",
+    )
     db.commit()
     return {
         "draft_id": result.draft_id,
@@ -441,7 +561,7 @@ def approve_draft(
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, body, db, context.tenant_id)
+    return _do_approve_draft(draft_id, db, context)
 
 
 @app.post("/api/openclaw/drafts/{draft_id}/reject")
@@ -450,7 +570,7 @@ def reject_draft(
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db, context.tenant_id)
+    return _do_reject_draft(draft_id, db, context)
 
 
 @app.get("/api/openclaw/drafts/{draft_id}")
@@ -481,7 +601,7 @@ def approve_draft_alias(
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, body, db, context.tenant_id)
+    return _do_approve_draft(draft_id, db, context)
 
 
 @app.post("/api/drafts/{draft_id}/reject")
@@ -490,7 +610,7 @@ def reject_draft_alias(
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db, context.tenant_id)
+    return _do_reject_draft(draft_id, db, context)
 
 
 @app.get("/api/drafts/{draft_id}")
@@ -514,7 +634,7 @@ def retry_draft_alias(
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_retry_draft(draft_id, db, context.tenant_id)
+    return _do_retry_draft(draft_id, db, context)
 
 
 @app.get("/api/drafts")

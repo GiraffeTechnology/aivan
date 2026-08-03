@@ -17,6 +17,10 @@ class OpenClawEvent(BaseModel):
     timestamp: str = ""
     project_id: str | None = None
     actor_id: str | None = None
+    business_role: str = ""
+    conversation_role: str = ""
+    execution_mode: str = ""
+    authorization_basis: str = ""
     role_context: str | None = None
     mode: str = "auto"
 

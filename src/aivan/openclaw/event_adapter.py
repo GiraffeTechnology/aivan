@@ -20,18 +20,22 @@ def parse_openclaw_event(data: dict) -> OpenClawEvent:
         timestamp=data.get("timestamp", ""),
         project_id=data.get("project_id"),
         actor_id=data.get("actor_id"),
+        business_role=data.get("business_role", ""),
+        conversation_role=data.get("conversation_role", ""),
+        execution_mode=data.get("execution_mode", ""),
+        authorization_basis=data.get("authorization_basis", ""),
         role_context=data.get("role_context"),
         mode=data.get("mode", "auto"),
     )
 
 def is_customer_message(event: OpenClawEvent) -> bool:
     """Return True if this looks like a customer/buyer inquiry."""
-    role = (event.role_context or "").lower()
+    role = (event.business_role or event.role_context or "").lower()
     if role in ("supplier", "seller", "m_side"):
         return False
     return role in ("", "buyer", "customer", "b_side") or event.mode == "auto"
 
 def is_supplier_reply(event: OpenClawEvent) -> bool:
     """Return True if this looks like a supplier/seller reply."""
-    role = (event.role_context or "").lower()
-    return role in ("supplier", "seller", "m_side")
+    role = (event.business_role or event.role_context or "").lower()
+    return role == "supplier" or role in ("seller", "m_side")

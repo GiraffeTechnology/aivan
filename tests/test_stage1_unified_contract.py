@@ -67,6 +67,7 @@ def _headers(**overrides):
         "X-AIVAN-Trace-ID": "trace-stage1-001",
         "Idempotency-Key": "delivery-stage1-001",
         "X-AIVAN-Role-Context": "buyer",
+        "X-AIVAN-Actor-ID": "buyer-001",
         "X-AIVAN-Channel-Account-ID": "wechat-account-01",
     }
     headers.update(overrides)

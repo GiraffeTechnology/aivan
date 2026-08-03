@@ -12,6 +12,7 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
+from aivan.db.repositories.domain_repo import CaseDomainRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
 from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
@@ -42,6 +43,7 @@ from aivan.schemas.rfq import (
     SupplierRoutingDecision,
 )
 from aivan.utils.env import env_bool
+from aivan.domain.roles import RoleAuthorizationError
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,17 @@ def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
         )
         if project:
             validated_project_id = project.project_id
+    if not validated_project_id and event.conversation_id:
+        bound_case_id = CaseDomainRepository(db).resolve_case_id_for_conversation(
+            tenant_id=event.tenant_id or "legacy",
+            external_conversation_id=event.conversation_id,
+            channel=event.channel,
+            channel_account_id=event.channel_account_id,
+        )
+        if bound_case_id and project_repo.get(
+            bound_case_id, tenant_id=event.tenant_id or "legacy"
+        ):
+            validated_project_id = bound_case_id
 
     # Deterministic-by-default: do not send raw (possibly non-English) event text
     # to the classification LLM unless explicitly enabled. The deterministic
@@ -499,14 +512,14 @@ def _dependency_recovery_result(project, event, classification, requirement, exc
 
 def _fallback_event_type(event: OpenClawEvent, has_project: bool) -> str:
     text = (event.message_text or "").lower()
-    role = (event.role_context or "").lower()
+    role = (event.business_role or event.role_context or "").lower()
     if is_supplier_reply(event):
         return "supplier_reply"
     if any(word in text for word in ["approve", "approved", "同意", "批准", "发送", "send it"]):
         return "approval_response"
     if any(word in text for word in ["status", "进度", "状态"]):
         return "internal_status_request"
-    if role in {"user", "owner", "operator", "sales", "salesperson"} or event.mode in {"user", "command"}:
+    if role in {"user", "owner", "operator", "sales", "salesperson", "procurement", "follow_up", "qc", "logistics", "admin", "approver"} or event.mode in {"user", "command"}:
         return "user_command"
     if role in {"buyer", "customer", "b_side"}:
         return "customer_followup" if has_project else "customer_new_inquiry"
@@ -542,10 +555,12 @@ def _get_or_create_project(event: OpenClawEvent, classification: EventClassifica
     project = repo.get(project_id, tenant_id=event.tenant_id) if project_id else None
     if project:
         bind_conversation(event.conversation_id, project.project_id)
+        _bind_event_to_case(project, event, db)
         return project
     project = repo.get_by_conversation(event.conversation_id, tenant_id=event.tenant_id)
     if project:
         bind_conversation(event.conversation_id, project.project_id)
+        _bind_event_to_case(project, event, db)
         return project
     project = repo.create(
         conversation_id=event.conversation_id,
@@ -556,6 +571,7 @@ def _get_or_create_project(event: OpenClawEvent, classification: EventClassifica
         tenant_id=event.tenant_id or "legacy",
     )
     bind_conversation(event.conversation_id, project.project_id)
+    _bind_event_to_case(project, event, db)
     ExecutionEventRepository(db).append(
         project.project_id,
         "PROJECT_CREATED",
@@ -563,6 +579,17 @@ def _get_or_create_project(event: OpenClawEvent, classification: EventClassifica
         actor="aivan_event_api",
     )
     return project
+
+
+def _bind_event_to_case(project, event: OpenClawEvent, db: Session):
+    """Attach the event's role-specific thread and participant to an existing Case."""
+
+    project.source_trace_id = event.source_trace_id or project.source_trace_id
+    conversation, participant, message, _created = CaseDomainRepository(
+        db
+    ).bind_inbound_event(project.project_id, event)
+    db.flush()
+    return conversation, participant, message
 
 
 def _load_requirement(payload: dict | None) -> BuyerRequirement | None:
@@ -833,7 +860,30 @@ def _build_user_control_message(
 
 
 def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClassification, db: Session) -> RFQExecutionResult:
-    project = _get_or_create_project(event, classification, db)
+    project_id = classification.project_id or event.project_id
+    project = (
+        ProjectRepository(db).get(project_id, tenant_id=event.tenant_id or "legacy")
+        if project_id
+        else None
+    )
+    if project is None or not classification.validated_project_attachment:
+        identity = CaseDomainRepository.identity_for_event(event)
+        CaseDomainRepository(db).record_audit(
+            tenant_id=event.tenant_id or "legacy",
+            case_id=project_id or "",
+            event_type="SUPPLIER_REPLY_REJECTED",
+            identity=identity,
+            source_trace_id=event.source_trace_id,
+            rejection_reason="supplier_reply_requires_validated_case_binding",
+        )
+        db.commit()
+        raise RoleAuthorizationError(
+            "SUPPLIER_CASE_BINDING_REQUIRED",
+            "Supplier reply must be attached to an existing validated Case thread",
+            reason="supplier_reply_requires_validated_case_binding",
+        )
+    bind_conversation(event.conversation_id, project.project_id)
+    _bind_event_to_case(project, event, db)
     project_repo = ProjectRepository(db)
     event_repo = ExecutionEventRepository(db)
     event_repo.append(
