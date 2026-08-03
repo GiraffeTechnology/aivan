@@ -529,7 +529,189 @@ def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict
         identity=identity,
         capability=Capability.SEND_OUTBOUND,
         source_trace_id=context.trace_id,
-    …1496 tokens truncated…i/suppliers")
+        db=db,
+    )
+    if draft.status != "send_failed":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "invalid_draft_state",
+                "draft_id": draft_id,
+                "status": draft.status,
+                "required_status": "send_failed",
+            },
+        )
+    from aivan.execution.approval_state import approve_and_send
+
+    result = approve_and_send(draft_id, db, approved_by=identity.actor_id)
+    CaseDomainRepository(db).record_audit(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        event_type="DRAFT_SEND_RETRIED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={"draft_id": draft.draft_id, "status": "send_failed"},
+        after={"draft_id": draft.draft_id, "status": result.status},
+        rejection_reason=result.error or "",
+    )
+    db.commit()
+    return {
+        "draft_id": result.draft_id,
+        "status": result.status,
+        "sent": result.sent,
+        "error": result.error,
+        "message_id": result.message_id,
+    }
+
+
+@app.post("/api/openclaw/drafts/{draft_id}/approve")
+def approve_draft(
+    draft_id: str,
+    body: dict = None,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return _do_approve_draft(draft_id, db, context)
+
+
+@app.post("/api/openclaw/drafts/{draft_id}/reject")
+def reject_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return _do_reject_draft(draft_id, db, context)
+
+
+@app.get("/api/openclaw/drafts/{draft_id}")
+def get_draft(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    """Fetch a single draft by id.
+
+    Returns 200 with the full draft (same shape as the ``drafts[]`` elements
+    elsewhere in the API), or a structured JSON 404 when the draft is absent.
+    """
+    draft = DraftRepository(db).get(draft_id, tenant_id=context.tenant_id)
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "draft_id": draft_id},
+        )
+    return _serialize_draft(draft)
+
+
+# Short-form aliases used by the OpenClaw plugin and dashboard
+@app.post("/api/drafts/{draft_id}/approve")
+def approve_draft_alias(
+    draft_id: str,
+    body: dict = None,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return _do_approve_draft(draft_id, db, context)
+
+
+@app.post("/api/drafts/{draft_id}/reject")
+def reject_draft_alias(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return _do_reject_draft(draft_id, db, context)
+
+
+@app.get("/api/drafts/{draft_id}")
+def get_draft_alias(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    draft = DraftRepository(db).get(draft_id, tenant_id=context.tenant_id)
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "draft_id": draft_id},
+        )
+    return _serialize_draft(draft)
+
+
+@app.post("/api/drafts/{draft_id}/retry")
+def retry_draft_alias(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return _do_retry_draft(draft_id, db, context)
+
+
+@app.get("/api/drafts")
+def list_all_drafts(
+    project_id: str | None = None,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    repo = DraftRepository(db)
+    if project_id:
+        drafts = repo.list_pending(project_id, tenant_id=context.tenant_id)
+    else:
+        drafts = repo.list_all_pending(tenant_id=context.tenant_id)
+    return {"drafts": [
+        {
+            "draft_id": d.draft_id,
+            "project_id": d.project_id,
+            "channel": d.channel,
+            "target_role": d.target_role,
+            "message_text": d.message_text[:200],
+            "created_by_agent": d.created_by_agent,
+            "status": d.status,
+            "created_at": str(d.created_at),
+        }
+        for d in drafts
+    ]}
+
+
+@app.get("/api/openclaw/projects/{project_id}/pending-drafts")
+def get_pending_drafts(
+    project_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    repo = DraftRepository(db)
+    drafts = repo.list_pending(project_id, tenant_id=context.tenant_id)
+    return {"project_id": project_id, "drafts": [
+        {"draft_id": d.draft_id, "target_role": d.target_role, "message_text": d.message_text[:200], "created_by_agent": d.created_by_agent, "status": d.status}
+        for d in drafts
+    ]}
+
+@app.get("/api/openclaw/projects/{project_id}/state")
+def get_project_state(project_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
+    repo = ProjectRepository(db)
+    project = repo.get(project_id, tenant_id=context.tenant_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    draft_repo = DraftRepository(db)
+    pending = draft_repo.list_pending(project_id, tenant_id=context.tenant_id)
+    return {
+        "project_id": project_id,
+        "status": project.status,
+        "requirement": project.requirement_json,
+        "pending_drafts": len(pending),
+    }
+
+@app.post("/api/suppliers/import")
+def import_suppliers(body: dict, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
+    csv_content = body.get("csv_content", "")
+    if not csv_content:
+        raise HTTPException(status_code=400, detail="csv_content required")
+    from aivan.sourcing.supplier_importer import import_from_csv
+    count, errors = import_from_csv(csv_content, db, tenant_id=context.tenant_id)
+    db.commit()
+    return {"imported": count, "errors": errors}
+
+@app.get("/api/suppliers")
 def list_suppliers(db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     from aivan.sourcing.supplier_registry import list_active
     suppliers = list_active(tenant_id=context.tenant_id)
@@ -969,4 +1151,3 @@ def _serialize_preference(record) -> dict:
         "created_at": str(record.created_at),
         "updated_at": str(record.updated_at),
     }
-
