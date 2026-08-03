@@ -137,6 +137,17 @@ jobs:
       - name: TypeScript syntax check
         run: npx tsc --noEmit
 
+      - name: Build and verify committed dist/ matches a fresh build
+        run: |
+          npm run build
+          git diff --exit-code -- dist/ || {
+            echo "::error::committed dist/ is stale — run 'npm run build' in integrations/openclaw-aivan-plugin and commit the result";
+            exit 1;
+          }
+
+      - name: Gateway harness E2E (against the just-built dist/)
+        run: npm test
+
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
