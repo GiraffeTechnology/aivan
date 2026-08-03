@@ -209,8 +209,14 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     if classification.event_type == "supplier_reply":
         return _handle_supplier_reply_event(event, classification, db)
     if classification.event_type == "user_command":
-        _require_event_capability(event, classification, Capability.EXECUTE_COMMAND, db)
-        _require_event_capability(event, classification, Capability.UPDATE_STRATEGY, db)
+        _require_event_capability(
+            event, classification, Capability.EXECUTE_COMMAND, db,
+            use_authenticated_actor=True,
+        )
+        _require_event_capability(
+            event, classification, Capability.UPDATE_STRATEGY, db,
+            use_authenticated_actor=True,
+        )
     elif classification.event_type in {
         "customer_new_inquiry",
         "customer_followup",
@@ -218,7 +224,10 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     }:
         _require_event_capability(event, classification, Capability.CREATE_INQUIRY, db)
     elif classification.event_type == "approval_response":
-        _require_event_capability(event, classification, Capability.APPROVE_OUTBOUND, db)
+        _require_event_capability(
+            event, classification, Capability.APPROVE_OUTBOUND, db,
+            use_authenticated_actor=True,
+        )
     if classification.event_type in {"internal_status_request", "approval_response", "unknown"}:
         return _record_non_rfq_event(event, classification, db)
 
@@ -382,8 +391,14 @@ def _require_event_capability(
     classification: EventClassification,
     capability: Capability,
     db: Session,
+    *,
+    use_authenticated_actor: bool = False,
 ):
-    identity = CaseDomainRepository.identity_for_event(event)
+    identity = (
+        CaseDomainRepository.authenticated_identity_for_event(event)
+        if use_authenticated_actor
+        else CaseDomainRepository.identity_for_event(event)
+    )
     try:
         require_capability(identity, capability)
     except RoleAuthorizationError as exc:

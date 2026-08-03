@@ -1,5 +1,7 @@
 """Regression tests for Stage 1-3 tenant-scoped repositories and registries."""
 
+import pytest
+
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
@@ -10,6 +12,9 @@ from aivan.sourcing.supplier_models import SupplierProfile
 from aivan.sourcing.supplier_registry import clear_registry, get_supplier, list_active, register_supplier
 from aivan.platforms.models import TrustedPlatform
 from aivan.platforms.platform_registry import add_platform, get_platform, reset_registry
+from aivan.domain.roles import RoleAuthorizationError
+from aivan.execution.rfq_execution import create_rfq_from_event
+from aivan.openclaw.contracts import OpenClawEvent
 
 
 def test_account_preference_and_supplier_queries_never_cross_tenants(db_session):
@@ -80,4 +85,51 @@ def test_custom_platform_whitelist_is_tenant_scoped():
         assert get_platform("alibaba", tenant_id="tenant-b") is not None
     finally:
         reset_registry()
+
+
+def _command_event(**overrides) -> OpenClawEvent:
+    base = dict(
+        tenant_id="tenant-cmd",
+        source="openclaw",
+        channel="wechat",
+        channel_account_id="acct-1",
+        conversation_id="conv-cmd-1",
+        message_id="msg-cmd-1",
+        sender_id="bridge-service",
+        message_text="Prioritize speed and known suppliers for this RFQ.",
+        mode="command",
+        execution_mode="command",
+        # The OpenClaw plugin forces the external participant role to
+        # buyer/supplier for every event (it must never self-assert an
+        # internal role) — a legitimate internal command still carries this
+        # downgraded participant business_role.
+        business_role="buyer",
+        role_context="buyer",
+    )
+    base.update(overrides)
+    return OpenClawEvent(**base)
+
+
+def test_authenticated_actor_role_authorizes_command_despite_downgraded_participant_role(db_session):
+    """An internal command authenticated as e.g. 'sales' must not be rejected
+    just because the OpenClaw plugin's participant identity is forced to
+    'buyer' — authorization for EXECUTE_COMMAND/UPDATE_STRATEGY must consult
+    the authenticated service actor's role, not the participant's."""
+    event = _command_event(
+        authenticated_actor_id="bridge-service-1",
+        authenticated_actor_role="sales",
+        authorization_basis="tenant_api_key",
+    )
+    result = create_rfq_from_event(event, db_session)
+    assert result.event_type == "user_command"
+
+
+def test_downgraded_participant_alone_still_cannot_issue_commands(db_session):
+    """Without an authenticated actor role granting EXECUTE_COMMAND, a bare
+    buyer-classified participant must still be rejected — the fix must not
+    grant blanket command authority to everyone."""
+    event = _command_event(conversation_id="conv-cmd-2", message_id="msg-cmd-2")
+    with pytest.raises(RoleAuthorizationError) as exc:
+        create_rfq_from_event(event, db_session)
+    assert exc.value.code == "CAPABILITY_FORBIDDEN"
 
