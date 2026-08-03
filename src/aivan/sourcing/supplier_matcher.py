@@ -42,8 +42,10 @@ def _score_capacity(required_qty: int | None, daily_cap: int, monthly_cap: int, 
 def match_suppliers_for_requirement(
     requirement,
     limit: int = 10,
+    *,
+    tenant_id: str = "legacy",
 ) -> list[SupplierMatch]:
-    suppliers = list_active()
+    suppliers = list_active(tenant_id=tenant_id)
     if not suppliers:
         return []
 
@@ -100,3 +102,4 @@ def match_suppliers_for_requirement(
 
     matches.sort(key=lambda m: m.match_score, reverse=True)
     return matches[:limit]
+

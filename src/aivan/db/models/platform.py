@@ -7,6 +7,7 @@ class PlatformRecord(Base):
     __tablename__ = "platforms"
 
     platform_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     display_name: Mapped[str] = mapped_column(String(256))
     status: Mapped[str] = mapped_column(String(32), default="pending_review", index=True)
     domain_patterns_json: Mapped[list] = mapped_column(JSON, default=list)
@@ -22,3 +23,4 @@ class PlatformRecord(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+

@@ -7,6 +7,7 @@ class OpenClawAccountRecord(Base):
     __tablename__ = "openclaw_accounts"
 
     account_connection_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     platform: Mapped[str] = mapped_column(String(64), index=True)
     channel: Mapped[str] = mapped_column(String(64), default="")
     channel_account_id: Mapped[str] = mapped_column(String(256), default="")
@@ -19,3 +20,4 @@ class OpenClawAccountRecord(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+

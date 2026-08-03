@@ -13,6 +13,10 @@ def _legacy_database(tmp_path) -> str:
                 "conversation_id VARCHAR(128), customer_id VARCHAR(128))"
             )
         )
+        connection.execute(text("CREATE TABLE openclaw_accounts (account_connection_id VARCHAR(128) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE user_preferences (preference_id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE suppliers (supplier_id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE platforms (platform_id VARCHAR(64) PRIMARY KEY)"))
         connection.execute(
             text(
                 "CREATE TABLE inquiry_drafts (draft_id VARCHAR(64) PRIMARY KEY, "
@@ -69,4 +73,9 @@ def test_stage2_migration_is_additive_and_idempotent(tmp_path):
         "after_json",
         "rejection_reason",
     } <= event_columns
+    for table in ("openclaw_accounts", "user_preferences", "suppliers", "platforms"):
+        assert "tenant_id" in {column["name"] for column in schema.get_columns(table)}
+    message_columns = {column["name"] for column in schema.get_columns("case_messages")}
+    assert {"asserted_by_actor_id", "asserted_by_actor_role"} <= message_columns
     engine.dispose()
+

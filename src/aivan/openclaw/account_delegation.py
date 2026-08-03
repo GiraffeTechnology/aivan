@@ -3,7 +3,7 @@ import os
 from aivan.openclaw.contracts import OpenClawManagedAccount, ALLOWED_PERMISSIONS, FORBIDDEN_ACTIONS
 from aivan.utils.time_utils import utcnow_iso
 
-def register_account(db_session, data: dict) -> OpenClawManagedAccount:
+def register_account(db_session, data: dict, *, tenant_id: str = "legacy") -> OpenClawManagedAccount:
     """Register an OpenClaw-managed account. AIVAN never stores passwords or sessions."""
     account_connection_id = data.get("account_connection_id", "")
     if not account_connection_id:
@@ -45,36 +45,36 @@ def register_account(db_session, data: dict) -> OpenClawManagedAccount:
         "allowed_actions_json": account.allowed_actions,
         "expires_at": account.expires_at or "",
         "metadata_json": account.metadata,
-    })
+    }, tenant_id=tenant_id)
 
-    _log_account_event(db_session, account_connection_id, "ACCOUNT_REGISTERED", account.platform)
+    _log_account_event(db_session, account_connection_id, "ACCOUNT_REGISTERED", account.platform, tenant_id=tenant_id)
     return account
 
-def revoke_account(db_session, account_connection_id: str) -> bool:
+def revoke_account(db_session, account_connection_id: str, *, tenant_id: str = "legacy") -> bool:
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db_session)
-    result = repo.revoke(account_connection_id)
+    result = repo.revoke(account_connection_id, tenant_id=tenant_id)
     if result:
-        _log_account_event(db_session, account_connection_id, "ACCOUNT_REVOKED", "")
+        _log_account_event(db_session, account_connection_id, "ACCOUNT_REVOKED", "", tenant_id=tenant_id)
     return result is not None
 
-def check_permission(db_session, account_connection_id: str, permission: str) -> bool:
+def check_permission(db_session, account_connection_id: str, permission: str, *, tenant_id: str = "legacy") -> bool:
     if permission in FORBIDDEN_ACTIONS:
         return False
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db_session)
-    account = repo.get(account_connection_id)
+    account = repo.get(account_connection_id, tenant_id=tenant_id)
     if not account:
         return False
     if account.status == "revoked":
         return False
-    _log_account_event(db_session, account_connection_id, "ACCOUNT_PERMISSION_CHECKED", permission)
+    _log_account_event(db_session, account_connection_id, "ACCOUNT_PERMISSION_CHECKED", permission, tenant_id=tenant_id)
     return permission in (account.permissions_json or [])
 
-def list_accounts(db_session) -> list[OpenClawManagedAccount]:
+def list_accounts(db_session, *, tenant_id: str = "legacy") -> list[OpenClawManagedAccount]:
     from aivan.db.repositories.account_repo import AccountRepository
     repo = AccountRepository(db_session)
-    records = repo.list_active()
+    records = repo.list_active(tenant_id=tenant_id)
     return [
         OpenClawManagedAccount(
             account_connection_id=r.account_connection_id,
@@ -94,7 +94,7 @@ def list_accounts(db_session) -> list[OpenClawManagedAccount]:
         for r in records
     ]
 
-def _log_account_event(db_session, account_connection_id: str, event_type: str, detail: str):
+def _log_account_event(db_session, account_connection_id: str, event_type: str, detail: str, *, tenant_id: str = "legacy"):
     try:
         from aivan.db.repositories.event_repo import ExecutionEventRepository
         repo = ExecutionEventRepository(db_session)
@@ -104,6 +104,8 @@ def _log_account_event(db_session, account_connection_id: str, event_type: str, 
             summary=f"{event_type}: {account_connection_id} ({detail})",
             payload={"account_connection_id": account_connection_id, "detail": detail},
             actor="account_delegation",
+            tenant_id=tenant_id,
         )
     except Exception:
         pass
+
