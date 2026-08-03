@@ -17,6 +17,9 @@ def _legacy_database(tmp_path) -> str:
         connection.execute(text("CREATE TABLE user_preferences (preference_id VARCHAR(64) PRIMARY KEY)"))
         connection.execute(text("CREATE TABLE suppliers (supplier_id VARCHAR(64) PRIMARY KEY)"))
         connection.execute(text("CREATE TABLE platforms (platform_id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO openclaw_accounts VALUES ('legacy-account')"))
+        connection.execute(text("INSERT INTO suppliers VALUES ('legacy-supplier')"))
+        connection.execute(text("INSERT INTO platforms VALUES ('legacy-platform')"))
         connection.execute(
             text(
                 "CREATE TABLE inquiry_drafts (draft_id VARCHAR(64) PRIMARY KEY, "
@@ -75,6 +78,13 @@ def test_stage2_migration_is_additive_and_idempotent(tmp_path):
     } <= event_columns
     for table in ("openclaw_accounts", "user_preferences", "suppliers", "platforms"):
         assert "tenant_id" in {column["name"] for column in schema.get_columns(table)}
+    assert "logical_account_connection_id" in {column["name"] for column in schema.get_columns("openclaw_accounts")}
+    assert "logical_supplier_id" in {column["name"] for column in schema.get_columns("suppliers")}
+    assert "logical_platform_id" in {column["name"] for column in schema.get_columns("platforms")}
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT logical_account_connection_id FROM openclaw_accounts")).scalar_one() == "legacy-account"
+        assert connection.execute(text("SELECT logical_supplier_id FROM suppliers")).scalar_one() == "legacy-supplier"
+        assert connection.execute(text("SELECT logical_platform_id FROM platforms")).scalar_one() == "legacy-platform"
     message_columns = {column["name"] for column in schema.get_columns("case_messages")}
     assert {"asserted_by_actor_id", "asserted_by_actor_role"} <= message_columns
     engine.dispose()

@@ -2,11 +2,21 @@ from datetime import datetime, timezone
 from sqlalchemy import String, Text, DateTime, JSON, Float, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from aivan.db.models import Base
+import hashlib
+import uuid
+
+def supplier_storage_key(tenant_id: str, supplier_id: str) -> str:
+    raw = f"{tenant_id}\x1f{supplier_id}".encode("utf-8")
+    return f"sup_{hashlib.sha256(raw).hexdigest()[:48]}"
+
+def _default_supplier_storage_key() -> str:
+    return f"sup_{uuid.uuid4().hex}"
 
 class SupplierRecord(Base):
     __tablename__ = "suppliers"
 
-    supplier_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    storage_key: Mapped[str] = mapped_column("supplier_id", String(64), primary_key=True, default=_default_supplier_storage_key)
+    supplier_id: Mapped[str] = mapped_column("logical_supplier_id", String(64), default="", index=True)
     tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     name: Mapped[str] = mapped_column(String(256), index=True)
     company_type: Mapped[str] = mapped_column(String(128), default="")

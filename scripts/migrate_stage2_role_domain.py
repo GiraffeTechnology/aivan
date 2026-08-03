@@ -51,15 +51,18 @@ ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     },
     "openclaw_accounts": {
         "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+        "logical_account_connection_id": "VARCHAR(128) NOT NULL DEFAULT ''",
     },
     "user_preferences": {
         "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
     },
     "suppliers": {
         "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+        "logical_supplier_id": "VARCHAR(64) NOT NULL DEFAULT ''",
     },
     "platforms": {
         "tenant_id": "VARCHAR(128) NOT NULL DEFAULT 'legacy'",
+        "logical_platform_id": "VARCHAR(64) NOT NULL DEFAULT ''",
     },
     "case_messages": {
         "asserted_by_actor_id": "VARCHAR(128) NOT NULL DEFAULT ''",
@@ -71,11 +74,17 @@ INDEXED_COLUMNS: dict[str, tuple[str, ...]] = {
     "projects": ("case_state", "source_trace_id"),
     "inquiry_drafts": ("participant_id", "source_trace_id", "approval_id"),
     "execution_events": ("tenant_id", "source_trace_id", "actor_id"),
-    "openclaw_accounts": ("tenant_id",),
+    "openclaw_accounts": ("tenant_id", "logical_account_connection_id"),
     "user_preferences": ("tenant_id",),
-    "suppliers": ("tenant_id",),
-    "platforms": ("tenant_id",),
+    "suppliers": ("tenant_id", "logical_supplier_id"),
+    "platforms": ("tenant_id", "logical_platform_id"),
     "case_messages": ("asserted_by_actor_id", "asserted_by_actor_role"),
+}
+
+LOGICAL_ID_BACKFILLS: dict[str, tuple[str, str]] = {
+    "openclaw_accounts": ("account_connection_id", "logical_account_connection_id"),
+    "suppliers": ("supplier_id", "logical_supplier_id"),
+    "platforms": ("platform_id", "logical_platform_id"),
 }
 
 
@@ -157,6 +166,16 @@ def apply(database_url: str) -> list[tuple[str, str, str]]:
                             )
                         )
                         applied.append((table, column, "index_added"))
+                if table in LOGICAL_ID_BACKFILLS:
+                    storage_column, logical_column = LOGICAL_ID_BACKFILLS[table]
+                    connection.execute(
+                        text(
+                            f"UPDATE {quote(table)} SET {quote(logical_column)} = "
+                            f"{quote(storage_column)} WHERE {quote(logical_column)} IS NULL "
+                            f"OR {quote(logical_column)} = ''"
+                        )
+                    )
+                    applied.append((table, logical_column, "legacy_ids_backfilled"))
         return applied
     finally:
         engine.dispose()

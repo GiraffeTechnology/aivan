@@ -3,6 +3,7 @@
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
+from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.repositories.supplier_repo import SupplierRepository
 from aivan.sourcing.supplier_models import SupplierProfile
@@ -17,6 +18,9 @@ def test_account_preference_and_supplier_queries_never_cross_tenants(db_session)
     accounts.upsert("account-b", {"platform": "wechat"}, tenant_id="tenant-b")
     assert accounts.get("account-a", tenant_id="tenant-b") is None
     assert [item.account_connection_id for item in accounts.list_active(tenant_id="tenant-a")] == ["account-a"]
+    accounts.upsert("shared-account", {"platform": "wechat"}, tenant_id="tenant-a")
+    accounts.upsert("shared-account", {"platform": "wechat"}, tenant_id="tenant-b")
+    assert accounts.get("shared-account", tenant_id="tenant-a").storage_key != accounts.get("shared-account", tenant_id="tenant-b").storage_key
 
     preferences = UserPreferenceRepository(db_session)
     preferences.upsert("user-a", "strategy", {"speed": True}, tenant_id="tenant-a")
@@ -29,6 +33,14 @@ def test_account_preference_and_supplier_queries_never_cross_tenants(db_session)
     suppliers.upsert("supplier-b", {"name": "B"}, tenant_id="tenant-b")
     assert suppliers.get("supplier-a", tenant_id="tenant-b") is None
     assert [item.supplier_id for item in suppliers.list_active(tenant_id="tenant-a")] == ["supplier-a"]
+    suppliers.upsert("shared-supplier", {"name": "Tenant A shared"}, tenant_id="tenant-a")
+    suppliers.upsert("shared-supplier", {"name": "Tenant B shared"}, tenant_id="tenant-b")
+    assert suppliers.get("shared-supplier", tenant_id="tenant-a").storage_key != suppliers.get("shared-supplier", tenant_id="tenant-b").storage_key
+
+    platforms = PlatformRepository(db_session)
+    platforms.upsert("shared-platform", {"display_name": "A"}, tenant_id="tenant-a")
+    platforms.upsert("shared-platform", {"display_name": "B"}, tenant_id="tenant-b")
+    assert platforms.get("shared-platform", tenant_id="tenant-a").storage_key != platforms.get("shared-platform", tenant_id="tenant-b").storage_key
 
 
 def test_in_memory_supplier_registry_is_tenant_scoped():

@@ -29,14 +29,18 @@ def clear_registry(*, tenant_id: str | None = None) -> None:
             for key in [key for key in _registry if key[0] == tenant_id]:
                 _registry.pop(key, None)
 
-def load_from_db(db_session, *, tenant_id: str = "legacy") -> int:
+def load_from_db(db_session, *, tenant_id: str | None = "legacy") -> int:
     from aivan.db.repositories.supplier_repo import SupplierRepository
     repo = SupplierRepository(db_session)
-    records = repo.list_active(tenant_id=tenant_id)
+    records = (
+        repo.list_active_all_tenants()
+        if tenant_id is None
+        else repo.list_active(tenant_id=tenant_id)
+    )
     loaded = 0
     for r in records:
         profile = SupplierProfile(
-            supplier_id=r.supplier_id,
+            supplier_id=r.supplier_id or r.storage_key,
             name=r.name,
             company_type=r.company_type or "",
             categories=r.categories_json or [],
@@ -63,7 +67,7 @@ def load_from_db(db_session, *, tenant_id: str = "legacy") -> int:
             notes=r.notes or "",
             active=r.active,
         )
-        register_supplier(profile, tenant_id=tenant_id)
+        register_supplier(profile, tenant_id=r.tenant_id or "legacy")
         loaded += 1
     return loaded
 

@@ -130,7 +130,9 @@ function participantIdentity(event: {
   const roleAliases: Record<string, string> = {
     customer: "buyer", b_side: "buyer", buyer: "buyer",
     seller: "supplier", m_side: "supplier", supplier: "supplier",
-    operator: "sales", user: "sales", salesperson: "sales", sales: "sales",
+    // Participant headers never grant internal/operator capabilities. The
+    // authenticated service identity carries those privileges separately.
+    operator: "buyer", user: "buyer", salesperson: "buyer", sales: "buyer",
   };
   const role = roleAliases[rawRole] ?? "buyer";
   const conversationRole = event.conversation_role ??

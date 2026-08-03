@@ -108,6 +108,8 @@ const firstParticipant = lastHeaders["x-aivan-participant-id"];
 await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-3", sender_id: "supplier-1", message_text: "Quote", message_id: "message-3", business_role: "supplier" });
 assert("different sender gets a different stable participant identity", lastHeaders["x-aivan-participant-id"] !== firstParticipant);
 assert("supplier participant is routed to supplier thread", lastHeaders["x-aivan-participant-role"] === "supplier" && lastHeaders["x-aivan-participant-conversation-role"] === "supplier_thread");
+await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-4", sender_id: "untrusted-1", message_text: "Run command", message_id: "message-4", business_role: "sales", mode: "command" });
+assert("tool parameters cannot self-assert an internal sales role", lastHeaders["x-aivan-participant-role"] === "buyer" && lastHeaders["x-aivan-participant-conversation-role"] === "buyer_thread");
 assert("openDashboard tool callable", (await invokeTool("aivan.openDashboard")).details.url.endsWith("/app"));
 assert("getPendingDrafts tool callable", (await invokeTool("aivan.getPendingDrafts", { project_id: "project-1" })).details.drafts.length === 1);
 assert("approveDraft tool callable", (await invokeTool("aivan.approveDraft", { draft_id: "draft-1" })).details.approved === true);

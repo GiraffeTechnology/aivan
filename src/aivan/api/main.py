@@ -38,7 +38,7 @@ def _load_supplier_registry_on_startup() -> int:
     from aivan.sourcing.supplier_registry import load_from_db
 
     with db_session() as db:
-        return load_from_db(db)
+        return load_from_db(db, tenant_id=None)
 
 
 @asynccontextmanager
