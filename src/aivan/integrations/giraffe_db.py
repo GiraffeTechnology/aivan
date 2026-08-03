@@ -55,9 +55,9 @@ class GiraffeDBClient:
     integration boundary.
     """
 
-    def __init__(self, db: Session, *, tenant_id: str = "legacy"):
+    def __init__(self, db: Session, *, tenant_id: str | None = None):
         self.db = db
-        self.tenant_id = tenant_id
+        self.tenant_id = tenant_id or resolve_service_tenant(context="giraffe_db_client")
 
     def build_context(
         self,

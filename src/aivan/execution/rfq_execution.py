@@ -810,12 +810,13 @@ def _user_control_channel_and_target(event: OpenClawEvent, db: Session) -> tuple
     role = (event.role_context or "").lower()
     normalized_channel = normalize_channel(event.channel)
     notification_channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
+    authenticated_actor_id = event.authenticated_actor_id or ""
     if role in {"user", "owner", "operator", "sales", "salesperson"} or event.mode in {"user", "command"}:
-        target = event.actor_id or event.sender_id
+        target = authenticated_actor_id
         if target:
             return notification_channel or "im", target, True, "verified_user_sender"
-    if event.actor_id:
-        return notification_channel or "im", event.actor_id, True, "verified_actor_id"
+    if authenticated_actor_id:
+        return notification_channel or "im", authenticated_actor_id, True, "verified_actor_id"
     owner_user_id = _owner_user_id_for_event(event, db)
     if owner_user_id:
         channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
@@ -832,6 +833,7 @@ def _owner_user_id_for_event(event: OpenClawEvent, db: Session) -> str:
     account = db.query(OpenClawAccountRecord).filter(
         OpenClawAccountRecord.channel == event.channel,
         OpenClawAccountRecord.channel_account_id == event.channel_account_id,
+        OpenClawAccountRecord.tenant_id == (event.tenant_id or "legacy"),
         OpenClawAccountRecord.status == "connected",
     ).first()
     return account.owner_user_id if account and account.owner_user_id else ""

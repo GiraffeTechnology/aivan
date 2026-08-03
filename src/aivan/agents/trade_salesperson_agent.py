@@ -20,6 +20,7 @@ from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.execution.event_log import append_event
 from aivan.utils.ids import new_project_id
 from aivan.utils.time_utils import utcnow_iso
+from aivan.utils.tenant import tenant_for_new_record
 
 @dataclass
 class AgentTurnResult:
@@ -46,7 +47,7 @@ def handle_trade_salesperson_event(
     if not project_id:
         project_id = get_project_id(event.conversation_id)
 
-    tenant_id = event.tenant_id or "legacy"
+    tenant_id = tenant_for_new_record(event.tenant_id or None)
     project = project_repo.get(project_id, tenant_id=tenant_id) if project_id else None
 
     if not project:
