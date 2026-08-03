@@ -42,6 +42,10 @@ def _headers(tenant="tenant-a"):
     return {
         "X-AIVAN-API-Key": "stage1-secret",
         "X-AIVAN-Tenant-ID": tenant,
+        "X-AIVAN-Actor-ID": "approver-001",
+        "X-AIVAN-Role-Context": "approver",
+        "X-AIVAN-Conversation-Role": "approval_thread",
+        "X-AIVAN-Execution-Mode": "approval",
     }
 
 
