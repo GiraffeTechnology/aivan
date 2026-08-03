@@ -5,7 +5,7 @@ description = "AIVAN - local-first AI trade salesperson assistant powered by Ope
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.141.1",
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy>=2.0.0",
     "pydantic>=2.10.0",
