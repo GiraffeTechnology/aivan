@@ -18,6 +18,8 @@ export declare function health(): Promise<{
     healthy: boolean;
     version?: string;
     error?: string;
+    error_code?: string;
+    retryable?: boolean;
 }>;
 /**
  * aivan.forwardEvent — Send a normalised OpenClaw event to AIVAN.
@@ -37,6 +39,13 @@ export declare function forwardEvent(event: {
     attachments?: unknown[];
     timestamp?: string;
     project_id?: string;
+    tenant_id?: string;
+    source_trace_id?: string;
+    idempotency_key?: string;
+    actor_id?: string;
+    business_role?: string;
+    conversation_role?: string;
+    execution_mode?: string;
     role_context?: string | Record<string, unknown> | null;
     mode?: string;
 }): Promise<{
@@ -46,6 +55,8 @@ export declare function forwardEvent(event: {
     reply_text?: string;
     output?: string;
     error?: string;
+    error_code?: string;
+    retryable?: boolean;
 }>;
 /**
  * aivan.openDashboard — Return the local dashboard URL.
@@ -89,4 +100,5 @@ export declare function rejectDraft(draftId: string, reason?: string): Promise<{
 }>;
 declare const pluginEntry: any;
 export default pluginEntry;
+export declare function isTradeSourcingIntent(params: any): boolean;
 export declare function register(api: any): void;

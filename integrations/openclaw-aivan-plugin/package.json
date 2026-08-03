@@ -1,6 +1,6 @@
 {
   "name": "@giraffetechnology/openclaw-aivan",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "OpenClaw plugin bridge for AIVAN, a local-first AI trade salesperson assistant",
   "main": "./dist/index.js",
@@ -26,16 +26,33 @@
     "ai-agent"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc && node -e \"require('node:fs').copyFileSync('intent-boundary.json','dist/intent-boundary.json')\"",
+    "typecheck": "tsc --noEmit",
+    "test": "node test-gateway-harness.mjs",
+    "pack:check": "npm pack --dry-run",
+    "prepack": "npm run build"
+  },
+  "files": [
+    "dist/",
+    "openclaw.plugin.json",
+    "intent-boundary.json",
+    "README.md",
+    "SECURITY.md",
+    "COMPATIBILITY.md",
+    "release-manifest.json"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.6.8 <2026.8.0"
+  },
+  "dependencies": {
+    "typebox": "1.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "openclaw": "^2026.6.9",
-    "typebox": "^1.3.0",
+    "openclaw": "2026.6.8",
     "typescript": "^5.0.0"
   },
   "openclaw": {
@@ -46,10 +63,13 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": "1.0"
+      "pluginApi": "1.0",
+      "minGatewayVersion": "2026.6.8",
+      "testedSourceVersion": "2026.7.2"
     },
     "build": {
-      "openclawVersion": ">=2026.3.22"
+      "openclawVersion": "2026.7.2",
+      "pluginSdkVersion": "2026.6.8"
     }
   }
 }

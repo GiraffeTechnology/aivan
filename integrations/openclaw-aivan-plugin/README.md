@@ -93,8 +93,31 @@ clawhub package link .
 |---|---|---|---|
 | `AIVAN_BASE_URL` | Yes | `http://127.0.0.1:8765` | URL of the local AIVAN server |
 | `AIVAN_API_KEY` | No | *(none)* | Optional API key sent as `X-AIVAN-API-Key` header; set in AIVAN `.env` to enable auth |
+| `AIVAN_CONNECT_TIMEOUT_MS` | No | `3000` | Explicit connection timeout in milliseconds |
+| `AIVAN_READ_TIMEOUT_MS` | No | `15000` | Explicit response-read timeout in milliseconds |
+| `AIVAN_MAX_RETRIES` | No | `1` | Bounded retries (0-2) for idempotent calls only |
+| `AIVAN_TENANT_ID` | Production | *(none)* | Static trusted tenant identity for this plugin process |
+| `AIVAN_ACTOR_ID` | Production | *(none)* | Static trusted service actor for this plugin process |
+| `AIVAN_ROLE_CONTEXT` | Production | *(none)* | Static Core role context for the service actor |
+| `AIVAN_CONVERSATION_ROLE` | No | *(none)* | Static conversation role for the service actor |
+| `AIVAN_EXECUTION_MODE` | No | *(none)* | Static execution mode for the service actor |
+
+`aivan.forwardEvent` supplies a stable `Idempotency-Key`, so connection, 429 and
+5xx failures can be retried without duplicating an inbound event. Approval and
+rejection actions are never automatically retried. Failures are returned as
+user-visible `AIVAN_*` error codes with a `retryable` flag.
 
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
+
+### Stage 3 trusted-identity limitation
+
+The identity variables above are read from the process environment and apply to
+every message handled by that OpenClaw process. Stage 3 does **not** map an
+individual WeChat participant to a trusted AIVAN actor or role. Do not enable this
+bridge for production multi-participant role attribution until Stage 4 adds a
+per-channel/per-participant trust binding. In production mode, missing required
+service identity values fail closed; using one fixed identity does not make every
+participant that identity. AIVAN Core RBAC and human approval remain mandatory.
 
 ---
 

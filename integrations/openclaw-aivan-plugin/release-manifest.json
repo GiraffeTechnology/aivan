@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.0",
+  "release": "0.3.0",
+  "artifacts": {
+    "aivanCore": "0.3.0",
+    "openclawPlugin": "0.3.0",
+    "openclawSkill": "0.3.0"
+  },
+  "openclawBaseline": {
+    "repository": "https://github.com/GiraffeTechnology/openclaw",
+    "commit": "1e06fd443033b8aa2fd638ee66b7fdad1168b8aa",
+    "version": "2026.7.2",
+    "publishedSdkVersion": "2026.6.8",
+    "synchronizedAt": "2026-08-03T15:26:00Z",
+    "archiveBranch": "archive/pre-upstream-sync-20260803",
+    "node": ">=22.19.0"
+  },
+  "intentBoundary": "intent-boundary.json",
+  "tools": [
+    "aivan.health",
+    "aivan.forwardEvent",
+    "aivan.openDashboard",
+    "aivan.getPendingDrafts",
+    "aivan.approveDraft",
+    "aivan.rejectDraft"
+  ],
+  "provenance": {
+    "sourceRepository": "https://github.com/GiraffeTechnology/aivan",
+    "buildCommand": "npm ci && npm run build",
+    "verificationCommand": "python scripts/validate_clawhub_aivan_plugin.py"
+  },
+  "knownLimitations": [
+    "Stage 3 authenticates the OpenClaw channel with one static service identity from process environment variables. Per-participant trusted identity binding is deferred to Stage 4; do not treat the Stage 3 bridge as production-ready for multi-participant role attribution."
+  ]
+}

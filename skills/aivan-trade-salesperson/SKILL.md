@@ -1,7 +1,7 @@
 ---
 name: AIVAN Trade Salesperson
 slug: aivan-trade-salesperson
-version: 0.1.0
+version: 0.3.0
 description: >
   Routes trade-salesperson workflows to a locally running AIVAN instance.
   AIVAN handles buyer requirement structuring, supplier sourcing, risk
@@ -18,9 +18,10 @@ repository: https://github.com/GiraffeTechnology/aivan
 openclaw:
   pluginRequirements:
     - package: "@giraffetechnology/openclaw-aivan"
-      version: ">=0.1.0"
+      version: ">=0.3.0 <0.4.0"
   routing:
     intent: trade-sourcing
+    boundary: integrations/openclaw-aivan-plugin/intent-boundary.json
     triggers:
       - buyer inquiry received
       - supplier reply received
@@ -29,12 +30,20 @@ openclaw:
       - supplier risk screening
 ```
 
+The Plugin Agent Harness and this SKILL use the same versioned intent boundary.
+Structured `intent` values and routing terms are defined in
+`integrations/openclaw-aivan-plugin/intent-boundary.json`. Messages outside that
+boundary must return explicit pass-through and must not call `aivan.forwardEvent`.
+
 ## Required environment variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AIVAN_BASE_URL` | Yes | `http://127.0.0.1:8765` | URL of the local AIVAN server |
 | `AIVAN_API_KEY` | No | *(none)* | Optional bearer token for AIVAN API auth |
+| `AIVAN_CONNECT_TIMEOUT_MS` | No | `3000` | Connection timeout (100-30000 ms) |
+| `AIVAN_READ_TIMEOUT_MS` | No | `15000` | Response-read timeout (500-120000 ms) |
+| `AIVAN_MAX_RETRIES` | No | `1` | Retry count for idempotent operations only (0-2) |
 
 ## Operating boundaries
 

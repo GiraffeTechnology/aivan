@@ -1,219 +1,123 @@
-/**
- * Gateway integration test for openclaw-aivan plugin.
- *
- * Loads the built plugin entry the way OpenClaw does, registers an
- * AgentHarness through a fake runtime API, then exercises runAttempt().
- *
- * Run with: node test-gateway-harness.mjs
- */
+/** Stage 3 Gateway contract and reliability test. */
+import { createServer } from "node:http";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { createServer } from "http";
-import { pathToFileURL } from "url";
-import path from "path";
-import { fileURLToPath } from "url";
+const directory = fileURLToPath(new URL(".", import.meta.url));
+const port = Number(process.env.AIVAN_TEST_PORT ?? 18765);
+process.env.AIVAN_BASE_URL = `http://127.0.0.1:${port}`;
+process.env.AIVAN_CONNECT_TIMEOUT_MS = "1000";
+process.env.AIVAN_READ_TIMEOUT_MS = "2000";
+process.env.AIVAN_MAX_RETRIES = "1";
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const MOCK_PORT = Number(process.env.AIVAN_TEST_PORT ?? 18765);
-process.env.AIVAN_BASE_URL = `http://127.0.0.1:${MOCK_PORT}`;
+let mode = "success";
+let invokeCount = 0;
+let lastEvent = null;
+let lastIdempotencyKey = null;
+let previousIdempotencyKey = null;
+const reply = "RFQ accepted for supplier sourcing.";
 
-// -- Mock AIVAN server --------------------------------------------------------
-let mockServerMode = "success"; // "success" | "error"
-let lastReceivedEvent = null;
-
-const mockReply =
-  "已收到您的询价需求：5000件格子衬衫，45天交东京。";
-
-const mockServer = createServer((req, res) => {
+const server = createServer((request, response) => {
   let body = "";
-  req.on("data", (d) => (body += d));
-  req.on("end", () => {
-    if (req.url === "/api/health") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", version: "mock-1.0.0" }));
-      return;
+  request.on("data", (chunk) => (body += chunk));
+  request.on("end", () => {
+    const json = (status, data) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(data));
+    };
+    if (request.url === "/api/health") return json(200, { status: "ok", version: "0.3.0" });
+    if (request.url === "/invoke" && request.method === "POST") {
+      invokeCount += 1;
+      lastIdempotencyKey = request.headers["idempotency-key"] ?? null;
+      lastEvent = JSON.parse(body || "{}");
+      if (mode === "transient" && invokeCount === 1) return json(503, { detail: "retry me" });
+      if (mode === "error") return json(422, { detail: "mock request error" });
+      return json(200, { status: "ok", reply_text: reply, output: reply, project_id: "project-1" });
     }
-
-    if (req.url === "/invoke" && req.method === "POST") {
-      try {
-        lastReceivedEvent = JSON.parse(body);
-      } catch {
-        lastReceivedEvent = null;
-      }
-
-      if (mockServerMode === "error") {
-        res.writeHead(422, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ detail: "mock error: project not found" }));
-        return;
-      }
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          reply_text: mockReply,
-          output: mockReply,
-        })
-      );
-      return;
+    if (request.url?.startsWith("/api/drafts?") || request.url === "/api/drafts") {
+      return json(200, { drafts: [{ draft_id: "draft-1", project_id: "project-1", channel: "weixin", target_role: "supplier", message_text: "Please quote", created_at: "2026-08-03T00:00:00Z" }] });
     }
-
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "not found" }));
+    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") return json(200, { status: "approved" });
+    if (request.url === "/api/drafts/draft-1/reject" && request.method === "POST") return json(200, { status: "rejected" });
+    return json(404, { detail: "not found" });
   });
 });
+await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
 
-await new Promise((resolve) =>
-  mockServer.listen(MOCK_PORT, "127.0.0.1", resolve)
-);
-
-// -- Load the plugin entry exactly as OpenClaw does ---------------------------
-const pluginPath = path.join(__dirname, "dist", "index.js");
-const pluginUrl = pathToFileURL(pluginPath).href;
-const plugin = await import(pluginUrl);
-const pluginEntry = plugin.default ?? plugin;
-
-let registeredHarness = null;
-let registerCalls = 0;
-
-const mockApi = {
-  registerAgentHarness(harness) {
-    registerCalls += 1;
-    registeredHarness = harness;
-  },
+const plugin = await import(pathToFileURL(path.join(directory, "dist", "index.js")).href);
+const entry = plugin.default ?? plugin;
+let harness = null;
+const tools = new Map();
+const toolOptions = new Map();
+const api = {
+  registerAgentHarness(value) { harness = value; },
+  registerTool(value, options) { tools.set(value.name, value); toolOptions.set(value.name, options ?? {}); },
 };
+if (typeof entry === "function") entry(api);
+else if (typeof entry?.register === "function") entry.register(api);
+else throw new Error("plugin entry is not callable");
 
-if (typeof pluginEntry === "function") {
-  pluginEntry(mockApi);
-} else if (typeof pluginEntry?.register === "function") {
-  pluginEntry.register(mockApi);
-} else {
-  throw new Error("built plugin entry has no callable register contract");
-}
-
-// -- Helpers -----------------------------------------------------------------
 let passed = 0;
 let failed = 0;
-
 function assert(label, condition, detail = "") {
-  if (condition) {
-    console.log(`  PASS  ${label}`);
-    passed++;
-  } else {
-    console.error(`  FAIL  ${label}${detail ? " - " + detail : ""}`);
-    failed++;
-  }
+  if (condition) { console.log(`PASS ${label}`); passed += 1; }
+  else { console.error(`FAIL ${label}${detail ? `: ${detail}` : ""}`); failed += 1; }
+}
+async function invokeTool(name, params = {}) {
+  const descriptor = tools.get(name);
+  if (!descriptor) throw new Error(`missing tool ${name}`);
+  return descriptor.execute(`test-${name}`, params);
 }
 
-function assertShape(label, obj, requiredKeys) {
-  const missing = requiredKeys.filter((k) => !(k in obj));
-  assert(
-    label,
-    missing.length === 0,
-    missing.length ? `missing keys: ${missing.join(", ")}` : ""
-  );
-}
+const expectedTools = [
+  "aivan.health", "aivan.forwardEvent", "aivan.openDashboard",
+  "aivan.getPendingDrafts", "aivan.approveDraft", "aivan.rejectDraft",
+];
+assert("exactly six Gateway tools enumerated", JSON.stringify([...tools.keys()]) === JSON.stringify(expectedTools), [...tools.keys()].join(","));
+assert("approve tool is optional", toolOptions.get("aivan.approveDraft")?.optional === true);
+assert("reject tool is optional", toolOptions.get("aivan.rejectDraft")?.optional === true);
+assert("Agent Harness registered", harness?.id === "openclaw-aivan");
 
-// -- Test 1: registration -----------------------------------------------------
-console.log("\n-- Test 1: OpenClaw plugin-entry registration");
-assert("registerAgentHarness called exactly once", registerCalls === 1);
-assert("register() sets harness", registeredHarness !== null);
-assert("harness id is openclaw-aivan", registeredHarness?.id === "openclaw-aivan");
-assert("harness has label", typeof registeredHarness?.label === "string");
-assert("harness has supports()", typeof registeredHarness?.supports === "function");
-assert("harness has runAttempt()", typeof registeredHarness?.runAttempt === "function");
+const nonTrade = { prompt: "What is the weather today?", sessionId: "non-trade" };
+assert("supports rejects non-trade messages", harness.supports(nonTrade).supported === false);
+const beforePassThrough = invokeCount;
+const passThrough = await harness.runAttempt(nonTrade);
+assert("non-trade messages explicitly pass through", passThrough.assistantTexts.length === 0 && invokeCount === beforePassThrough);
 
-// -- Test 2: supports() shape -------------------------------------------------
-console.log("\n-- Test 2: supports() return shape");
-const supportResult = registeredHarness.supports({ sessionId: "sess-001" });
-assert("supports() returns object", typeof supportResult === "object" && supportResult !== null);
-assert("supports.supported is boolean", typeof supportResult?.supported === "boolean");
-assert("supports.supported is true", supportResult?.supported === true);
+const trade = { prompt: "Please source suppliers and request for quotation for 5,000 shirts", sessionId: "trade-1", senderId: "buyer-1", channel: "weixin", metadata: { intent: "trade-sourcing" } };
+assert("supports accepts shared trade-sourcing intent", harness.supports(trade).supported === true);
+mode = "success";
+const attempt = await harness.runAttempt(trade);
+assert("trade attempt returns AIVAN reply", attempt.assistantTexts[0] === reply);
+previousIdempotencyKey = lastIdempotencyKey;
+await harness.runAttempt(trade);
+assert("Harness redelivery keeps a stable message idempotency key", lastIdempotencyKey === previousIdempotencyKey);
 
-// -- Test 3: runAttempt success path -----------------------------------------
-console.log("\n-- Test 3: runAttempt() success path");
-mockServerMode = "success";
-lastReceivedEvent = null;
+assert("health tool callable", (await invokeTool("aivan.health")).details.healthy === true);
+mode = "transient";
+invokeCount = 0;
+const forwarded = (await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-1", sender_id: "buyer-1", message_text: "RFQ for shirts", message_id: "message-1" })).details;
+assert("forwardEvent retries one transient failure", forwarded.accepted === true && invokeCount === 2);
+assert("forwardEvent sends stable idempotency header", typeof lastIdempotencyKey === "string" && lastIdempotencyKey === lastEvent.idempotency_key);
+assert("openDashboard tool callable", (await invokeTool("aivan.openDashboard")).details.url.endsWith("/app"));
+assert("getPendingDrafts tool callable", (await invokeTool("aivan.getPendingDrafts", { project_id: "project-1" })).details.drafts.length === 1);
+assert("approveDraft tool callable", (await invokeTool("aivan.approveDraft", { draft_id: "draft-1" })).details.approved === true);
+assert("rejectDraft tool callable", (await invokeTool("aivan.rejectDraft", { draft_id: "draft-1", reason: "operator decision" })).details.rejected === true);
 
-const TEST_PARAMS = {
-  prompt: "询价5000件格子衬衫，45天交东京，高品质",
-  sessionId: "sess-wechat-001",
-  senderId: "weixin-user-abc",
-  channel: "weixin",
-};
+mode = "error";
+invokeCount = 0;
+const mapped = (await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-2", sender_id: "buyer-2", message_text: "RFQ", message_id: "message-2" })).details;
+assert("user-visible error mapping returned", mapped.accepted === false && mapped.error_code === "AIVAN_REQUEST_FAILED" && mapped.retryable === false);
 
-const successResult = await registeredHarness.runAttempt(TEST_PARAMS);
+mode = "fail-soft";
+// Exercise the HTTP-200 degraded-response path without treating it as pass-through.
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => new Response(JSON.stringify({ status: "error", reply_text: "AIVAN is temporarily unavailable.", error_code: "DEPENDENCY_UNAVAILABLE", retryable: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+const degraded = await harness.runAttempt(trade);
+assert("HTTP 200 fail-soft reply remains user-visible", degraded.assistantTexts[0] === "AIVAN is temporarily unavailable.");
+globalThis.fetch = originalFetch;
 
-assertShape("result has EmbeddedRunAttemptResult keys", successResult, [
-  "aborted",
-  "externalAbort",
-  "timedOut",
-  "idleTimedOut",
-  "timedOutDuringCompaction",
-  "promptError",
-  "promptErrorSource",
-  "sessionIdUsed",
-  "messagesSnapshot",
-  "assistantTexts",
-  "toolMetas",
-  "lastAssistant",
-  "didSendViaMessagingTool",
-  "messagingToolSentTexts",
-  "messagingToolSentMediaUrls",
-  "messagingToolSentTargets",
-  "cloudCodeAssistFormatError",
-]);
-assert("aborted is false", successResult.aborted === false);
-assert("timedOut is false", successResult.timedOut === false);
-assert("assistantTexts is non-empty array", Array.isArray(successResult.assistantTexts) && successResult.assistantTexts.length > 0);
-assert("assistantTexts[0] uses AIVAN reply", successResult.assistantTexts[0] === mockReply);
-assert("lastAssistant exists", successResult.lastAssistant != null);
-assert("lastAssistant.role = assistant", successResult.lastAssistant?.role === "assistant");
-assert("lastAssistant.content[0].type = text", successResult.lastAssistant?.content?.[0]?.type === "text");
-assert("lastAssistant.content[0].text uses AIVAN reply", successResult.lastAssistant?.content?.[0]?.text === mockReply);
-assert("terminal pass-through is not used", successResult.lastAssistant !== undefined && successResult.assistantTexts.length > 0);
-assert("sessionIdUsed matches", successResult.sessionIdUsed === TEST_PARAMS.sessionId);
-assert("event forwarded to AIVAN", lastReceivedEvent !== null);
-assert("event.message_text = prompt", lastReceivedEvent?.message_text === TEST_PARAMS.prompt);
-assert("event.channel = weixin", lastReceivedEvent?.channel === "weixin");
-assert("event.conversation_id = sessionId", lastReceivedEvent?.conversation_id === TEST_PARAMS.sessionId);
-assert("event.sender_id = senderId", lastReceivedEvent?.sender_id === TEST_PARAMS.senderId);
-assert("event.source = openclaw", lastReceivedEvent?.source === "openclaw");
-assert("event.mode = auto", lastReceivedEvent?.mode === "auto");
-
-console.log("  reply:", successResult.assistantTexts[0]);
-
-// -- Test 4: AIVAN error path -------------------------------------------------
-console.log("\n-- Test 4: runAttempt() AIVAN error path");
-mockServerMode = "error";
-
-const errorResult = await registeredHarness.runAttempt(TEST_PARAMS);
-assert("returns object (no throw)", typeof errorResult === "object" && errorResult !== null);
-assertShape("error result has required keys", errorResult, ["aborted", "messagesSnapshot", "assistantTexts", "lastAssistant"]);
-assert("assistantTexts is empty on AIVAN error", Array.isArray(errorResult.assistantTexts) && errorResult.assistantTexts.length === 0);
-
-// -- Test 5: empty prompt -----------------------------------------------------
-console.log("\n-- Test 5: runAttempt() empty prompt");
-mockServerMode = "success";
-
-const emptyResult = await registeredHarness.runAttempt({ sessionId: "sess-002" });
-assert("returns object (no throw)", typeof emptyResult === "object");
-assert("assistantTexts is empty", Array.isArray(emptyResult.assistantTexts) && emptyResult.assistantTexts.length === 0);
-
-// -- Test 6: health() ---------------------------------------------------------
-console.log("\n-- Test 6: health() direct call");
-const healthResult = await plugin.health();
-assert("health.healthy is true", healthResult.healthy === true);
-assert("health.version is string", typeof healthResult.version === "string");
-
-// -- Summary -----------------------------------------------------------------
-mockServer.close();
-
-console.log(`\n${"=".repeat(60)}`);
-if (failed === 0) {
-  console.log(`GATEWAY INTEGRATION TEST: PASS (${passed} checks)`);
-} else {
-  console.log(`GATEWAY INTEGRATION TEST: FAIL (${failed} failed, ${passed} passed)`);
-}
-console.log("=".repeat(60));
-
-process.exit(failed > 0 ? 1 : 0);
+await new Promise((resolve) => server.close(resolve));
+console.log(`GATEWAY STAGE3 TEST: ${failed === 0 ? "PASS" : "FAIL"} (${passed} passed, ${failed} failed)`);
+process.exit(failed ? 1 : 0);

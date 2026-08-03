@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     app.state.giraffe_db_client = get_db_client()
     yield
 
-app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -320,7 +320,7 @@ except Exception:
 @app.get("/api/health")
 @app.get("/healthz")
 def health():
-    return {"status": "ok", "product": "AIVAN", "version": "0.2.0"}
+    return {"status": "ok", "product": "AIVAN", "version": "0.3.0"}
 
 @app.get("/app", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
