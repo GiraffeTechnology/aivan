@@ -33,6 +33,7 @@ from aivan.llm import guard_config as cfg
 from aivan.llm.cancellation import get_cancel_token
 from aivan.llm.errors import (
     LLM_PROVIDER_CONNECTION_ERROR,
+    LLM_PROVIDER_UNSUPPORTED_RESPONSE,
     LlmAbortedError,
     LlmBusyError,
     LlmContextOverflowError,
@@ -206,6 +207,7 @@ class LlmTokenGuard:
         deadline = started + timeout_s
         parts: list[str] = []
         done_reason = ""
+        watchdog_reason = ""
         # read timeout bounds a *silent* hang (no chunks); the per-chunk deadline
         # bounds a slow-but-streaming run. connect is kept short.
         timeout = httpx.Timeout(connect=min(10.0, timeout_s), read=timeout_s,
@@ -217,29 +219,61 @@ class LlmTokenGuard:
             with httpx.Client(**client_kwargs) as client:
                 with client.stream("POST", url, json=body) as resp:
                     resp.raise_for_status()
-                    for line in resp.iter_lines():
-                        if not line:
-                            pass
-                        else:
-                            chunk = _parse_line(line)
-                            if chunk is not None:
-                                content = (chunk.get("message") or {}).get("content", "")
-                                if content:
-                                    parts.append(content)
-                                if chunk.get("done"):
-                                    done_reason = chunk.get("done_reason") or "stop"
-                                    break
-                        # Cooperative cancel / circuit-break between chunks.
-                        if token is not None and token.is_aborted():
-                            self._log(profile_name, model, est_prompt, num_predict,
-                                      started, done_reason="aborted", note=token.reason)
-                            raise LlmAbortedError("".join(parts), reason=token.reason or "client_disconnect",
-                                                  provider=self.provider_name, model=model)
-                        if time.monotonic() > deadline:
-                            self._log(profile_name, model, est_prompt, num_predict,
-                                      started, done_reason="timeout", note=f"cap={timeout_s:.1f}s")
-                            raise LlmTimeoutError(timeout_s, "".join(parts), reason="deadline",
-                                                  provider=self.provider_name, model=model)
+                    watchdog_stop = threading.Event()
+
+                    def close_at_deadline() -> None:
+                        nonlocal watchdog_reason
+                        while not watchdog_stop.wait(0.05):
+                            if token is not None and token.is_aborted():
+                                watchdog_reason = "aborted"
+                                resp.close()
+                                return
+                            if time.monotonic() >= deadline:
+                                watchdog_reason = "timeout"
+                                resp.close()
+                                return
+
+                    watchdog = threading.Thread(
+                        target=close_at_deadline,
+                        name="aivan-llm-stream-watchdog",
+                        daemon=True,
+                    )
+                    watchdog.start()
+                    try:
+                        for line in resp.iter_lines():
+                            if not line:
+                                pass
+                            else:
+                                chunk = _parse_line(line)
+                                if chunk is not None:
+                                    content = (chunk.get("message") or {}).get("content", "")
+                                    if content:
+                                        parts.append(content)
+                                    if chunk.get("done"):
+                                        done_reason = chunk.get("done_reason") or "stop"
+                                        break
+                            # Cooperative checks also catch cancellation between chunks.
+                            if token is not None and token.is_aborted():
+                                watchdog_reason = "aborted"
+                                break
+                            if time.monotonic() >= deadline:
+                                watchdog_reason = "timeout"
+                                break
+                    finally:
+                        watchdog_stop.set()
+                        watchdog.join(timeout=0.2)
+
+                    if watchdog_reason == "aborted":
+                        self._log(profile_name, model, est_prompt, num_predict,
+                                  started, done_reason="aborted", note=token.reason if token else "")
+                        raise LlmAbortedError("".join(parts),
+                                              reason=(token.reason if token else "") or "client_disconnect",
+                                              provider=self.provider_name, model=model)
+                    if watchdog_reason == "timeout":
+                        self._log(profile_name, model, est_prompt, num_predict,
+                                  started, done_reason="timeout", note=f"cap={timeout_s:.1f}s")
+                        raise LlmTimeoutError(timeout_s, "".join(parts), reason="deadline",
+                                              provider=self.provider_name, model=model)
         except httpx.TimeoutException as exc:
             self._log(profile_name, model, est_prompt, num_predict, started,
                       done_reason="timeout", note=type(exc).__name__)
@@ -251,11 +285,29 @@ class LlmTokenGuard:
             raise LLMProviderError(LLM_PROVIDER_CONNECTION_ERROR, provider=self.provider_name,
                                    model=model, detail=f"http_{exc.response.status_code}") from exc
         except httpx.HTTPError as exc:
+            if watchdog_reason == "aborted":
+                raise LlmAbortedError("".join(parts),
+                                      reason=(token.reason if token else "") or "client_disconnect",
+                                      provider=self.provider_name, model=model) from exc
+            if watchdog_reason == "timeout":
+                raise LlmTimeoutError(timeout_s, "".join(parts), reason="deadline",
+                                      provider=self.provider_name, model=model) from exc
             # ConnectError, network, protocol, DNS — anything transport-level.
             self._log(profile_name, model, est_prompt, num_predict, started,
                       done_reason="error", note=type(exc).__name__)
             raise LLMProviderError(LLM_PROVIDER_CONNECTION_ERROR, provider=self.provider_name,
                                    model=model, detail=type(exc).__name__) from exc
+
+        if not done_reason:
+            self._log(profile_name, model, est_prompt, num_predict, started,
+                      done_reason="incomplete", note="eof_without_done")
+            raise LLMProviderError(
+                LLM_PROVIDER_UNSUPPORTED_RESPONSE,
+                provider=self.provider_name,
+                model=model,
+                retryable=False,
+                detail="eof_without_done",
+            )
 
         text = "".join(parts)
         truncated = done_reason == "length"

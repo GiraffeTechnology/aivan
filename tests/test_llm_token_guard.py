@@ -24,10 +24,12 @@ from aivan.llm import guard as guard_mod
 from aivan.llm import guard_config as cfg
 from aivan.llm.cancellation import CancelToken, cancellable
 from aivan.llm.errors import (
+    LLM_PROVIDER_UNSUPPORTED_RESPONSE,
     LlmAbortedError,
     LlmBusyError,
     LlmContextOverflowError,
     LlmTimeoutError,
+    LLMProviderError,
 )
 from aivan.llm.guard import LlmTokenGuard, estimate_prompt_tokens
 
@@ -70,9 +72,25 @@ class _SlowStream(httpx.SyncByteStream):
         for _ in range(self.n):
             time.sleep(self.delay)
             yield (json.dumps({"message": {"content": "x"}, "done": False}) + "\n").encode()
+        yield (json.dumps({"done": True, "done_reason": "stop"}) + "\n").encode()
 
     def close(self):
         pass
+
+
+class _StalledStream(httpx.SyncByteStream):
+    """Blocks until close() proves the watchdog interrupts a silent read."""
+
+    def __init__(self):
+        self.closed = threading.Event()
+
+    def __iter__(self):
+        self.closed.wait(10)
+        if False:
+            yield b""
+
+    def close(self):
+        self.closed.set()
 
 
 def _slow_transport(n=50, delay=0.1):
@@ -165,6 +183,35 @@ def test_timeout_circuit_break(monkeypatch):
     elapsed = time.monotonic() - started
     assert elapsed < 3.0  # fired at the 0.5s cap, not after the full stream
     assert exc.value.timeout_s <= 0.5 + 1e-6
+
+
+def test_deadline_interrupts_stalled_stream(monkeypatch):
+    monkeypatch.setenv("LLM_MAX_INFERENCE_TIMEOUT_S", "0.3")
+    stream = _StalledStream()
+    guard_mod.set_test_transport(
+        httpx.MockTransport(lambda req: httpx.Response(200, stream=stream))
+    )
+    started = time.monotonic()
+    with pytest.raises(LlmTimeoutError) as exc:
+        _guard().stream_chat(base_url="http://x", model="m",
+                             messages=[{"role": "user", "content": "hi"}],
+                             profile=cfg.PROFILES["qa_short"])
+    assert time.monotonic() - started < 1.5
+    assert exc.value.reason == "deadline"
+    assert stream.closed.is_set()
+
+
+def test_eof_without_done_frame_fails_closed():
+    partial = json.dumps({"message": {"content": '{"ok": true}'}, "done": False}) + "\n"
+    guard_mod.set_test_transport(
+        httpx.MockTransport(lambda req: httpx.Response(200, content=partial.encode()))
+    )
+    with pytest.raises(LLMProviderError) as exc:
+        _guard().stream_chat(base_url="http://x", model="m",
+                             messages=[{"role": "user", "content": "hi"}],
+                             profile=cfg.PROFILES["qa_short"])
+    assert exc.value.error_code == LLM_PROVIDER_UNSUPPORTED_RESPONSE
+    assert exc.value.detail == "eof_without_done"
 
 
 def test_read_timeout_maps_to_timeout_error():
