@@ -67,9 +67,15 @@ supplier, and GLTG context. Do not invent facts. Return JSON only.
 
 def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
     project_repo = ProjectRepository(db)
-    validated_project_id = event.project_id if event.project_id and project_repo.get(event.project_id) else None
+    validated_project_id = (
+        event.project_id
+        if event.project_id and project_repo.get(event.project_id, tenant_id=event.tenant_id)
+        else None
+    )
     if not validated_project_id and event.conversation_id:
-        project = project_repo.get_by_conversation(event.conversation_id)
+        project = project_repo.get_by_conversation(
+            event.conversation_id, tenant_id=event.tenant_id
+        )
         if project:
             validated_project_id = project.project_id
 
@@ -149,11 +155,13 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     )
 
     idem_key = build_inbound_idempotency_key(
+        tenant_id=event.tenant_id or "legacy",
         source=getattr(event, "source", "") or "",
         channel=event.channel or "",
         channel_account_id=event.channel_account_id or "",
         conversation_id=event.conversation_id or "",
         message_id=event.message_id or "",
+        explicit_idempotency_key=event.idempotency_key or "",
     )
     repo = InboundEventRepository(db)
     if idem_key:
@@ -167,6 +175,7 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     if idem_key:
         repo.record(
             idem_key,
+            tenant_id=event.tenant_id or "legacy",
             project_id=result.project_id,
             event_type=result.event_type,
             result_json=result.model_dump(),
@@ -530,11 +539,11 @@ def _fallback_strategy(raw_text: str) -> RFQStrategy:
 def _get_or_create_project(event: OpenClawEvent, classification: EventClassification, db: Session):
     repo = ProjectRepository(db)
     project_id = classification.project_id or event.project_id or get_project_id(event.conversation_id)
-    project = repo.get(project_id) if project_id else None
+    project = repo.get(project_id, tenant_id=event.tenant_id) if project_id else None
     if project:
         bind_conversation(event.conversation_id, project.project_id)
         return project
-    project = repo.get_by_conversation(event.conversation_id)
+    project = repo.get_by_conversation(event.conversation_id, tenant_id=event.tenant_id)
     if project:
         bind_conversation(event.conversation_id, project.project_id)
         return project
@@ -544,6 +553,7 @@ def _get_or_create_project(event: OpenClawEvent, classification: EventClassifica
         channel=event.channel,
         channel_account_id=event.channel_account_id,
         customer_display_name=event.sender_display_name,
+        tenant_id=event.tenant_id or "legacy",
     )
     bind_conversation(event.conversation_id, project.project_id)
     ExecutionEventRepository(db).append(
@@ -606,6 +616,7 @@ def _create_supplier_email_drafts(
         draft = repo.create(
             project_id,
             {
+                "tenant_id": event.tenant_id or "legacy",
                 "conversation_id": event.conversation_id,
                 "channel": "email",
                 "target_peer_id": supplier.get("email", ""),
@@ -651,6 +662,7 @@ def _send_user_control_notification(project_id: str, event: OpenClawEvent, messa
     draft = repo.create(
         project_id,
         {
+            "tenant_id": event.tenant_id or "legacy",
             "conversation_id": event.conversation_id,
             "channel": channel,
             "target_peer_id": target_peer_id,
@@ -946,6 +958,7 @@ def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_opti
     draft = DraftRepository(db).create(
         project.project_id,
         {
+            "tenant_id": project.tenant_id or event.tenant_id or "legacy",
             "conversation_id": project.conversation_id or event.conversation_id,
             "channel": "email",
             "target_peer_id": project.customer_id or "",

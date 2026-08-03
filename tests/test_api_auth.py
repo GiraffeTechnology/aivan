@@ -36,12 +36,29 @@ def client():
     engine.dispose()
 
 
+_AUTH_ENV = (
+    "AIVAN_ENV",
+    "AIVAN_API_KEY",
+    "AIVAN_AUTH_SECRET",
+    "AIVAN_TENANT_ID",
+    "AIVAN_TENANT_API_KEYS",
+    "AIVAN_TEST_MODE",
+    "AIVAN_TEST_TENANT_ID",
+)
+
+
 @pytest.fixture(autouse=True)
 def clear_api_key():
-    """Ensure AIVAN_API_KEY is unset before each test."""
-    os.environ.pop("AIVAN_API_KEY", None)
+    """Keep the shared request-context environment deterministic."""
+    saved = {name: os.environ.get(name) for name in _AUTH_ENV}
+    for name in _AUTH_ENV:
+        os.environ.pop(name, None)
     yield
-    os.environ.pop("AIVAN_API_KEY", None)
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 # ── No auth configured — all routes open ────────────────────────────────────
@@ -70,7 +87,7 @@ def test_events_missing_key_returns_401(client):
     os.environ["AIVAN_API_KEY"] = "secret-key-abc"
     resp = client.post("/api/openclaw/events", json={"channel": "test"})
     assert resp.status_code == 401
-    assert "Missing" in resp.json()["detail"]
+    assert resp.json()["detail"]["error"] == "AUTH_REQUIRED"
 
 
 def test_drafts_approve_missing_key_returns_401(client):
@@ -101,7 +118,7 @@ def test_events_wrong_key_returns_403(client):
         headers={"X-AIVAN-API-Key": "wrong-key"},
     )
     assert resp.status_code == 403
-    assert "Invalid" in resp.json()["detail"]
+    assert resp.json()["detail"]["error"] == "INVALID_API_KEY"
 
 
 def test_drafts_approve_wrong_key_returns_403(client):

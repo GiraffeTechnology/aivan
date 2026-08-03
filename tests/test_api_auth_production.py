@@ -37,7 +37,11 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _clean_env():
-    saved = {k: os.environ.get(k) for k in ("AIVAN_ENV", "AIVAN_API_KEY", "AIVAN_AUTH_SECRET")}
+    names = (
+        "AIVAN_ENV", "AIVAN_API_KEY", "AIVAN_AUTH_SECRET",
+        "AIVAN_TENANT_ID", "AIVAN_TENANT_API_KEYS",
+    )
+    saved = {k: os.environ.get(k) for k in names}
     for k in saved:
         os.environ.pop(k, None)
     yield
@@ -98,7 +102,25 @@ def test_local_mode_can_run_without_auth(client):
 def test_production_with_api_key_allows_authenticated(client):
     os.environ["AIVAN_ENV"] = "production"
     os.environ["AIVAN_API_KEY"] = "prod-secret"
-    ok = client.get("/api/projects", headers={"X-AIVAN-API-Key": "prod-secret"})
+    os.environ["AIVAN_TENANT_ID"] = "tenant-prod"
+    ok = client.get(
+        "/api/projects",
+        headers={
+            "X-AIVAN-API-Key": "prod-secret",
+            "X-AIVAN-Tenant-ID": "tenant-prod",
+        },
+    )
     assert ok.status_code == 200
     bad = client.get("/api/projects")
     assert bad.status_code == 401
+
+
+def test_production_global_key_without_bound_tenant_fails_closed(client):
+    os.environ["AIVAN_ENV"] = "production"
+    os.environ["AIVAN_API_KEY"] = "prod-secret"
+    response = client.get(
+        "/api/projects",
+        headers={"X-AIVAN-API-Key": "prod-secret"},
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TENANT_AUTH_MISCONFIGURED"

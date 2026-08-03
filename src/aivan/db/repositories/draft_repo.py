@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.utils.ids import new_draft_id
+from aivan.utils.tenant import tenant_for_new_record
 
 class DraftRepository:
     def __init__(self, db: Session):
@@ -9,29 +10,42 @@ class DraftRepository:
 
     def create(self, project_id: str, data: dict) -> InquiryDraftRecord:
         safe_data = {k: v for k, v in data.items() if k not in ("draft_id", "project_id") and hasattr(InquiryDraftRecord, k)}
+        safe_data["tenant_id"] = tenant_for_new_record(safe_data.get("tenant_id"))
         record = InquiryDraftRecord(draft_id=new_draft_id(), project_id=project_id, **safe_data)
         self.db.add(record)
         self.db.flush()
         return record
 
-    def get(self, draft_id: str) -> InquiryDraftRecord | None:
-        return self.db.query(InquiryDraftRecord).filter(InquiryDraftRecord.draft_id == draft_id).first()
+    def get(self, draft_id: str, tenant_id: str | None = None) -> InquiryDraftRecord | None:
+        query = self.db.query(InquiryDraftRecord).filter(InquiryDraftRecord.draft_id == draft_id)
+        if tenant_id is not None:
+            query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
+        return query.first()
 
-    def list_pending(self, project_id: str) -> list[InquiryDraftRecord]:
-        return self.db.query(InquiryDraftRecord).filter(
+    def list_pending(self, project_id: str, tenant_id: str | None = None) -> list[InquiryDraftRecord]:
+        query = self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.project_id == project_id,
             InquiryDraftRecord.status == "pending_approval",
-        ).order_by(InquiryDraftRecord.created_at.asc()).all()
+        )
+        if tenant_id is not None:
+            query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
+        return query.order_by(InquiryDraftRecord.created_at.asc()).all()
 
-    def list_for_project(self, project_id: str) -> list[InquiryDraftRecord]:
-        return self.db.query(InquiryDraftRecord).filter(
+    def list_for_project(self, project_id: str, tenant_id: str | None = None) -> list[InquiryDraftRecord]:
+        query = self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.project_id == project_id,
-        ).order_by(InquiryDraftRecord.created_at.asc()).all()
+        )
+        if tenant_id is not None:
+            query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
+        return query.order_by(InquiryDraftRecord.created_at.asc()).all()
 
-    def list_all_pending(self) -> list[InquiryDraftRecord]:
-        return self.db.query(InquiryDraftRecord).filter(
+    def list_all_pending(self, tenant_id: str | None = None) -> list[InquiryDraftRecord]:
+        query = self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.status == "pending_approval"
-        ).order_by(InquiryDraftRecord.created_at.asc()).all()
+        )
+        if tenant_id is not None:
+            query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
+        return query.order_by(InquiryDraftRecord.created_at.asc()).all()
 
     def approve(self, draft_id: str, approved_by: str = "user") -> InquiryDraftRecord | None:
         """Transition draft to 'approved'. Returns None if not found.

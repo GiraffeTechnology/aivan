@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 import traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -19,48 +18,19 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
+from aivan.api.request_context import (
+    RequestContext,
+    apply_trusted_identity,
+    resolve_request_context,
+)
 
 logger = logging.getLogger("aivan.api")
 
 
-def _require_api_key(request: Request) -> None:
-    """Enforce auth on protected routes; fail closed in production.
+def _require_api_key(request: Request) -> RequestContext:
+    """Authenticate and return the shared tenant/trace request context."""
 
-    * production (AIVAN_ENV=production) with neither AIVAN_API_KEY nor
-      AIVAN_AUTH_SECRET configured -> reject every protected call (503). AIVAN
-      must never serve tenant/business data unauthenticated in production.
-    * a secret configured -> require a matching X-AIVAN-API-Key header or
-      Authorization: Bearer token.
-    * local/dev with no secret -> open (unauthenticated dev mode).
-    """
-    env = os.environ.get("AIVAN_ENV", "local").strip().lower()
-    api_key = os.environ.get("AIVAN_API_KEY", "").strip()
-    auth_secret = os.environ.get("AIVAN_AUTH_SECRET", "").strip()
-    configured = api_key or auth_secret
-
-    if env == "production" and not configured:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Server auth misconfigured: production requires AIVAN_API_KEY or "
-                "AIVAN_AUTH_SECRET"
-            ),
-        )
-    if not configured:
-        return  # local/dev open mode
-
-    provided = request.headers.get("X-AIVAN-API-Key", "").strip()
-    if not provided:
-        auth_header = request.headers.get("Authorization", "").strip()
-        if auth_header.lower().startswith("bearer "):
-            provided = auth_header[7:].strip()
-    if not provided:
-        raise HTTPException(status_code=401, detail="Missing X-AIVAN-API-Key header")
-    if not (
-        (api_key and secrets.compare_digest(provided, api_key))
-        or (auth_secret and secrets.compare_digest(provided, auth_secret))
-    ):
-        raise HTTPException(status_code=403, detail="Invalid API key")
+    return resolve_request_context(request)
 
 def _load_supplier_registry_on_startup() -> int:
     from aivan.db.session import db_session
@@ -285,6 +255,56 @@ def _normalize_invoke_payload(raw: dict) -> dict:
 
     raise ValueError(f"unrecognized payload keys: {sorted(raw.keys())}")
 
+
+def _skill_error_response(message: str, reply_text: str, trace_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "error",
+            "error": {"code": "INVALID_INVOKE_PAYLOAD", "message": message},
+            "output": message,
+            "reply_text": reply_text,
+            "artifacts": [],
+            "trace_id": trace_id,
+        },
+    )
+
+
+async def _invoke_application_service(
+    request: Request,
+    db: Session,
+    context: RequestContext,
+) -> dict | JSONResponse:
+    """Single authenticated application service for all four invoke aliases."""
+
+    try:
+        raw = await request.json()
+    except Exception:
+        return _skill_error_response(
+            "Invalid JSON body.", "Invalid JSON body.", context.trace_id
+        )
+    try:
+        event_data = apply_trusted_identity(_normalize_invoke_payload(raw), context)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("invoke payload normalization failed: %s", exc)
+        return _skill_error_response(
+            "Unrecognized request format.",
+            "Unable to recognize the request format. Check the message content.",
+            context.trace_id,
+        )
+
+    result = await _run_skill_event_with_abort(event_data, db, request)
+    if isinstance(result, dict):
+        return {
+            **result,
+            "tenant_id": context.tenant_id,
+            "trace_id": context.trace_id,
+            "idempotency_key": context.idempotency_key or event_data.get("idempotency_key", ""),
+        }
+    return result
+
 _templates_dir = os.path.join(os.path.dirname(__file__), "..", "app", "templates")
 _static_dir = os.path.join(os.path.dirname(__file__), "..", "app", "static")
 
@@ -308,61 +328,51 @@ def serve_app(request: Request):
 
 
 @app.post("/invoke")
-async def invoke(request: Request, db: Session = Depends(get_db)):
+async def invoke(
+    request: Request,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
     """OpenClaw / WeChat skill invocation endpoint.
 
     Registered directly on the root app (the real harness calls POST /invoke).
     Accepts OpenClaw-standard, WeChat-webhook, and native OpenClaw-event bodies,
     and is in SKILL_INVOKE_PATHS so it always fails soft: never 404, never 500.
     """
-    try:
-        raw = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=200,
-            content={"status": "error", "output": "Invalid JSON body.", "reply_text": "Invalid JSON body.", "artifacts": []},
-        )
-    try:
-        event_data = _normalize_invoke_payload(raw)
-    except Exception as exc:
-        logger.warning("invoke payload normalization failed: %s", exc)
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "error",
-                "output": "Unrecognized request format.",
-                "reply_text": "无法识别的请求格式，请检查消息内容。",
-                "artifacts": [],
-            },
-        )
-    return await _run_skill_event_with_abort(event_data, db, request)
+    return await _invoke_application_service(request, db, context)
 
 
 @app.post("/api/openclaw/events")
-def openclaw_event(
-    event_data: dict,
+async def openclaw_event(
+    request: Request,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    return _run_skill_event(event_data, db)
+    return await _invoke_application_service(request, db, context)
 
 @app.post("/api/skill/invoke")
-def skill_invoke(event_data: dict, db: Session = Depends(get_db)):
-    return _run_skill_event(event_data, db)
+async def skill_invoke(
+    request: Request,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return await _invoke_application_service(request, db, context)
 
 
 @app.post("/api/rfq/create-from-event")
-def create_rfq_from_event_api(
-    event_data: dict,
+async def create_rfq_from_event_api(
+    request: Request,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    return _run_skill_event(event_data, db)
+    return await _invoke_application_service(request, db, context)
 
 
-def _do_approve_draft(draft_id: str, body: dict | None, db: Session) -> dict:
+def _do_approve_draft(
+    draft_id: str, body: dict | None, db: Session, tenant_id: str
+) -> dict:
     repo = DraftRepository(db)
-    draft = repo.get(draft_id)
+    draft = repo.get(draft_id, tenant_id=tenant_id)
     if draft is None:
         raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found")
     if draft.status != "pending_approval":
@@ -378,9 +388,9 @@ def _do_approve_draft(draft_id: str, body: dict | None, db: Session) -> dict:
     return {"draft_id": draft_id, "status": "approved", "sent": response.success, "error": response.error}
 
 
-def _do_reject_draft(draft_id: str, db: Session) -> dict:
+def _do_reject_draft(draft_id: str, db: Session, tenant_id: str) -> dict:
     repo = DraftRepository(db)
-    draft = repo.get(draft_id)
+    draft = repo.get(draft_id, tenant_id=tenant_id)
     if draft is None:
         raise HTTPException(status_code=404, detail=f"Draft {draft_id} not found")
     if draft.status != "pending_approval":
@@ -393,37 +403,68 @@ def _do_reject_draft(draft_id: str, db: Session) -> dict:
     return {"draft_id": draft_id, "status": "rejected"}
 
 
+def _do_retry_draft(draft_id: str, db: Session, tenant_id: str) -> dict:
+    repo = DraftRepository(db)
+    draft = repo.get(draft_id, tenant_id=tenant_id)
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "draft_id": draft_id},
+        )
+    if draft.status != "send_failed":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "invalid_draft_state",
+                "draft_id": draft_id,
+                "status": draft.status,
+                "required_status": "send_failed",
+            },
+        )
+    from aivan.execution.approval_state import approve_and_send
+
+    result = approve_and_send(draft_id, db, approved_by=draft.approved_by or "user")
+    db.commit()
+    return {
+        "draft_id": result.draft_id,
+        "status": result.status,
+        "sent": result.sent,
+        "error": result.error,
+        "message_id": result.message_id,
+    }
+
+
 @app.post("/api/openclaw/drafts/{draft_id}/approve")
 def approve_draft(
     draft_id: str,
     body: dict = None,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, body, db)
+    return _do_approve_draft(draft_id, body, db, context.tenant_id)
 
 
 @app.post("/api/openclaw/drafts/{draft_id}/reject")
 def reject_draft(
     draft_id: str,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db)
+    return _do_reject_draft(draft_id, db, context.tenant_id)
 
 
 @app.get("/api/openclaw/drafts/{draft_id}")
 def get_draft(
     draft_id: str,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     """Fetch a single draft by id.
 
     Returns 200 with the full draft (same shape as the ``drafts[]`` elements
     elsewhere in the API), or a structured JSON 404 when the draft is absent.
     """
-    draft = DraftRepository(db).get(draft_id)
+    draft = DraftRepository(db).get(draft_id, tenant_id=context.tenant_id)
     if draft is None:
         raise HTTPException(
             status_code=404,
@@ -438,31 +479,55 @@ def approve_draft_alias(
     draft_id: str,
     body: dict = None,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, body, db)
+    return _do_approve_draft(draft_id, body, db, context.tenant_id)
 
 
 @app.post("/api/drafts/{draft_id}/reject")
 def reject_draft_alias(
     draft_id: str,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db)
+    return _do_reject_draft(draft_id, db, context.tenant_id)
+
+
+@app.get("/api/drafts/{draft_id}")
+def get_draft_alias(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    draft = DraftRepository(db).get(draft_id, tenant_id=context.tenant_id)
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "draft_id": draft_id},
+        )
+    return _serialize_draft(draft)
+
+
+@app.post("/api/drafts/{draft_id}/retry")
+def retry_draft_alias(
+    draft_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    return _do_retry_draft(draft_id, db, context.tenant_id)
 
 
 @app.get("/api/drafts")
 def list_all_drafts(
     project_id: str | None = None,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     repo = DraftRepository(db)
     if project_id:
-        drafts = repo.list_pending(project_id)
+        drafts = repo.list_pending(project_id, tenant_id=context.tenant_id)
     else:
-        drafts = repo.list_all_pending()
+        drafts = repo.list_all_pending(tenant_id=context.tenant_id)
     return {"drafts": [
         {
             "draft_id": d.draft_id,
@@ -482,23 +547,23 @@ def list_all_drafts(
 def get_pending_drafts(
     project_id: str,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     repo = DraftRepository(db)
-    drafts = repo.list_pending(project_id)
+    drafts = repo.list_pending(project_id, tenant_id=context.tenant_id)
     return {"project_id": project_id, "drafts": [
         {"draft_id": d.draft_id, "target_role": d.target_role, "message_text": d.message_text[:200], "created_by_agent": d.created_by_agent, "status": d.status}
         for d in drafts
     ]}
 
 @app.get("/api/openclaw/projects/{project_id}/state")
-def get_project_state(project_id: str, db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def get_project_state(project_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     repo = ProjectRepository(db)
-    project = repo.get(project_id)
+    project = repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     draft_repo = DraftRepository(db)
-    pending = draft_repo.list_pending(project_id)
+    pending = draft_repo.list_pending(project_id, tenant_id=context.tenant_id)
     return {
         "project_id": project_id,
         "status": project.status,
@@ -531,13 +596,13 @@ def match_suppliers(body: dict, db: Session = Depends(get_db), _: None = Depends
     return {"matches": [{"supplier": m.supplier.model_dump(), "match_score": m.match_score, "match_reason": m.match_reason} for m in matches]}
 
 @app.get("/api/platforms")
-def list_platforms():
+def list_platforms(_: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import list_all_platforms
     platforms = list_all_platforms()
     return {"platforms": [p.model_dump() for p in platforms]}
 
 @app.get("/api/platforms/whitelist")
-def list_whitelist():
+def list_whitelist(_: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import list_trusted_platforms
     platforms = list_trusted_platforms()
     return {"trusted_platforms": [p.model_dump() for p in platforms]}
@@ -560,13 +625,13 @@ def add_platform_to_whitelist(body: dict, db: Session = Depends(get_db), _: None
     return {"added": platform.model_dump()}
 
 @app.get("/api/platforms/suggestions")
-def list_platform_suggestions():
+def list_platform_suggestions(_: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import list_suggestions
     sugs = list_suggestions()
     return {"suggestions": [s.model_dump() for s in sugs]}
 
 @app.post("/api/platforms/suggestions/{suggestion_id}/approve")
-def approve_platform_suggestion(suggestion_id: str):
+def approve_platform_suggestion(suggestion_id: str, _: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import approve_suggestion
     sug = approve_suggestion(suggestion_id)
     if not sug:
@@ -574,7 +639,7 @@ def approve_platform_suggestion(suggestion_id: str):
     return {"suggestion_id": suggestion_id, "status": "approved"}
 
 @app.post("/api/platforms/suggestions/{suggestion_id}/reject")
-def reject_platform_suggestion(suggestion_id: str):
+def reject_platform_suggestion(suggestion_id: str, _: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import reject_suggestion
     sug = reject_suggestion(suggestion_id)
     if not sug:
@@ -582,7 +647,7 @@ def reject_platform_suggestion(suggestion_id: str):
     return {"suggestion_id": suggestion_id, "status": "rejected"}
 
 @app.post("/api/platforms/suggestions/{suggestion_id}/block")
-def block_platform_suggestion(suggestion_id: str):
+def block_platform_suggestion(suggestion_id: str, _: RequestContext = Depends(_require_api_key)):
     from aivan.platforms.platform_registry import block_suggestion
     sug = block_suggestion(suggestion_id)
     if not sug:
@@ -590,18 +655,18 @@ def block_platform_suggestion(suggestion_id: str):
     return {"suggestion_id": suggestion_id, "status": "blocked"}
 
 @app.get("/api/projects")
-def list_projects(db: Session = Depends(get_db), _: None = Depends(_require_api_key)):
+def list_projects(db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     repo = ProjectRepository(db)
-    projects = repo.list_all(limit=50)
+    projects = repo.list_all(limit=50, tenant_id=context.tenant_id)
     return {"projects": [
         {"project_id": p.project_id, "status": p.status, "category": p.category, "customer_id": p.customer_id, "created_at": str(p.created_at)}
         for p in projects
     ]}
 
 @app.get("/api/projects/{project_id}")
-def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(project_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     repo = ProjectRepository(db)
-    project = repo.get(project_id)
+    project = repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return {
@@ -618,12 +683,12 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 def get_project_drafts(
     project_id: str,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
-    project = ProjectRepository(db).get(project_id)
+    project = ProjectRepository(db).get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    drafts = DraftRepository(db).list_for_project(project_id)
+    drafts = DraftRepository(db).list_for_project(project_id, tenant_id=context.tenant_id)
     return {"project_id": project_id, "drafts": [_serialize_draft(d) for d in drafts]}
 
 
@@ -632,11 +697,11 @@ def update_project_strategy(
     project_id: str,
     body: dict,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     from aivan.schemas.rfq import RFQStrategy
     project_repo = ProjectRepository(db)
-    project = project_repo.get(project_id)
+    project = project_repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     try:
@@ -663,14 +728,14 @@ def run_project_gltg(
     project_id: str,
     body: dict | None = None,
     db: Session = Depends(get_db),
-    _: None = Depends(_require_api_key),
+    context: RequestContext = Depends(_require_api_key),
 ):
     from aivan.integrations.giraffe_db import GiraffeDBClient
     from aivan.integrations.gltg import GLTGClient
     from aivan.schemas.requirement import BuyerRequirement
     from aivan.schemas.rfq import RFQStrategy
     project_repo = ProjectRepository(db)
-    project = project_repo.get(project_id)
+    project = project_repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     payload = dict(project.requirement_json or {})
@@ -736,7 +801,9 @@ def get_user_preferences(
 
 
 @app.get("/api/projects/{project_id}/events")
-def get_project_events(project_id: str, db: Session = Depends(get_db)):
+def get_project_events(project_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
+    if ProjectRepository(db).get(project_id, tenant_id=context.tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
     from aivan.db.repositories.event_repo import ExecutionEventRepository
     repo = ExecutionEventRepository(db)
     events = repo.list_for_project(project_id)
@@ -746,9 +813,9 @@ def get_project_events(project_id: str, db: Session = Depends(get_db)):
     ]}
 
 @app.get("/api/projects/{project_id}/options")
-def get_project_options(project_id: str, db: Session = Depends(get_db)):
+def get_project_options(project_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     repo = ProjectRepository(db)
-    project = repo.get(project_id)
+    project = repo.get(project_id, tenant_id=context.tenant_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"project_id": project_id, "selected_option": project.selected_option_json}
@@ -802,6 +869,7 @@ def _serialize_draft(d) -> dict:
             draft_type = part.split("=", 1)[1]
     return {
         "draft_id": d.draft_id,
+        "tenant_id": d.tenant_id,
         "project_id": d.project_id,
         "conversation_id": d.conversation_id,
         "channel": d.channel,
