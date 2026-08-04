@@ -13,6 +13,7 @@ class InquiryDraftRecord(Base):
     source_trace_id: Mapped[str] = mapped_column(String(255), default="", index=True)
     conversation_id: Mapped[str] = mapped_column(String(128), default="")
     channel: Mapped[str] = mapped_column(String(64), default="")
+    channel_account_id: Mapped[str] = mapped_column(String(128), default="", index=True)
     target_peer_id: Mapped[str] = mapped_column(String(256), default="")
     target_role: Mapped[str] = mapped_column(String(64), default="")
     message_text: Mapped[str] = mapped_column(Text, default="")

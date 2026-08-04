@@ -395,6 +395,22 @@ Execution control lives in AIVAN.
 Final responsibility stays with humans.
 ```
 
+### Stage 4 channel delivery contract
+
+| Channel | Delivery mode |
+| --- | --- |
+| Email | `auto_send` |
+| LINE | `auto_send` |
+| WeChat / Wangwang | `guided_relay` |
+| WhatsApp | `unsupported` |
+
+Guided relay keeps approved messages in `GET /api/relay/outbox`. After a human
+copies and sends the message in the channel client, the client records delivery
+through `POST /api/relay/{draft_id}/confirm` with an `Idempotency-Key` and a
+receipt reference. Relayed replies enter the same tenant-scoped Case pipeline
+through `POST /api/relay/inbound`; they are not attributed to a fixed service
+actor.
+
 ---
 
 ## License
