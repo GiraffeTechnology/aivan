@@ -59,6 +59,7 @@ class Capability(StrEnum):
     UPDATE_QC = "update_qc"
     UPDATE_LOGISTICS = "update_logistics"
     VIEW_AUDIT = "view_audit"
+    REVERSE_EVENT = "reverse_event"
 
 
 class CaseState(StrEnum):

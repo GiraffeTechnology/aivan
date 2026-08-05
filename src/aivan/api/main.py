@@ -1442,6 +1442,141 @@ def get_project_events(project_id: str, db: Session = Depends(get_db), context: 
         for e in events
     ]}
 
+def _authorize_event_capability(
+    *, event, identity, capability, source_trace_id: str, db: Session
+) -> None:
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.domain.roles import RoleAuthorizationError, require_capability
+
+    try:
+        require_capability(identity, capability)
+    except RoleAuthorizationError as exc:
+        CaseDomainRepository(db).record_audit(
+            tenant_id=event.tenant_id,
+            case_id=event.project_id,
+            event_type="EVENT_CORRECTION_REJECTED",
+            identity=identity,
+            source_trace_id=source_trace_id,
+            before={"event_id": event.event_id},
+            rejection_reason=exc.reason,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={"error": exc.code, "reason": exc.reason},
+        ) from exc
+
+
+@app.get("/api/events/{event_id}/impact")
+def get_event_impact(
+    event_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    from aivan.db.repositories.event_repo import ExecutionEventRepository
+    from aivan.domain.roles import Capability
+    from aivan.execution.event_correction import build_event_impact
+
+    event = ExecutionEventRepository(db).get(event_id, tenant_id=context.tenant_id)
+    if event is None:
+        raise HTTPException(
+            status_code=404, detail={"error": "not_found", "event_id": event_id}
+        )
+    identity = actor_identity_from_context(context, default_mode="audit")
+    _authorize_event_capability(
+        event=event,
+        identity=identity,
+        capability=Capability.VIEW_AUDIT,
+        source_trace_id=context.trace_id,
+        db=db,
+    )
+    return build_event_impact(db, event, tenant_id=context.tenant_id)
+
+
+@app.post("/api/events/{event_id}/reverse")
+def reverse_execution_event(
+    event_id: str,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_require_api_key),
+):
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.db.repositories.event_repo import ExecutionEventRepository
+    from aivan.domain.roles import Capability
+    from aivan.execution.event_correction import (
+        ReversalConflict,
+        UnsafeAutomaticReversal,
+        reverse_event,
+        serialize_reversal_result,
+    )
+
+    event = ExecutionEventRepository(db).get(event_id, tenant_id=context.tenant_id)
+    if event is None:
+        raise HTTPException(
+            status_code=404, detail={"error": "not_found", "event_id": event_id}
+        )
+    identity = actor_identity_from_context(context, default_mode="audit")
+    _authorize_event_capability(
+        event=event,
+        identity=identity,
+        capability=Capability.REVERSE_EVENT,
+        source_trace_id=context.trace_id,
+        db=db,
+    )
+    if not context.idempotency_key:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "IDEMPOTENCY_KEY_REQUIRED", "header": "Idempotency-Key"},
+        )
+    payload = body or {}
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(
+            status_code=400, detail={"error": "REVERSAL_REASON_REQUIRED"}
+        )
+    try:
+        result = reverse_event(
+            db,
+            event,
+            tenant_id=context.tenant_id,
+            supplied_idempotency_key=context.idempotency_key,
+            identity=identity,
+            source_trace_id=context.trace_id,
+            reason=reason,
+            compensation_only=bool(payload.get("compensation_only", False)),
+        )
+    except UnsafeAutomaticReversal as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "AUTOMATIC_REVERSAL_UNSAFE", "impact": exc.impact},
+        ) from exc
+    except ReversalConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "REVERSAL_CONFLICT", "reason": str(exc)},
+        ) from exc
+
+    if not result.idempotent_replay:
+        CaseDomainRepository(db).record_audit(
+            tenant_id=context.tenant_id,
+            case_id=event.project_id,
+            event_type=(
+                "EVENT_REVERSED"
+                if result.record.status == "applied"
+                else "EVENT_COMPENSATION_REQUIRED"
+            ),
+            identity=identity,
+            source_trace_id=context.trace_id,
+            before=event.after_json or {},
+            after=(
+                event.before_json or {}
+                if result.record.status == "applied"
+                else event.after_json or {}
+            ),
+        )
+    db.commit()
+    return serialize_reversal_result(result)
+
 @app.get("/api/projects/{project_id}/options")
 def get_project_options(project_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):
     repo = ProjectRepository(db)
