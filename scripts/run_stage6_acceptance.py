@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 import subprocess
 import sys
 import time
@@ -20,6 +21,23 @@ from typing import Callable
 
 REQUIRED_CONSECUTIVE_RUNS = 5
 EVIDENCE_CLASS = "automated_preflight"
+CONFIG_PROFILES = {
+    "stage6a-local": {
+        "execution_context": "local",
+        "external_network_required": False,
+        "production_services_modified": False,
+    },
+    "stage6a-ci": {
+        "execution_context": "ci",
+        "external_network_required": False,
+        "production_services_modified": False,
+    },
+    "stage6a-candidate-preflight": {
+        "execution_context": "candidate_preflight",
+        "external_network_required": False,
+        "production_services_modified": False,
+    },
+}
 STAGE6A_TESTS = (
     "tests/test_stage1_unified_contract.py",
     "tests/test_stage1_3_tenant_isolation.py",
@@ -66,11 +84,28 @@ def build_command(python_executable: str = sys.executable) -> list[str]:
     ]
 
 
+def build_environment_profile(config_profile: str) -> dict:
+    """Return a reproducible descriptor without host identity or env values."""
+
+    if config_profile not in CONFIG_PROFILES:
+        raise ValueError(f"Unsupported Stage 6A config profile: {config_profile}")
+    return {
+        "config_profile": config_profile,
+        **CONFIG_PROFILES[config_profile],
+        "python_implementation": platform.python_implementation(),
+        "python_version": platform.python_version(),
+        "platform_system": platform.system(),
+        "platform_release": platform.release(),
+        "platform_machine": platform.machine(),
+    }
+
+
 def run_stage6a_preflight(
     *,
     repository_root: Path,
     output_path: Path,
     candidate_commit: str,
+    config_profile: str = "stage6a-local",
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict:
@@ -83,6 +118,7 @@ def run_stage6a_preflight(
         "evidence_class": EVIDENCE_CLASS,
         "production_acceptance": False,
         "candidate_commit": candidate_commit.strip() or "working-tree",
+        "environment_profile": build_environment_profile(config_profile),
         "required_consecutive_runs": REQUIRED_CONSECUTIVE_RUNS,
         "started_at": _utcnow(),
         "dependency_lock_digests": {
@@ -128,6 +164,17 @@ def run_stage6a_preflight(
         if consecutive == REQUIRED_CONSECUTIVE_RUNS
         else "failed_reset_required"
     )
+    evidence["evidence_summary"] = {
+        "attempted_runs": len(evidence["attempts"]),
+        "passed_runs": sum(
+            attempt["result"] == "passed" for attempt in evidence["attempts"]
+        ),
+        "failed_runs": sum(
+            attempt["result"] == "failed" for attempt in evidence["attempts"]
+        ),
+        "consecutive_passes": consecutive,
+        "result": evidence["status"],
+    }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(evidence, ensure_ascii=False, sort_keys=True) + "\n")
@@ -141,6 +188,11 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--candidate-commit", default="working-tree")
+    parser.add_argument(
+        "--config-profile",
+        choices=tuple(CONFIG_PROFILES),
+        default="stage6a-local",
+    )
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
     if args.list:
@@ -148,6 +200,7 @@ def main() -> int:
             "evidence_class": EVIDENCE_CLASS,
             "production_acceptance": False,
             "required_consecutive_runs": REQUIRED_CONSECUTIVE_RUNS,
+            "config_profiles": list(CONFIG_PROFILES),
             "test_paths": list(STAGE6A_TESTS),
         }, ensure_ascii=False, indent=2))
         return 0
@@ -157,6 +210,7 @@ def main() -> int:
         repository_root=args.repository_root,
         output_path=args.output,
         candidate_commit=args.candidate_commit,
+        config_profile=args.config_profile,
     )
     print(json.dumps({
         "status": result["status"],
@@ -168,4 +222,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
