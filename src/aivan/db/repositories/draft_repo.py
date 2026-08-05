@@ -47,6 +47,19 @@ class DraftRepository:
             query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
         return query.order_by(InquiryDraftRecord.created_at.asc()).all()
 
+    def list_by_status(
+        self, status: str, *, tenant_id: str
+    ) -> list[InquiryDraftRecord]:
+        return (
+            self.db.query(InquiryDraftRecord)
+            .filter(
+                InquiryDraftRecord.tenant_id == tenant_id,
+                InquiryDraftRecord.status == status,
+            )
+            .order_by(InquiryDraftRecord.created_at.asc())
+            .all()
+        )
+
     def approve(self, draft_id: str, approved_by: str = "user") -> InquiryDraftRecord | None:
         """Transition draft to 'approved'. Returns None if not found.
         If the draft exists but is not in 'pending_approval' state, returns it

@@ -10,6 +10,7 @@ from aivan.db.models.execution import ExecutionEventRecord, ProcessedInboundEven
 from aivan.db.models.platform import PlatformRecord
 from aivan.db.models.account import OpenClawAccountRecord
 from aivan.db.models.preference import UserPreferenceRecord
+from aivan.db.models.relay import RelayReceiptRecord
 from aivan.db.models.domain import (
     ApprovalRecord,
     AuditLogRecord,
@@ -28,6 +29,7 @@ __all__ = [
     "PlatformRecord",
     "OpenClawAccountRecord",
     "UserPreferenceRecord",
+    "RelayReceiptRecord",
     "ApprovalRecord",
     "AuditLogRecord",
     "CaseConversationRecord",
