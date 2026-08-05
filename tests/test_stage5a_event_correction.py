@@ -223,3 +223,131 @@ def test_event_append_persists_stable_payload_digest(correction_api):
     )
     assert len(first.payload_digest) == 64
     assert first.payload_digest == second.payload_digest
+
+
+def test_impact_reports_event_already_corrected(correction_api):
+    client, _db = correction_api
+    _project, event = _case_state_event(_db, suffix="already-corrected")
+    reversed_response = client.post(
+        f"/api/events/{event.event_id}/reverse",
+        headers=_headers(idempotency_key="already-corrected"),
+        json={"reason": "Create immutable correction evidence."},
+    )
+    assert reversed_response.status_code == 200
+
+    impact = client.get(
+        f"/api/events/{event.event_id}/impact", headers=_headers(role="auditor")
+    )
+    assert impact.status_code == 200
+    payload = impact.json()
+    assert payload["automatic_reverse_allowed"] is False
+    assert "event_already_corrected" in payload["blockers"]
+    assert payload["existing_reversal"]["source_event_id"] == event.event_id
+
+
+def test_impact_reports_correction_events_cannot_be_reversed(correction_api):
+    client, db = correction_api
+    _project, event = _case_state_event(db, suffix="correction-event")
+    reversed_response = client.post(
+        f"/api/events/{event.event_id}/reverse",
+        headers=_headers(idempotency_key="make-correction-event"),
+        json={"reason": "Create correction event for blocker coverage."},
+    )
+    correction_event_id = reversed_response.json()["reversal"]["correction_event_id"]
+
+    impact = client.get(
+        f"/api/events/{correction_event_id}/impact", headers=_headers(role="auditor")
+    )
+    assert impact.status_code == 200
+    assert impact.json()["automatic_reverse_allowed"] is False
+    assert "correction_events_cannot_be_reversed" in impact.json()["blockers"]
+    assert db.query(EventReversalRecord).count() == 1
+
+
+def test_impact_reports_case_not_found(correction_api):
+    client, db = correction_api
+    event = ExecutionEventRepository(db).append(
+        "missing-case",
+        "CASE_STATE_TRANSITION",
+        "Orphan event retained for audit",
+        tenant_id="tenant-a",
+        before={"case_state": "inquiry"},
+        after={"case_state": "sourcing"},
+    )
+    db.commit()
+
+    impact = client.get(
+        f"/api/events/{event.event_id}/impact", headers=_headers(role="auditor")
+    )
+    assert impact.status_code == 200
+    assert impact.json()["automatic_reverse_allowed"] is False
+    assert "case_not_found" in impact.json()["blockers"]
+    assert db.query(EventReversalRecord).count() == 0
+
+
+def test_impact_reports_no_supported_materialized_state(correction_api):
+    client, db = correction_api
+    project = ProjectRepository(db).create(
+        "unsupported-conversation", "unsupported-buyer", tenant_id="tenant-a"
+    )
+    event = ExecutionEventRepository(db).append(
+        project.project_id,
+        "UNSUPPORTED_STATE_CHANGED",
+        "Unsupported field changed",
+        tenant_id="tenant-a",
+        before={"unsupported_field": "before"},
+        after={"unsupported_field": "after"},
+    )
+    db.commit()
+
+    impact = client.get(
+        f"/api/events/{event.event_id}/impact", headers=_headers(role="auditor")
+    )
+    assert impact.status_code == 200
+    assert impact.json()["affected"]["materialized_field"] == ""
+    assert "no_supported_materialized_state" in impact.json()["blockers"]
+    assert db.query(EventReversalRecord).count() == 0
+
+
+def test_impact_reports_materialized_state_diverged(correction_api):
+    client, db = correction_api
+    project, event = _case_state_event(db, suffix="state-diverged")
+    project.case_state = "awaiting_supplier"
+    db.commit()
+
+    impact = client.get(
+        f"/api/events/{event.event_id}/impact", headers=_headers(role="auditor")
+    )
+    assert impact.status_code == 200
+    payload = impact.json()
+    assert payload["automatic_reverse_allowed"] is False
+    assert "materialized_state_diverged" in payload["blockers"]
+    assert payload["affected"]["current_value"] == "awaiting_supplier"
+    assert project.case_state == "awaiting_supplier"
+    assert db.query(EventReversalRecord).count() == 0
+
+
+def test_impact_reports_derived_events_exist(correction_api):
+    client, db = correction_api
+    project, event = _case_state_event(db, suffix="derived-event")
+    derived = ExecutionEventRepository(db).append(
+        project.project_id,
+        "DOWNSTREAM_ARTIFACT_CREATED",
+        "Derived business artifact",
+        tenant_id="tenant-a",
+        derived_from_event_id=event.event_id,
+    )
+    db.commit()
+
+    impact = client.get(
+        f"/api/events/{event.event_id}/impact", headers=_headers(role="auditor")
+    )
+    assert impact.status_code == 200
+    payload = impact.json()
+    assert payload["automatic_reverse_allowed"] is False
+    assert "derived_events_exist" in payload["blockers"]
+    assert [item["event_id"] for item in payload["derived_events"]] == [
+        derived.event_id
+    ]
+    assert project.case_state == "sourcing"
+    assert db.query(EventReversalRecord).count() == 0
