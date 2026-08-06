@@ -91,7 +91,7 @@ const trade = { prompt: "Please source suppliers and request for quotation for 5
 assert("supports accepts shared trade-sourcing intent", harness.supports(trade).supported === true);
 mode = "success";
 const attempt = await harness.runAttempt(trade);
-assert("trade attempt returns AIVAN reply", attempt.assistantTexts[0] === reply);
+assert("trade attempt is captured without automatic outbound reply", attempt.assistantTexts.length === 0 && attempt.didSendViaMessagingTool === true && attempt.outboundAuthorization === "required");
 previousIdempotencyKey = lastIdempotencyKey;
 await harness.runAttempt(trade);
 assert("Harness redelivery keeps a stable message idempotency key", lastIdempotencyKey === previousIdempotencyKey);
@@ -125,7 +125,7 @@ mode = "fail-soft";
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response(JSON.stringify({ status: "error", reply_text: "AIVAN is temporarily unavailable.", error_code: "DEPENDENCY_UNAVAILABLE", retryable: true }), { status: 200, headers: { "Content-Type": "application/json" } });
 const degraded = await harness.runAttempt(trade);
-assert("HTTP 200 fail-soft reply remains user-visible", degraded.assistantTexts[0] === "AIVAN is temporarily unavailable.");
+assert("HTTP 200 fail-soft result remains local and does not auto-reply", degraded.assistantTexts.length === 0 && degraded.didSendViaMessagingTool === true);
 globalThis.fetch = originalFetch;
 
 await new Promise((resolve) => server.close(resolve));

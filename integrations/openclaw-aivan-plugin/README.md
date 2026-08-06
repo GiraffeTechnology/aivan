@@ -143,6 +143,12 @@ In mock mode:
 
 **Every outbound message drafted by AIVAN requires explicit human approval before it is sent.**
 
+Inbound trade messages handled by the Agent Harness are intentionally silent on
+personal IM channels: the harness records the AIVAN result but returns no
+`assistantTexts`. It also marks the attempt as handled so OpenClaw cannot fall
+through to an automatic model reply. The operator must review a pending draft
+and use the approved send or guided-relay flow for every outbound message.
+
 The workflow:
 1. AIVAN processes an event and creates a pending draft
 2. `aivan.getPendingDrafts` returns the draft to the operator

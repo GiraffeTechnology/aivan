@@ -108,9 +108,9 @@ def test_stage3_versions_and_compatibility_are_aligned():
     release = json.loads((PLUGIN_DIR / "release-manifest.json").read_text(encoding="utf-8"))
     assert package["version"] == manifest["version"] == release["release"] == "0.3.0"
     assert "version: 0.3.0" in skill
-    assert package["engines"]["node"] == ">=22.19.0"
+    assert package["engines"]["node"] == ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
     assert package["openclaw"]["build"]["openclawVersion"] == "2026.7.2"
-    assert package["openclaw"]["build"]["pluginSdkVersion"] == "2026.6.8"
+    assert package["openclaw"]["build"]["pluginSdkVersion"] == "2026.7.2-beta.7"
     assert release["openclawBaseline"]["commit"] == "1e06fd443033b8aa2fd638ee66b7fdad1168b8aa"
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert re.search(r'(?ms)^name = "aivan"\nversion = "0\.3\.0"$', lock)

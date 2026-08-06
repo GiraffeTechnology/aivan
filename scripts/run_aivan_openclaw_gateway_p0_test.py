@@ -119,7 +119,7 @@ check("index.ts present", (PLUGIN_DIR / "index.ts").is_file())
 pkg_path = PLUGIN_DIR / "package.json"
 pkg: dict = {}
 if pkg_path.is_file():
-    pkg = json.loads(pkg_path.read_text())
+    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
 
 info("Package name", pkg.get("name", "(missing)"))
 info("Package version", pkg.get("version", "(missing)"))
@@ -127,7 +127,7 @@ info("Package version", pkg.get("version", "(missing)"))
 manifest_path = PLUGIN_DIR / "openclaw.plugin.json"
 manifest: dict = {}
 if manifest_path.is_file():
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
 info("Manifest id", manifest.get("id", "(missing)"))
 info("Manifest name", manifest.get("name", "(missing)"))
@@ -375,7 +375,7 @@ else:
             'mode_is_auto':            evt.mode === 'auto',
             'project_id_preserved':    evt.project_id === 'test-project-001',
             'role_context_preserved':  evt.role_context === 'supplier',
-            'reply_surfaced':          Array.isArray(attempt.assistantTexts) && attempt.assistantTexts[0] === 'AIVAN mock reply',
+            'outbound_suppressed':     Array.isArray(attempt.assistantTexts) && attempt.assistantTexts.length === 0 && attempt.didSendViaMessagingTool === true && attempt.outboundAuthorization === 'required',
             'session_id_used':         attempt.sessionIdUsed === 'conv-project-001',
           }};
 

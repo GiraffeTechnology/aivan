@@ -73,8 +73,8 @@ pkg_path = PLUGIN_DIR / "package.json"
 manifest_path = PLUGIN_DIR / "openclaw.plugin.json"
 dist_js = PLUGIN_DIR / "dist" / "index.js"
 
-pkg: dict = json.loads(pkg_path.read_text()) if pkg_path.is_file() else {}
-manifest: dict = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+pkg: dict = json.loads(pkg_path.read_text(encoding="utf-8")) if pkg_path.is_file() else {}
+manifest: dict = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
 
 info("Plugin directory", str(PLUGIN_DIR))
 info("Package name", pkg.get("name", "(missing)"))

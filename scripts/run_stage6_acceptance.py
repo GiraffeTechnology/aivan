@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -47,8 +48,14 @@ STAGE6A_TESTS = (
     "tests/test_stage5a_event_correction.py",
     "tests/test_stage5a_migration.py",
     "tests/test_llm_token_guard.py",
+    "tests/test_stage7_delivery_safety.py",
 )
-LOCK_FILES = ("pyproject.toml", "uv.lock")
+LOCK_FILES = (
+    "pyproject.toml",
+    "uv.lock",
+    "integrations/openclaw-aivan-plugin/package-lock.json",
+)
+CANDIDATE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _utcnow() -> str:
@@ -111,13 +118,21 @@ def run_stage6a_preflight(
 ) -> dict:
     repository_root = repository_root.resolve()
     output_path = output_path.resolve()
+    normalized_candidate = candidate_commit.strip().lower()
+    if normalized_candidate == "working-tree":
+        if config_profile != "stage6a-local":
+            raise ValueError(
+                "working-tree evidence is allowed only for stage6a-local"
+            )
+    elif not CANDIDATE_COMMIT_PATTERN.fullmatch(normalized_candidate):
+        raise ValueError("candidate_commit must be a full 40-character Git SHA")
     command = build_command()
     evidence = {
         "schema_version": 1,
         "stage": "6A",
         "evidence_class": EVIDENCE_CLASS,
         "production_acceptance": False,
-        "candidate_commit": candidate_commit.strip() or "working-tree",
+        "candidate_commit": normalized_candidate,
         "environment_profile": build_environment_profile(config_profile),
         "required_consecutive_runs": REQUIRED_CONSECUTIVE_RUNS,
         "started_at": _utcnow(),
