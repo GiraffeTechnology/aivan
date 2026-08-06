@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -210,7 +211,9 @@ else:
 section("Source security checks")
 index_text = (PLUGIN_DIR / "index.ts").read_text(encoding="utf-8") if (PLUGIN_DIR / "index.ts").is_file() else ""
 check("No hardcoded API key in index.ts",
-      "sk-" not in index_text and "Authorization" not in index_text)
+      "sk-" not in index_text and re.search(r"\bAuthorization\b", index_text) is None,
+      "flags a literal 'Authorization' header/token; word-boundary so it does not "
+      "false-positive on identifiers like outboundAuthorization")
 check("AIVAN_API_KEY sent as X-AIVAN-API-Key header", "X-AIVAN-API-Key" in index_text)
 check("AIVAN_API_KEY only read from env",
       "process.env?.AIVAN_API_KEY" in index_text or "process.env.AIVAN_API_KEY" in index_text)
