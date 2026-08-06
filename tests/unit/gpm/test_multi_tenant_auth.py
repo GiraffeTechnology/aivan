@@ -104,6 +104,7 @@ def test_valid_token_tenant_inactive(monkeypatch):
 
 
 def test_valid_token_giraffe_db_unavailable_degrades(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "local")
     monkeypatch.setenv("AIVAN_AUTH_SECRET", "test-secret")
     db = MagicMock()
     db.get_tenant.side_effect = GiraffeDBClientError("connection refused")
@@ -150,6 +151,7 @@ def test_transport_error_in_get_tenant_triggers_auth_degradation(monkeypatch):
     import httpx
     from aivan.gpm.giraffe_db_client import GiraffeDBClient
 
+    monkeypatch.setenv("AIVAN_ENV", "local")
     monkeypatch.setenv("AIVAN_AUTH_SECRET", "test-secret")
     db_client = GiraffeDBClient("http://localhost:1")
     db_client._session = MagicMock()
@@ -160,3 +162,71 @@ def test_transport_error_in_get_tenant_triggers_auth_degradation(monkeypatch):
     result = _run(auth(_make_request({"Authorization": f"Bearer {token}"}))
     )
     assert result == "t-transport"
+
+
+def test_production_never_trusts_x_tenant_id_without_credentials(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "deployment-key")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-prod")
+    monkeypatch.delenv("AIVAN_AUTH_SECRET", raising=False)
+    db = MagicMock()
+    db.get_tenant.return_value = {"tenant_id": "tenant-prod", "status": "active"}
+    auth = make_require_auth(db_client=db)
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run(auth(_make_request({"X-Tenant-ID": "attacker-tenant"})))
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["error"] == "TENANT_MISMATCH"
+
+
+def test_production_api_key_uses_shared_request_context(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "deployment-key")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-prod")
+    monkeypatch.delenv("AIVAN_AUTH_SECRET", raising=False)
+    db = MagicMock()
+    db.get_tenant.return_value = {"tenant_id": "tenant-prod", "status": "active"}
+    auth = make_require_auth(db_client=db)
+
+    tenant_id = _run(
+        auth(
+            _make_request(
+                {
+                    "X-AIVAN-API-Key": "deployment-key",
+                    "X-AIVAN-Tenant-ID": "tenant-prod",
+                }
+            )
+        )
+    )
+
+    assert tenant_id == "tenant-prod"
+    db.get_tenant.assert_called_once_with("tenant-prod")
+
+
+def test_production_requires_giraffe_db(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "deployment-key")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-prod")
+    auth = make_require_auth(db_client=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run(auth(_make_request({"X-AIVAN-API-Key": "deployment-key"})))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "GPM_PERSISTENCE_MISCONFIGURED"
+
+
+def test_production_tenant_verification_failure_is_closed(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_AUTH_SECRET", "test-secret")
+    db = MagicMock()
+    db.get_tenant.side_effect = GiraffeDBClientError("connection refused")
+    auth = make_require_auth(db_client=db)
+    token = generate_token("tenant-prod", "test-secret")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run(auth(_make_request({"Authorization": f"Bearer {token}"})))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "TENANT_VERIFICATION_UNAVAILABLE"

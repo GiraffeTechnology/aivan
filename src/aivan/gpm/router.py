@@ -7,7 +7,7 @@ import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -49,6 +49,24 @@ def get_db_client():
     return _db_client
 
 
+async def require_gpm_tenant(request: Request) -> str:
+    """Authenticate a tenant and prohibit production in-memory degradation."""
+
+    tenant_id = await require_auth(request)
+    if (
+        os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
+        and not _packet_store.is_durable
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "GPM_PERSISTENCE_UNAVAILABLE",
+                "message": "production GPM requires durable giraffe-db persistence",
+            },
+        )
+    return tenant_id
+
+
 class QuoteGuidanceRequest(BaseModel):
     sku: str
     supplier_id: Optional[str] = None
@@ -67,7 +85,7 @@ class ApprovalRequest(BaseModel):
 @router.post("/quote-guidance", status_code=201, response_model=None)
 async def create_quote_guidance(
     body: QuoteGuidanceRequest,
-    tenant_id: str = Depends(require_auth),
+    tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict | JSONResponse:
     """Analyse a supplier quote and persist the resulting decision packet."""
     # A supplier_id that is a retired giraffe-db legacy id is rejected, never
@@ -118,7 +136,7 @@ async def create_quote_guidance(
 @router.get("/quote-guidance/{packet_id}")
 async def get_quote_guidance(
     packet_id: str,
-    tenant_id: str = Depends(require_auth),
+    tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
@@ -135,7 +153,7 @@ async def get_quote_guidance(
 async def approve_packet(
     packet_id: str,
     body: ApprovalRequest,
-    tenant_id: str = Depends(require_auth),
+    tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
@@ -168,7 +186,7 @@ async def approve_packet(
 async def reject_packet(
     packet_id: str,
     body: ApprovalRequest,
-    tenant_id: str = Depends(require_auth),
+    tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
@@ -200,7 +218,7 @@ async def reject_packet(
 @router.get("/packets")
 async def list_gpm_packets(
     status: Optional[str] = None,
-    tenant_id: str = Depends(require_auth),
+    tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
     """List current tenant's packets with optional status filter."""
     packets = _packet_store.list_by_tenant(tenant_id=tenant_id, status=status)
@@ -213,8 +231,10 @@ async def list_gpm_packets(
 
 @router.get("/healthz")
 async def healthz() -> dict:
+    production = os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
+    ready = _packet_store.is_durable or not production
     return {
-        "status": "ok",
+        "status": "ok" if ready else "not_ready",
         "packet_persistence": "durable" if _packet_store.is_durable else "in_memory_only",
         "giraffe_db_connected": _packet_store.is_durable,
     }
@@ -223,9 +243,19 @@ async def healthz() -> dict:
 @router.get("/capabilities")
 async def capabilities() -> dict:
     has_secret = bool(os.environ.get("AIVAN_AUTH_SECRET"))
+    has_request_context_auth = bool(
+        os.environ.get("AIVAN_API_KEY") or os.environ.get("AIVAN_TENANT_API_KEYS")
+    )
     has_db = _db_client is not None
+    production = os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
     auth_mode = (
-        "multi_tenant_hmac_giraffe_db"
+        "production_misconfigured"
+        if production and (not has_db or not _packet_store.is_durable)
+        else "production_request_context"
+        if production and has_request_context_auth
+        else "production_hmac_giraffe_db"
+        if production and has_secret and has_db
+        else "multi_tenant_hmac_giraffe_db"
         if has_secret and has_db
         else "multi_tenant_hmac_only"
         if has_secret

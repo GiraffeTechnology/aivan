@@ -360,6 +360,20 @@ AIVAN_LANGUAGE_SKILL_FAIL_SOFT=true
 
 See `.env.example` for the full annotated list.
 
+Production is intentionally stricter:
+
+- set `AIVAN_DB_URL` explicitly through the authorized configuration store;
+- bind `AIVAN_API_KEY` to `AIVAN_TENANT_ID`, or use a reviewed
+  `AIVAN_TENANT_API_KEYS` mapping;
+- set `GIRAFFE_DB_BASE_URL` for GPM durable persistence and active-tenant checks;
+- set `AIVAN_CORS_ORIGINS` to an exact comma-separated browser allowlist
+  (production defaults to none and rejects `*`);
+- treat `deploy/aivan.production.env.example` as a schema, not as authorization
+  to deploy or modify a host.
+
+In production, a caller-supplied `X-Tenant-ID` is never authentication. GPM
+fails closed when giraffe-db is missing, unavailable, or not durable.
+
 LLM providers are optional and must not bypass deterministic gates, GLTG, giraffe-db, or the language boundary.
 
 ---

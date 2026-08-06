@@ -139,9 +139,19 @@ def test_approver_identity_not_body_controls_approval(client_and_session, monkey
         assert approval.approver_role == "approver"
         assert approval.source_trace_id == "trace-approved"
         assert draft.approval_id == approval.approval_id
-        audit = db.query(AuditLogRecord).one()
+        audit = (
+            db.query(AuditLogRecord)
+            .filter(AuditLogRecord.event_type == "DRAFT_APPROVED")
+            .one()
+        )
         assert audit.before_json["status"] == "pending_approval"
         assert audit.after_json["status"] == "approved"
+        delivery_audit = (
+            db.query(AuditLogRecord)
+            .filter(AuditLogRecord.event_type == "DRAFT_SENT")
+            .one()
+        )
+        assert delivery_audit.after_json["status"] == "sent"
 
 
 def test_buyer_cannot_retry_failed_outbound(client_and_session):
