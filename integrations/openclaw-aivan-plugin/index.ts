@@ -416,8 +416,8 @@ export async function forwardEvent(event: {
   process.stderr.write(
     `[aivan] AIVAN HTTP status=${result.status} fields=${JSON.stringify({
       status: d["status"],
-      output: d["output"] ? String(d["output"]).slice(0, 120) : undefined,
-      reply_text: d["reply_text"] ? String(d["reply_text"]).slice(0, 120) : undefined,
+      output_length: d["output"] ? String(d["output"]).length : 0,
+      reply_text_length: d["reply_text"] ? String(d["reply_text"]).length : 0,
     })}\n`
   );
   return {
@@ -683,57 +683,6 @@ function extractSessionContext(params: any): {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildSuccessResult(params: any, replyText: string): any {
-  const sessionId: string = typeof params?.sessionId === "string" ? params.sessionId : "";
-  const now = Date.now();
-  const prompt = extractPrompt(params);
-
-  const assistantMsg = {
-    role: "assistant",
-    content: [{ type: "text", text: replyText }],
-    api: "aivan",
-    provider: "aivan",
-    model: "aivan",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: "stop",
-    timestamp: now,
-  };
-
-  const messagesSnapshot: unknown[] = [];
-  if (prompt) {
-    messagesSnapshot.push({ role: "user", content: prompt, timestamp: now - 1 });
-  }
-  messagesSnapshot.push(assistantMsg);
-
-  return {
-    aborted: false,
-    externalAbort: false,
-    timedOut: false,
-    idleTimedOut: false,
-    timedOutDuringCompaction: false,
-    promptError: null,
-    promptErrorSource: null,
-    sessionIdUsed: sessionId,
-    messagesSnapshot,
-    assistantTexts: [replyText],
-    toolMetas: [],
-    lastAssistant: assistantMsg,
-    didSendViaMessagingTool: false,
-    messagingToolSentTexts: [],
-    messagingToolSentMediaUrls: [],
-    messagingToolSentTargets: [],
-    cloudCodeAssistFormatError: false,
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildPassThroughResult(params: any): any {
   const sessionId: string = typeof params?.sessionId === "string" ? params.sessionId : "";
   return {
@@ -754,6 +703,21 @@ function buildPassThroughResult(params: any): any {
     messagingToolSentMediaUrls: [],
     messagingToolSentTargets: [],
     cloudCodeAssistFormatError: false,
+  };
+}
+
+// A matched inbound event is recorded by AIVAN but must not become a personal-
+// IM assistant reply. `didSendViaMessagingTool` prevents OpenClaw from falling
+// through to an automatic model reply while `assistantTexts` remains empty, so
+// no message is emitted. An operator can later use the explicit draft approval
+// and guided-relay flow.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildNoOutboundResult(params: any): any {
+  return {
+    ...buildPassThroughResult(params),
+    didSendViaMessagingTool: true,
+    aivanHandled: true,
+    outboundAuthorization: "required",
   };
 }
 
@@ -858,7 +822,7 @@ export function register(api: any): void {
               `[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`
             );
             if (result.reply_text) {
-              return buildSuccessResult(params, result.reply_text);
+              return buildNoOutboundResult(params);
             }
             return buildPassThroughResult(params);
           }
@@ -870,9 +834,9 @@ export function register(api: any): void {
               : "已收到您的请求");
 
           process.stderr.write(
-            `[aivan] AIVAN reply: ${replyText.slice(0, 80)}\n`
+            `[aivan] AIVAN result captured locally: reply_length=${replyText.length}; outbound suppressed\n`
           );
-          return buildSuccessResult(params, replyText);
+          return buildNoOutboundResult(params);
         } catch (err) {
           process.stderr.write(
             `[aivan] runAttempt unexpected error: ${String(err)}\n`
@@ -889,4 +853,3 @@ export function register(api: any): void {
     process.stderr.write(`[aivan] register() error: ${String(err)}\n`);
   }
 }
-

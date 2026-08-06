@@ -10,10 +10,10 @@
     "repository": "https://github.com/GiraffeTechnology/openclaw",
     "commit": "1e06fd443033b8aa2fd638ee66b7fdad1168b8aa",
     "version": "2026.7.2",
-    "publishedSdkVersion": "2026.6.8",
+    "publishedSdkVersion": "2026.7.2-beta.7",
     "synchronizedAt": "2026-08-03T15:26:00Z",
     "archiveBranch": "archive/pre-upstream-sync-20260803",
-    "node": ">=22.19.0"
+    "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
   },
   "intentBoundary": "intent-boundary.json",
   "tools": [

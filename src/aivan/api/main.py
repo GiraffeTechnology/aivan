@@ -61,12 +61,44 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
 
+
+def _cors_origins() -> list[str]:
+    """Return an explicit CORS allowlist; production defaults to no origins."""
+
+    configured = os.environ.get("AIVAN_CORS_ORIGINS", "")
+    origins = [value.strip() for value in configured.split(",") if value.strip()]
+    if "*" in origins:
+        raise RuntimeError("AIVAN_CORS_ORIGINS must not contain '*' ")
+    if origins:
+        return origins
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        return []
+    return [
+        "http://127.0.0.1:8765",
+        "http://localhost:8765",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-AIVAN-API-Key",
+        "X-AIVAN-Actor-ID",
+        "X-AIVAN-Channel-Account-ID",
+        "X-AIVAN-Conversation-Role",
+        "X-AIVAN-Execution-Mode",
+        "X-AIVAN-Participant-Conversation-Role",
+        "X-AIVAN-Participant-ID",
+        "X-AIVAN-Participant-Role",
+        "X-AIVAN-Role-Context",
+        "X-AIVAN-Tenant-ID",
+        "X-AIVAN-Trace-ID",
+    ],
 )
 
 app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])

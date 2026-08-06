@@ -127,7 +127,7 @@ check("npx tsc exits 0 with zero errors", result.returncode == 0,
 section("Compiled output correctness")
 dist_js = PLUGIN_DIR / "dist" / "index.js"
 if dist_js.is_file():
-    dist_text = dist_js.read_text()
+    dist_text = dist_js.read_text(encoding="utf-8")
     check("dist/index.js exports register function",
           "export function register" in dist_text)
     check("dist/index.js references forwardEvent",
@@ -138,7 +138,7 @@ else:
 
 # ── package.json runtime entry alignment ──────────────────────────────────────
 section("package.json runtime entry alignment")
-pkg = json.loads((PLUGIN_DIR / "package.json").read_text())
+pkg = json.loads((PLUGIN_DIR / "package.json").read_text(encoding="utf-8"))
 main_val = pkg.get("main", "")
 types_val = pkg.get("types", "")
 
@@ -176,7 +176,7 @@ check("openclaw.extensions entry points to dist JS",
 section("openclaw.plugin.json structure")
 manifest_path = PLUGIN_DIR / "openclaw.plugin.json"
 if manifest_path.is_file():
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     check("id present", bool(manifest.get("id")))
     check("name present", bool(manifest.get("name")))
     check("description present", bool(manifest.get("description")))

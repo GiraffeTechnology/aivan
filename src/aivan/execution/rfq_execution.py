@@ -27,9 +27,7 @@ from aivan.execution.safety import (
 from aivan.rfq.dependency_policy import classify_exception
 from aivan.rfq.operator_reply import render_operator_reply
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
-from aivan.openclaw.client import get_openclaw_client
 from aivan.openclaw.contracts import OpenClawEvent
-from aivan.openclaw.contracts import OpenClawSendRequest
 from aivan.execution.channel_policy import USER_CONTROL_CHANNELS, normalize_channel
 from aivan.openclaw.event_adapter import is_supplier_reply
 from aivan.schemas.requirement import BuyerRequirement
@@ -776,7 +774,7 @@ def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session,
 
 
 def _send_user_control_notification(project_id: str, event: OpenClawEvent, message_text: str, db: Session) -> dict:
-    channel, target_peer_id, should_send, reason = _user_control_channel_and_target(event, db)
+    channel, target_peer_id, owner_resolved, reason = _user_control_channel_and_target(event, db)
     repo = DraftRepository(db)
     draft = repo.create(
         project_id,
@@ -789,35 +787,28 @@ def _send_user_control_notification(project_id: str, event: OpenClawEvent, messa
             "message_text": message_text,
             "message_type": "text",
             "attachments_json": [],
-            "status": "approved" if should_send else "pending_approval",
+            # Stage 7 P0: resolving the owner is routing evidence, not consent.
+            # Personal-IM/user-control output must never leave AIVAN merely because
+            # the inbound participant or account owner was identified.
+            "status": "pending_approval",
             "created_by_agent": "aivan_user_control",
-            "notes": f"draft_type=approval_request_im {reason}",
+            "notes": (
+                "draft_type=approval_request_im "
+                f"owner_resolved={str(owner_resolved).lower()} {reason} "
+                "outbound_authorization=required"
+            ),
         },
     )
-    if not should_send:
-        return {
-            "draft_id": draft.draft_id,
-            "sent": False,
-            "message_id": "",
-            "error": "owner resolution required before sending user-control notification",
-        }
-    response = get_openclaw_client().send_message(
-        OpenClawSendRequest(
-            channel=channel,
-            channel_account_id=event.channel_account_id,
-            conversation_id=event.conversation_id,
-            target_peer_id=target_peer_id,
-            message_text=message_text,
-            message_type="text",
-        )
-    )
-    if response.success:
-        repo.mark_sent(draft.draft_id)
     return {
         "draft_id": draft.draft_id,
-        "sent": response.success,
-        "message_id": response.message_id,
-        "error": response.error,
+        "sent": False,
+        "message_id": "",
+        "owner_resolved": owner_resolved,
+        "error": (
+            "explicit outbound authorization required"
+            if owner_resolved
+            else "owner resolution and explicit outbound authorization required"
+        ),
     }
 
 

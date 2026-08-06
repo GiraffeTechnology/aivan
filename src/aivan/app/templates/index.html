@@ -17,6 +17,7 @@
         <button onclick="showPanel('platforms')">Platforms</button>
         <button onclick="showPanel('accounts')">Accounts</button>
         <button onclick="showPanel('approvals')">Approvals</button>
+        <button onclick="showPanel('settings')">Connection</button>
     </nav>
 </header>
 
@@ -41,8 +42,8 @@
         <div class="form-group">
             <label>Simulate Customer Message:</label>
             <textarea id="msg-text" rows="4" placeholder="e.g. 我需要采购10000件白色纯棉男士衬衣..."></textarea>
-            <input id="msg-conv" placeholder="Conversation ID" value="conv_demo_001">
-            <input id="msg-sender" placeholder="Sender ID" value="customer_001">
+            <input id="msg-conv" placeholder="Conversation ID (required)">
+            <input id="msg-sender" placeholder="Sender / participant ID (required)">
             <button onclick="sendMessage()">Send to AIVAN</button>
         </div>
         <div id="message-result" class="result-box"></div>
@@ -88,10 +89,35 @@
         <button onclick="loadDrafts()">Load Drafts</button>
         <div id="drafts-list" class="card-list"></div>
     </div>
+
+    <!-- Authenticated Core connection settings. Secrets stay in sessionStorage. -->
+    <div id="panel-settings" class="panel">
+        <h2>AIVAN Core Connection</h2>
+        <p>Use the trusted identity assigned by the operator. These values do not grant permissions; Core validates every request.</p>
+        <div class="form-group">
+            <label for="cfg-api-key">API key</label>
+            <input id="cfg-api-key" type="password" autocomplete="off" placeholder="Session only">
+            <label for="cfg-tenant-id">Tenant ID</label>
+            <input id="cfg-tenant-id" placeholder="tenant id">
+            <label for="cfg-actor-id">Actor ID</label>
+            <input id="cfg-actor-id" placeholder="actor id">
+            <label for="cfg-role-context">Business role</label>
+            <input id="cfg-role-context" placeholder="sales / approver / admin">
+            <label for="cfg-conversation-role">Conversation role</label>
+            <input id="cfg-conversation-role" placeholder="internal_thread / buyer_thread / supplier_thread">
+            <label for="cfg-execution-mode">Execution mode</label>
+            <input id="cfg-execution-mode" placeholder="manual / approval">
+            <label for="cfg-channel-account-id">Channel account ID</label>
+            <input id="cfg-channel-account-id" placeholder="trusted channel binding">
+            <button onclick="saveConnectionSettings()">Save for this tab</button>
+            <button onclick="clearConnectionSettings()">Clear</button>
+        </div>
+        <div id="settings-result" class="result-box"></div>
+    </div>
 </main>
 
 <footer>
-    <p>AIVAN v0.3.0 — Local-first AI Trade Salesperson. All data stays on your machine.</p>
+    <p>AIVAN v0.3.0 — Local-first Core. External delivery occurs only through an explicitly authorized adapter or guided relay.</p>
 </footer>
 
 <script src="/static/app.js"></script>
