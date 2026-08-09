@@ -6,12 +6,17 @@ must not be merged into the shared Core.
 
 ## Stage 5A — Core event correction
 
+Status: **implementation merged**; downstream invalidation, compensation task,
+and correction-draft integration remain carried by Stage 7B.
+
 - `GET /api/events/{event_id}/impact`
 - `POST /api/events/{event_id}/reverse`
 - tenant-scoped lineage, payload digest, idempotent reversal ledger
 - append-only correction/compensation evidence; no physical history deletion
 
 ## Stage 5B — MyAIVAN Core API
+
+Status: **not delivered**.
 
 - expose current Core Project/Case/Conversation/Participant/Draft/Approval/Audit
   models to the workbench
@@ -21,11 +26,16 @@ must not be merged into the shared Core.
 
 ## Stage 5C — unified delivery adapters
 
+Status: **not delivered**. Guided-relay repository APIs and automated tests do
+not substitute for authorized real-channel receipts.
+
 - Email and LINE auto-send through Core approval, receipt, and audit semantics
 - WeChat/Wangwang continue through guided relay
 - WhatsApp remains fail-closed unsupported
 
 ## Stage 5D — MyAIVAN UI
+
+Status: **not delivered**. PR #36 remains reference-only.
 
 - role, approver, delivery mode, dependency error, relay card, impact preview,
   correction action, receipt, and audit timeline

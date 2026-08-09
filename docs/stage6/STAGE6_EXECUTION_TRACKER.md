@@ -1,14 +1,18 @@
 # Stage 6 execution tracker
 
-Baseline: `main@e576e8c7d209c1a6c31dc7712e42a8f5d83c6ca7`.
+Baseline reconciled 2026-08-10: `main@61e456688952cda6e09574b33413b4eb1f84aac3`.
 
 ## 6A — release gates and automated evidence
 
-- [ ] cover all seven event-correction blocker codes
-- [ ] add five-run preflight evidence runner
-- [ ] add requirement-to-evidence traceability matrix
-- [ ] full local regression and GitHub CI
-- [ ] Claude Code cross-review
+- [x] cover all seven event-correction blocker codes
+- [x] add five-run preflight evidence runner
+- [x] add requirement-to-evidence traceability matrix
+- [x] full local regression and GitHub CI
+- [x] Claude Code cross-review
+
+Evidence: PR #58 established the runner and digest-only evidence; PR #59 added
+candidate CI execution; PR #60 passed 6/6 CI and Claude Code cross-review before
+merge. These automated gates are not production acceptance.
 
 ## Required before candidate freeze
 

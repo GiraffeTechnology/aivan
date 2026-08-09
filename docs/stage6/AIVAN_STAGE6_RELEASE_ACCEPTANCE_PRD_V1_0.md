@@ -133,8 +133,8 @@ failure_code, root_cause_reference, reviewer, approved_at
 只有以下条件全部满足，才允许向项目主管提出正式发布申请：
 
 - [ ] Stage 5B、5C、5D 已合并，且没有独立 `web_*` 业务状态机；
-- [ ] PR #57 的全部 7 个纠错阻断码均有自动化断言；
-- [ ] main required checks 5/5，完整测试无失败；
+- [x] PR #57 的全部 7 个纠错阻断码均有自动化断言；
+- [x] PR #60 候选 CI 6/6，完整测试无失败并完成 Claude Code 交叉评审；
 - [ ] 唯一候选 commit 和依赖锁已冻结；
 - [ ] 数据库/对象存储备份已校验，恢复演练成功；
 - [ ] UI、RFQ、角色、审批、Plugin/SKILL、Email/LINE、Relay、Reversal、Token Guard 均连续 5/5；

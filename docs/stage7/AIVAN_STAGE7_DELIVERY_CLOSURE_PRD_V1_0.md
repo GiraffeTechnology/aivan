@@ -261,7 +261,7 @@ Stage 7A.1 复审增补（PR #59 合并后发现）：
 - [x] 数据库默认名统一为 `aivan.db`，旧 `aiven.db` 兼容且双文件歧义失败关闭；
 - [x] 生产模板补齐租户、CORS、显式数据库、GPM 持久化与 qwen3.5:9b 现场值；
 - [x] 旧 CTYun 执行手册替换为无命令 quarantine notice；
-- [ ] Stage 7A.1 PR 由另一执行方完成交叉 CI/评审。
+- [x] Stage 7A.1 PR #60 已由 Claude Code 完成交叉 CI/评审，CI 6/6 通过并合并为 `61e456688952cda6e09574b33413b4eb1f84aac3`。
 
 验收：新增安全回归测试通过；代码中不存在 Harness `assistantTexts: [replyText]`；
 部署 workflow 不含 SSH/Secret/远端变更；默认生产 CORS 无 wildcard。
@@ -430,6 +430,14 @@ PR CI 与另一执行方评审后才可标记为 merged。Stage 7B–7D、依赖
 
 本次明确未执行：生产部署、数据库迁移、Secret 读取、Email/LINE/微信/旺旺
 外发、DNS/CDN/反向代理修改、端口修改、服务重启和 GitHub 管理员控制面修改。
+
+### 2026-08-10 状态校准
+
+- Stage 7A/7A.1 已合并；原未勾选的交叉评审项已按 PR #60 事实更新。
+- Stage 7B–7F 的未勾选项仍是未交付或待授权，不因自动化 preflight 通过而改变。
+- 技术债清理候选新增安全日志、生产 GPM 无缓存、`relayed` 终态、模块体积预算以及
+  Ruff/Mypy/Bandit/覆盖率门禁；在其 PR 合并前仅记为 candidate，不记为 delivered。
+- Stage 7F 继续保持 `blocked_by_authorization`；443/8443 和 `abcdyi-sin` 约束不变。
 
 ---
 

@@ -28,7 +28,6 @@ from aivan.rfq.dependency_policy import classify_exception
 from aivan.rfq.operator_reply import render_operator_reply
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.contracts import OpenClawEvent
-from aivan.execution.channel_policy import USER_CONTROL_CHANNELS, normalize_channel
 from aivan.openclaw.event_adapter import is_supplier_reply
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -36,11 +35,20 @@ from aivan.schemas.rfq import (
     EventClassification,
     FallbackTrigger,
     GiraffeContext,
+    GLTGSimulation,
     RFQExecutionResult,
     RFQStrategy,
     SupplierRoutingDecision,
 )
 from aivan.utils.env import env_bool
+from aivan.execution.rfq_user_control import (
+    _should_use_chinese_user_message,
+    build_user_control_message as _build_user_control_message,
+    draft_supplier_email as _draft_supplier_email,
+    owner_user_id_for_event as _owner_user_id_for_event,
+    send_user_control_notification as _send_user_control_notification,
+)
+from aivan.observability.safe_logging import log_exception_safely
 from aivan.domain.roles import (
     BusinessRole,
     Capability,
@@ -65,12 +73,6 @@ You translate user trade strategy into structured JSON. Use only the user's
 instruction and AIVAN-provided context. Do not invent suppliers, history, prices,
 lead times, risk facts, or compliance decisions.
 """
-
-DRAFT_SYSTEM = """
-You draft concise business email text from AIVAN-provided requirement, strategy,
-supplier, and GLTG context. Do not invent facts. Return JSON only.
-"""
-
 
 def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
     project_repo = ProjectRepository(db)
@@ -282,11 +284,13 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
     except Exception as exc:
         giraffe_db_graph_error = {
             "error_type": exc.__class__.__name__,
-            "message": str(exc),
+            "message": "giraffe-db graph persistence failed",
         }
-        logger.exception(
-            "Failed to persist giraffe-db RFQ/GLTG graph for project %s",
-            project.project_id,
+        log_exception_safely(
+            logger,
+            "Failed to persist giraffe-db RFQ/GLTG graph",
+            exc=exc,
+            context={"project_id": project.project_id},
         )
     routing = _select_suppliers(giraffe, strategy)
 
@@ -441,10 +445,8 @@ def _advance_to_awaiting_supplier(project, event: OpenClawEvent, db: Session) ->
         )
 
 
-def _empty_gltg_simulation() -> "GLTGSimulation":
+def _empty_gltg_simulation() -> GLTGSimulation:
     """A zeroed GLTG simulation for blocked/recovery results (GLTG not run)."""
-    from aivan.schemas.rfq import GLTGSimulation
-
     return GLTGSimulation(
         p50_days=0,
         p80_days=0,
@@ -770,177 +772,6 @@ def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session,
         source="explicit_user_instruction",
         confidence=0.78,
         tenant_id=tenant_id,
-    )
-
-
-def _send_user_control_notification(project_id: str, event: OpenClawEvent, message_text: str, db: Session) -> dict:
-    channel, target_peer_id, owner_resolved, reason = _user_control_channel_and_target(event, db)
-    repo = DraftRepository(db)
-    draft = repo.create(
-        project_id,
-        {
-            "tenant_id": event.tenant_id or "legacy",
-            "conversation_id": event.conversation_id,
-            "channel": channel,
-            "target_peer_id": target_peer_id,
-            "target_role": "user",
-            "message_text": message_text,
-            "message_type": "text",
-            "attachments_json": [],
-            # Stage 7 P0: resolving the owner is routing evidence, not consent.
-            # Personal-IM/user-control output must never leave AIVAN merely because
-            # the inbound participant or account owner was identified.
-            "status": "pending_approval",
-            "created_by_agent": "aivan_user_control",
-            "notes": (
-                "draft_type=approval_request_im "
-                f"owner_resolved={str(owner_resolved).lower()} {reason} "
-                "outbound_authorization=required"
-            ),
-        },
-    )
-    return {
-        "draft_id": draft.draft_id,
-        "sent": False,
-        "message_id": "",
-        "owner_resolved": owner_resolved,
-        "error": (
-            "explicit outbound authorization required"
-            if owner_resolved
-            else "owner resolution and explicit outbound authorization required"
-        ),
-    }
-
-
-def _user_control_channel_and_target(event: OpenClawEvent, db: Session) -> tuple[str, str, bool, str]:
-    role = (event.role_context or "").lower()
-    normalized_channel = normalize_channel(event.channel)
-    notification_channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
-    authenticated_actor_id = event.authenticated_actor_id or ""
-    if role in {"user", "owner", "operator", "sales", "salesperson"} or event.mode in {"user", "command"}:
-        target = authenticated_actor_id
-        if target:
-            return notification_channel or "im", target, True, "verified_user_sender"
-    if authenticated_actor_id:
-        return notification_channel or "im", authenticated_actor_id, True, "verified_actor_id"
-    owner_user_id = _owner_user_id_for_event(event, db)
-    if owner_user_id:
-        channel = event.channel if normalized_channel in USER_CONTROL_CHANNELS else "im"
-        return channel or "im", owner_user_id, True, "verified_account_owner"
-    return "internal", "owner_resolution_required", False, "owner_resolution_required"
-
-
-def _owner_user_id_for_event(event: OpenClawEvent, db: Session) -> str:
-    if not event.channel_account_id:
-        return ""
-    from aivan.db.models.account import OpenClawAccountRecord
-    # Filter by channel + channel_account_id and require active/connected status so
-    # revoked or stale accounts do not resolve as the owner.
-    account = db.query(OpenClawAccountRecord).filter(
-        OpenClawAccountRecord.channel == event.channel,
-        OpenClawAccountRecord.channel_account_id == event.channel_account_id,
-        OpenClawAccountRecord.tenant_id == (event.tenant_id or "legacy"),
-        OpenClawAccountRecord.status == "connected",
-    ).first()
-    return account.owner_user_id if account and account.owner_user_id else ""
-
-
-def _draft_supplier_email(requirement: BuyerRequirement, strategy: RFQStrategy, supplier: dict, gltg) -> str:
-    schema_hint = {"subject": "", "message_text": ""}
-    user_prompt = {
-        "supplier": supplier,
-        "requirement": requirement.model_dump(),
-        "strategy": strategy.model_dump(),
-        "gltg": gltg.model_dump(),
-    }
-    # Deterministic-by-default: render the supplier email from a fixed template
-    # unless LLM drafting is explicitly enabled. The template is built only from
-    # already-canonical requirement/strategy/GLTG fields (English), never raw text.
-    raw = {}
-    if env_bool("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED"):
-        try:
-            raw = llm_complete_json("aivan_supplier_email_draft", DRAFT_SYSTEM, str(user_prompt), schema_hint)
-        except Exception:
-            raw = {}
-    if raw.get("message_text"):
-        return raw["message_text"]
-    subject = (
-        f"RFQ: {requirement.quantity or 'TBD'} {requirement.product_type or requirement.category or 'Products'} "
-        f"for Delivery to {requirement.destination or 'TBD'} Within {requirement.delivery_days or 'TBD'} Days"
-    )
-    lines = [
-        f"Subject: {subject}",
-        "",
-        f"Dear {supplier.get('name', 'Supplier')},",
-        "",
-        "We are preparing an RFQ and would like your quotation for the following requirement:",
-        f"- Product: {requirement.product_type or requirement.category or 'product'}",
-        f"- Quantity: {requirement.quantity or 'TBD'} {requirement.quantity_unit}",
-        f"- Material/spec: {requirement.fabric_material or requirement.material_spec or 'TBD'}",
-        f"- Color/finish: {requirement.color or requirement.surface_finish or 'TBD'}",
-        f"- Destination: {requirement.destination or 'TBD'}",
-        f"- Target delivery: {requirement.delivery_days or 'TBD'} days",
-        f"- Lead-time confidence requested: {strategy.lead_time_confidence}",
-        "",
-        "Please include the following in your quotation:",
-        "- Unit price",
-        "- Total price",
-        "- MOQ",
-        "- Production capacity",
-        "- Lead time",
-        "- Earliest shipment date",
-        "- Payment terms",
-        "- Incoterms / trade terms",
-        "- Packaging information",
-        "- Validity period of quotation",
-        "- Any risks or constraints",
-        "",
-        "This inquiry is subject to buyer review and final approval.",
-        "",
-        "Best regards,",
-        "AIVAN",
-    ]
-    return "\n".join(lines)
-
-
-def _should_use_chinese_user_message(requirement: BuyerRequirement) -> bool:
-    return requirement.language == "zh" or any(
-        "一" <= ch <= "鿿" for ch in requirement.raw_text
-    )
-
-
-def _risk_label_for_user(risk_level: str) -> str:
-    labels = {"low": "低", "medium": "中", "high": "高", "critical": "严重", "unknown": "未知"}
-    return labels.get((risk_level or "unknown").lower(), risk_level or "未知")
-
-
-def _build_user_control_message(
-    requirement: BuyerRequirement,
-    strategy: RFQStrategy,
-    gltg,
-    routing: SupplierRoutingDecision,
-    drafts_created: list[str],
-) -> str:
-    if _should_use_chinese_user_message(requirement):
-        deadline = (
-            f"目标交期 {requirement.delivery_days} 天"
-            if requirement.delivery_days
-            else "目标交期待确认"
-        )
-        return (
-            f"RFQ 已创建，等待人工审批：{requirement.quantity or 'TBD'} {requirement.quantity_unit} "
-            f"{requirement.product_type or requirement.category or 'product'}，目的地 {requirement.destination or 'TBD'}，{deadline}。"
-            f"策略={strategy.priority}/{strategy.supplier_scope}，GLTG {strategy.lead_time_confidence}="
-            f"{gltg.selected_confidence_days} 天，交期风险={_risk_label_for_user(gltg.deadline_risk_level)}。"
-            f"已生成 {len(routing.selected_supplier_ids)} 封供应商邮件草稿，仍需人工审批后才会发送：{', '.join(drafts_created)}。"
-        )
-
-    return (
-        f"RFQ ready for approval: {requirement.quantity or 'TBD'} {requirement.quantity_unit} "
-        f"{requirement.color} {requirement.product_type or requirement.category} to {requirement.destination or 'TBD'}. "
-        f"Strategy={strategy.priority}/{strategy.supplier_scope}, GLTG {strategy.lead_time_confidence}="
-        f"{gltg.selected_confidence_days} days, deadline risk={gltg.deadline_risk_level}. "
-        f"{len(routing.selected_supplier_ids)} supplier email drafts are pending approval: {', '.join(drafts_created)}."
     )
 
 

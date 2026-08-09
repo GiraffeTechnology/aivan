@@ -160,3 +160,19 @@ def test_production_db_failure_never_degrades_to_memory(monkeypatch, mock_db, op
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"] == "GPM_PERSISTENCE_UNAVAILABLE"
+
+
+def test_production_durable_success_never_populates_memory(monkeypatch, mock_db):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    store = GPMPacketStore(db_client=mock_db)
+    approved = {**SAMPLE, "approval_status": "approved"}
+    mock_db.create_packet.return_value = SAMPLE
+    mock_db.get_packet.return_value = SAMPLE
+    mock_db.update_packet_status.return_value = approved
+
+    assert store.save(SAMPLE) == SAMPLE
+    assert store.get(SAMPLE["packet_id"], tenant_id="default") == SAMPLE
+    assert store.update_status(
+        SAMPLE["packet_id"], "approved", "op-001", tenant_id="default"
+    ) == approved
+    assert store._mem == {}

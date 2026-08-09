@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import traceback
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -18,12 +17,19 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
+from aivan.api.authorization import authorize_draft_action as _authorize_draft_action
+from aivan.api.relay_routes import router as _relay_router
+from aivan.api.serializers import (
+    serialize_draft as _serialize_draft,
+    serialize_preference as _serialize_preference,
+)
 from aivan.api.request_context import (
     RequestContext,
     actor_identity_from_context,
     apply_trusted_identity,
     resolve_request_context,
 )
+from aivan.observability.safe_logging import log_exception_safely
 
 logger = logging.getLogger("aivan.api")
 
@@ -50,8 +56,12 @@ async def lifespan(app: FastAPI):
     try:
         loaded_suppliers = _load_supplier_registry_on_startup()
         logger.info("Loaded %s suppliers into the in-memory registry", loaded_suppliers)
-    except Exception:
-        logger.exception("Failed to load supplier registry from the local database")
+    except Exception as exc:
+        log_exception_safely(
+            logger,
+            "Failed to load supplier registry from the local database",
+            exc=exc,
+        )
     from aivan.platforms.platform_registry import _ensure_init
     _ensure_init()
     from aivan.gpm.router import _init_store as _gpm_init_store, get_db_client
@@ -102,6 +112,7 @@ app.add_middleware(
 )
 
 app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
+app.include_router(_relay_router, tags=["relay"])
 
 
 # OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
@@ -133,13 +144,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     semantics. Explicit HTTPException (401/403/404/409/...) is handled by
     FastAPI's own handler and keeps its status code.
     """
-    logger.error(
-        "Unhandled exception on %s %s: %s: %s\n%s",
-        request.method,
-        request.url.path,
-        type(exc).__name__,
-        exc,
-        traceback.format_exc(),
+    log_exception_safely(
+        logger,
+        "Unhandled API exception",
+        exc=exc,
+        context={"method": request.method, "path": request.url.path},
     )
     if request.url.path not in SKILL_INVOKE_PATHS:
         return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
@@ -405,43 +414,6 @@ async def create_rfq_from_event_api(
     context: RequestContext = Depends(_require_api_key),
 ):
     return await _invoke_application_service(request, db, context)
-
-
-def _authorize_draft_action(
-    *, draft, identity, capability, source_trace_id: str, db: Session
-) -> None:
-    from aivan.db.repositories.domain_repo import CaseDomainRepository
-    from aivan.domain.roles import RoleAuthorizationError, require_capability
-
-    try:
-        require_capability(identity, capability)
-    except RoleAuthorizationError as exc:
-        domain_repo = CaseDomainRepository(db)
-        domain_repo.record_approval(
-            tenant_id=draft.tenant_id,
-            case_id=draft.project_id,
-            draft_id=draft.draft_id,
-            identity=identity,
-            source_trace_id=source_trace_id,
-            status="authorization_rejected",
-            requested_by_actor_id=draft.created_by_actor_id,
-            requested_by_actor_role=draft.created_by_actor_role,
-            rejection_reason=exc.reason,
-        )
-        domain_repo.record_audit(
-            tenant_id=draft.tenant_id,
-            case_id=draft.project_id,
-            event_type="DRAFT_ACTION_REJECTED",
-            identity=identity,
-            source_trace_id=source_trace_id,
-            before={"draft_id": draft.draft_id, "status": draft.status},
-            rejection_reason=exc.reason,
-        )
-        db.commit()
-        raise HTTPException(
-            status_code=403,
-            detail={"error": exc.code, "reason": exc.reason},
-        ) from exc
 
 
 def _do_approve_draft(
@@ -818,282 +790,6 @@ def get_channel_capability_registry(
         "tenant_id": context.tenant_id,
         "capabilities": list_channel_capabilities(),
     }
-
-
-def _serialize_relay_receipt(receipt) -> dict:
-    return {
-        "receipt_id": receipt.receipt_id,
-        "tenant_id": receipt.tenant_id,
-        "draft_id": receipt.draft_id,
-        "case_id": receipt.case_id,
-        "channel": receipt.channel,
-        "channel_account_id": receipt.channel_account_id,
-        "conversation_id": receipt.conversation_id,
-        "external_message_id": receipt.external_message_id,
-        "receipt_reference": receipt.receipt_reference,
-        "confirmed_by": receipt.confirmed_by,
-        "source_trace_id": receipt.source_trace_id,
-        "confirmed_at": str(receipt.confirmed_at),
-    }
-
-
-@app.get("/api/relay/outbox")
-def get_relay_outbox(
-    db: Session = Depends(get_db),
-    context: RequestContext = Depends(_require_api_key),
-):
-    from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
-
-    drafts = DraftRepository(db).list_by_status(
-        "approved_pending_send", tenant_id=context.tenant_id
-    )
-    items = []
-    for draft in drafts:
-        capability = get_channel_capability(draft.channel)
-        if capability.delivery_mode != DeliveryMode.GUIDED_RELAY:
-            continue
-        items.append(
-            {
-                **_serialize_draft(draft),
-                "channel_account_id": draft.channel_account_id,
-                "delivery_mode": capability.delivery_mode.value,
-                "copy_payload": {
-                    "message_text": draft.message_text,
-                    "attachments": draft.attachments_json or [],
-                },
-                "confirm_path": f"/api/relay/{draft.draft_id}/confirm",
-            }
-        )
-    return {"tenant_id": context.tenant_id, "outbox": items, "total": len(items)}
-
-
-@app.post("/api/relay/{draft_id}/confirm")
-def confirm_relay_delivery(
-    draft_id: str,
-    body: dict | None = None,
-    db: Session = Depends(get_db),
-    context: RequestContext = Depends(_require_api_key),
-):
-    from aivan.db.repositories.domain_repo import CaseDomainRepository
-    from aivan.db.repositories.relay_repo import (
-        RelayReceiptRepository,
-        relay_idempotency_key,
-    )
-    from aivan.domain.roles import Capability
-    from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
-
-    payload = body or {}
-    repo = DraftRepository(db)
-    draft = repo.get(draft_id, tenant_id=context.tenant_id)
-    if draft is None:
-        raise HTTPException(
-            status_code=404, detail={"error": "not_found", "draft_id": draft_id}
-        )
-    identity = actor_identity_from_context(context, default_mode="approval")
-    _authorize_draft_action(
-        draft=draft,
-        identity=identity,
-        capability=Capability.SEND_OUTBOUND,
-        source_trace_id=context.trace_id,
-        db=db,
-    )
-    capability = get_channel_capability(draft.channel)
-    if capability.delivery_mode != DeliveryMode.GUIDED_RELAY:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "RELAY_NOT_AVAILABLE",
-                "channel": capability.channel,
-                "delivery_mode": capability.delivery_mode.value,
-            },
-        )
-    if not context.idempotency_key:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "IDEMPOTENCY_KEY_REQUIRED", "header": "Idempotency-Key"},
-        )
-    external_message_id = str(payload.get("external_message_id") or "").strip()
-    receipt_reference = str(payload.get("receipt_reference") or "").strip()
-    if not external_message_id and not receipt_reference:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "RELAY_RECEIPT_REQUIRED",
-                "fields": ["external_message_id", "receipt_reference"],
-            },
-        )
-    metadata = payload.get("metadata") or {}
-    if not isinstance(metadata, dict):
-        raise HTTPException(
-            status_code=400, detail={"error": "INVALID_RECEIPT_METADATA"}
-        )
-
-    receipts = RelayReceiptRepository(db)
-    stored_key = relay_idempotency_key(context.tenant_id, context.idempotency_key)
-    existing_for_key = receipts.get_for_idempotency_key(
-        stored_key, tenant_id=context.tenant_id
-    )
-    if existing_for_key is not None and existing_for_key.draft_id != draft_id:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "IDEMPOTENCY_KEY_REUSED", "draft_id": draft_id},
-        )
-    existing = receipts.get_for_draft(draft_id, tenant_id=context.tenant_id)
-    if existing is not None:
-        return {"status": "sent", "idempotent_replay": True, "receipt": _serialize_relay_receipt(existing)}
-    if draft.status != "approved_pending_send":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "INVALID_DRAFT_STATE",
-                "status": draft.status,
-                "required_status": "approved_pending_send",
-            },
-        )
-
-    receipt, created = receipts.create_or_get(
-        tenant_id=context.tenant_id,
-        draft_id=draft.draft_id,
-        case_id=draft.project_id,
-        channel=capability.channel,
-        channel_account_id=draft.channel_account_id,
-        conversation_id=draft.conversation_id,
-        external_message_id=external_message_id,
-        receipt_reference=receipt_reference,
-        idempotency_key=stored_key,
-        confirmed_by=identity.actor_id,
-        source_trace_id=context.trace_id,
-        metadata_json=metadata,
-    )
-    if not created:
-        if receipt.draft_id != draft_id:
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "IDEMPOTENCY_KEY_REUSED", "draft_id": draft_id},
-            )
-        return {
-            "status": "sent",
-            "idempotent_replay": True,
-            "receipt": _serialize_relay_receipt(receipt),
-        }
-    repo.mark_sent(draft_id)
-    CaseDomainRepository(db).record_audit(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        event_type="RELAY_DELIVERY_CONFIRMED",
-        identity=identity,
-        source_trace_id=context.trace_id,
-        before={"draft_id": draft.draft_id, "status": "approved_pending_send"},
-        after={
-            "draft_id": draft.draft_id,
-            "status": "sent",
-            "receipt_id": receipt.receipt_id,
-        },
-    )
-    db.commit()
-    return {"status": "sent", "idempotent_replay": False, "receipt": _serialize_relay_receipt(receipt)}
-
-
-@app.post("/api/relay/inbound")
-async def relay_inbound(
-    request: Request,
-    db: Session = Depends(get_db),
-    context: RequestContext = Depends(_require_api_key),
-):
-    from aivan.db.repositories.domain_repo import CaseDomainRepository
-    from aivan.db.repositories.inbound_event_repo import (
-        InboundEventRepository,
-        build_inbound_idempotency_key,
-    )
-    from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
-    from aivan.openclaw.event_adapter import parse_openclaw_event
-
-    try:
-        raw = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail={"error": "INVALID_JSON"})
-    if not isinstance(raw, dict):
-        raise HTTPException(status_code=400, detail={"error": "INVALID_RELAY_PAYLOAD"})
-    capability = get_channel_capability(str(raw.get("channel") or ""))
-    if (
-        capability.delivery_mode != DeliveryMode.GUIDED_RELAY
-        or not capability.supports_inbound_relay
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "RELAY_INBOUND_NOT_SUPPORTED",
-                "channel": capability.channel,
-                "delivery_mode": capability.delivery_mode.value,
-            },
-        )
-    if not context.idempotency_key and not str(raw.get("message_id") or "").strip():
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "INBOUND_IDENTITY_REQUIRED",
-                "message": "Provide Idempotency-Key or message_id.",
-            },
-        )
-    binding = {
-        "channel_account_id": context.channel_account_id
-        or str(raw.get("channel_account_id") or "").strip(),
-        "conversation_id": str(raw.get("conversation_id") or "").strip(),
-        "participant_actor_id": context.participant_actor_id
-        or str(raw.get("actor_id") or raw.get("sender_id") or "").strip(),
-    }
-    missing_binding = [key for key, value in binding.items() if not value]
-    if missing_binding:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "RELAY_BINDING_INCOMPLETE",
-                "missing": missing_binding,
-            },
-        )
-    event_data = _normalize_invoke_payload(raw)
-    event_data["source"] = "relay"
-    event_data["channel"] = capability.channel
-    event_data = apply_trusted_identity(event_data, context)
-    event = parse_openclaw_event(event_data)
-    idem_key = build_inbound_idempotency_key(
-        tenant_id=context.tenant_id,
-        source=event.source,
-        channel=event.channel,
-        channel_account_id=event.channel_account_id,
-        conversation_id=event.conversation_id,
-        message_id=event.message_id,
-        explicit_idempotency_key=event.idempotency_key,
-    )
-    replayed = bool(idem_key and InboundEventRepository(db).get(idem_key))
-    result = await _run_skill_event_with_abort(event_data, db, request)
-    if not replayed and isinstance(result, dict):
-        project_id = str(result.get("project_id") or "")
-        if project_id:
-            CaseDomainRepository(db).record_audit(
-                tenant_id=context.tenant_id,
-                case_id=project_id,
-                event_type="RELAY_INBOUND_ACCEPTED",
-                identity=CaseDomainRepository.identity_for_event(event),
-                source_trace_id=context.trace_id,
-                after={
-                    "channel": capability.channel,
-                    "channel_account_id": event.channel_account_id,
-                    "conversation_id": event.conversation_id,
-                    "message_id": event.message_id,
-                },
-            )
-            db.commit()
-    if isinstance(result, dict):
-        return {
-            **result,
-            "tenant_id": context.tenant_id,
-            "trace_id": context.trace_id,
-            "idempotency_key": idem_key or "",
-            "idempotent_replay": replayed,
-            "delivery_mode": capability.delivery_mode.value,
-        }
-    return result
 
 
 @app.get("/api/openclaw/projects/{project_id}/pending-drafts")
@@ -1669,44 +1365,3 @@ def get_account_permissions(account_connection_id: str, db: Session = Depends(ge
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     return {"account_connection_id": account_connection_id, "permissions": account.permissions_json, "allowed_actions": account.allowed_actions_json}
-
-
-def _serialize_draft(d) -> dict:
-    draft_type = ""
-    for part in (d.notes or "").split():
-        if part.startswith("draft_type="):
-            draft_type = part.split("=", 1)[1]
-    return {
-        "draft_id": d.draft_id,
-        "tenant_id": d.tenant_id,
-        "project_id": d.project_id,
-        "conversation_id": d.conversation_id,
-        "channel": d.channel,
-        "channel_account_id": d.channel_account_id,
-        "target_peer_id": d.target_peer_id,
-        "target_role": d.target_role,
-        "message_text": d.message_text,
-        "message_type": d.message_type,
-        "attachments": d.attachments_json or [],
-        "status": d.status,
-        "created_by_agent": d.created_by_agent,
-        "draft_type": draft_type,
-        "approved_by": d.approved_by,
-        "notes": d.notes,
-        "created_at": str(d.created_at),
-        "approved_at": str(d.approved_at) if d.approved_at else None,
-        "sent_at": str(d.sent_at) if d.sent_at else None,
-    }
-
-
-def _serialize_preference(record) -> dict:
-    return {
-        "preference_id": record.preference_id,
-        "user_id": record.user_id,
-        "preference_type": record.preference_type,
-        "value": record.value_json,
-        "source": record.source,
-        "confidence": record.confidence,
-        "created_at": str(record.created_at),
-        "updated_at": str(record.updated_at),
-    }
