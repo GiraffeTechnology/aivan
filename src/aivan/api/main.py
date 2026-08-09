@@ -579,10 +579,22 @@ def _do_approve_draft(
 
     from aivan.openclaw.outbound_approval import send_if_approved
     response = send_if_approved(draft_id, db)
+    final_draft = repo.get(draft_id, tenant_id=context.tenant_id)
+    final_status = final_draft.status if final_draft is not None else "send_failed"
+    CaseDomainRepository(db).record_audit(
+        tenant_id=draft.tenant_id,
+        case_id=draft.project_id,
+        event_type="DRAFT_SENT" if response.success else "DRAFT_SEND_FAILED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={"draft_id": draft.draft_id, "status": "approved"},
+        after={"draft_id": draft.draft_id, "status": final_status},
+        rejection_reason="" if response.success else "outbound_transport_failed",
+    )
     db.commit()
     return {
         "draft_id": draft_id,
-        "status": "sent" if response.success else "approved",
+        "status": final_status,
         "sent": response.success,
         "relay_required": False,
         "delivery_mode": channel_capability.delivery_mode.value,

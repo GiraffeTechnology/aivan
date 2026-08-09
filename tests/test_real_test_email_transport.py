@@ -61,7 +61,7 @@ def test_real_test_email_blocks_unapproved_recipient(db_session, monkeypatch):
     assert result.success is False
     assert "allowlisted" in (result.error or "")
     assert calls["smtp"] == 0
-    assert DraftRepository(db_session).get(draft_id).status == "approved"
+    assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
 
 def test_real_test_email_requires_openclaw_gateway_marker(db_session, monkeypatch):
@@ -81,6 +81,7 @@ def test_real_test_email_requires_openclaw_gateway_marker(db_session, monkeypatc
     assert result.success is False
     assert "AIVAN_EMAIL_GATEWAY" in (result.error or "")
     assert calls["smtp"] == 0
+    assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
 
 def test_real_test_email_allows_mich_giraffe_technology_only(db_session, monkeypatch):
@@ -146,6 +147,7 @@ def test_real_test_email_blocks_multiple_recipients(db_session, monkeypatch):
     assert result.success is False
     assert "exactly one recipient" in (result.error or "")
     assert calls["smtp"] == 0
+    assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
 
 def test_real_test_email_blocks_sender_username_mismatch(db_session, monkeypatch):
@@ -165,6 +167,7 @@ def test_real_test_email_blocks_sender_username_mismatch(db_session, monkeypatch
     assert result.success is False
     assert "sender must match SMTP username" in (result.error or "")
     assert calls["smtp"] == 0
+    assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
 
 def test_email_secrets_not_logged(monkeypatch):

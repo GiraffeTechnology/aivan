@@ -32,7 +32,13 @@ def _verify_hmac(token: str, secret: str) -> Optional[str]:
         return None
 
 
-def _verify_tenant_active(tenant_id: str, db_client) -> bool:
+def _is_production() -> bool:
+    return os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
+
+
+def _verify_tenant_active(
+    tenant_id: str, db_client, *, fail_closed: bool = False
+) -> bool:
     from aivan.gpm.giraffe_db_client import GiraffeDBClientError
 
     try:
@@ -53,20 +59,64 @@ def _verify_tenant_active(tenant_id: str, db_client) -> bool:
     except HTTPException:
         raise
     except GiraffeDBClientError as exc:
-        logger.warning(
-            "giraffe-db unavailable for tenant verification (%s) — HMAC-only fallback", exc
-        )
+        if fail_closed:
+            logger.error("giraffe-db unavailable for production tenant verification")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "TENANT_VERIFICATION_UNAVAILABLE",
+                    "message": "tenant verification is temporarily unavailable",
+                },
+            ) from exc
+        logger.warning("giraffe-db unavailable — local HMAC-only compatibility mode")
         return True
 
 
 def make_require_auth(db_client=None):
     async def require_auth(request: Request) -> str:
+        production = _is_production()
         secret = os.environ.get("AIVAN_AUTH_SECRET", "")
+        if production and db_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "GPM_PERSISTENCE_MISCONFIGURED",
+                    "message": "production GPM requires giraffe-db",
+                },
+            )
+
+        # Production accepts the shared AIVAN request-context profiles
+        # (deployment API key or tenant-key map).  HMAC remains a supported GPM
+        # profile, but only with a live tenant lookup and an optional deployment
+        # tenant binding.  A caller-supplied X-Tenant-ID is never trusted by
+        # itself in production.
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+        hmac_tenant = _verify_hmac(token, secret) if production and secret and token else None
+        if production and hmac_tenant is not None:
+            deployment_tenant = os.environ.get("AIVAN_TENANT_ID", "").strip()
+            requested_tenant = (
+                request.headers.get("X-AIVAN-Tenant-ID", "").strip()
+                or request.headers.get("X-Tenant-ID", "").strip()
+            )
+            if deployment_tenant and hmac_tenant != deployment_tenant:
+                raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
+            if requested_tenant and requested_tenant != hmac_tenant:
+                raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
+            _verify_tenant_active(hmac_tenant, db_client, fail_closed=True)
+            return hmac_tenant
+
+        if production:
+            from aivan.api.request_context import resolve_request_context
+
+            context = resolve_request_context(request)
+            _verify_tenant_active(context.tenant_id, db_client, fail_closed=True)
+            return context.tenant_id
+
         if not secret:
             tenant_id = request.headers.get("X-Tenant-ID", "default")
             logger.warning("AIVAN_AUTH_SECRET not set — dev mode, tenant_id=%s", tenant_id)
             return tenant_id
-        auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=401,

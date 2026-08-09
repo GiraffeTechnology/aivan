@@ -45,3 +45,45 @@ class TestMainAppGPMAuthWiring:
         assert hasattr(main_app_client.app.state, "giraffe_db_client")
         # No GIRAFFE_DB_BASE_URL -> db_client is None
         assert main_app_client.app.state.giraffe_db_client is None
+
+
+def test_production_gpm_route_rejects_forged_tenant_without_credentials(monkeypatch):
+    """Regression for the audited unauthenticated cross-tenant write."""
+
+    class FakeGiraffeDBClient:
+        def __init__(self, base_url: str):
+            self.base_url = base_url
+
+        def check_schema_version(self):
+            return None
+
+        def get_tenant(self, tenant_id: str):
+            return {"tenant_id": tenant_id, "status": "active"}
+
+        def create_packet(self, packet: dict, tenant_id: str | None = None):
+            return dict(packet)
+
+        def list_packets(self, tenant_id: str, status: str | None = None):
+            return []
+
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "deployment-key")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-prod")
+    monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.invalid")
+    monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "mock")
+    monkeypatch.delenv("AIVAN_AUTH_SECRET", raising=False)
+    monkeypatch.setattr(
+        "aivan.gpm.giraffe_db_client.GiraffeDBClient", FakeGiraffeDBClient
+    )
+
+    from aivan.api.main import app
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/gpm/quote-guidance",
+            headers={"X-Tenant-ID": "attacker-tenant"},
+            json={"sku": "SKU-1", "supplier_quote": 10.0},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "TENANT_MISMATCH"

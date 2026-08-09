@@ -169,6 +169,28 @@ def test_api_approve_pending_draft_succeeds(api_client, api_db):
     assert resp.status_code not in (404, 409), resp.json()
 
 
+def test_api_send_failure_is_recoverable_and_never_left_approved(
+    api_client, api_db, monkeypatch
+):
+    from aivan.openclaw import outbound_approval
+    from aivan.openclaw.contracts import OpenClawSendResponse
+
+    class FailingClient:
+        def send_message(self, _request):
+            return OpenClawSendResponse(success=False, error="temporary transport failure")
+
+    monkeypatch.setattr(outbound_approval, "get_openclaw_client", lambda: FailingClient())
+    draft_id = _api_create_draft(api_db)
+
+    resp = api_client.post(f"/api/openclaw/drafts/{draft_id}/approve", json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "send_failed"
+    assert resp.json()["sent"] is False
+    api_db.expire_all()
+    assert DraftRepository(api_db).get(draft_id).status == "send_failed"
+
+
 def test_api_approve_rejected_draft_returns_409(api_client, api_db):
     draft_id = _api_create_draft(api_db)
     repo = DraftRepository(api_db)

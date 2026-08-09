@@ -633,7 +633,7 @@ def test_counterparty_personal_im_draft_cannot_be_sent(api_db):
 
     assert result.success is False
     assert "channel policy blocks" in (result.error or "")
-    assert repo.get(draft.draft_id).status == "approved"
+    assert repo.get(draft.draft_id).status == "send_failed"
 
 
 # ── P2 acceptance tests ───────────────────────────────────────────────────────

@@ -74,6 +74,38 @@ def test_deployment_workflow_is_quarantined_and_has_no_remote_mutation():
     assert "remote_connections_opened: \\`false\\`" in workflow
 
 
+def test_ctyun_document_is_non_executable_and_preserves_infrastructure_constraints():
+    notice = (ROOT / "docs" / "DEPLOYMENT_CTYUN.md").read_text(encoding="utf-8")
+    forbidden = (
+        "git fetch",
+        "git reset --hard",
+        "ollama pull",
+        "ollama rm",
+        "systemctl restart",
+        "systemctl stop",
+        "systemctl start",
+    )
+    assert all(token not in notice for token in forbidden)
+    assert "abcdyi-sin" in notice
+    assert "443" in notice and "8443" in notice
+    assert "qwen3.5:9b" in notice
+    assert "NO DEPLOYMENT AUTHORIZED" in notice
+
+
+def test_production_template_documents_fail_closed_identity_and_persistence():
+    template = (ROOT / "deploy" / "aivan.production.env.example").read_text(
+        encoding="utf-8"
+    )
+    assert "AIVAN_TENANT_ID=" in template
+    assert "AIVAN_TENANT_API_KEYS={}" in template
+    assert "AIVAN_CORS_ORIGINS=" in template
+    assert "AIVAN_DB_URL=" in template
+    assert "GIRAFFE_DB_BASE_URL=" in template
+    assert "OLLAMA_MODEL=qwen3.5:9b" in template
+    assert "fails startup" in template
+    assert "fail closed" in template
+
+
 def test_dashboard_interpolations_escape_api_data_and_auth_is_session_scoped():
     script = (ROOT / "src" / "aivan" / "app" / "static" / "app.js").read_text(
         encoding="utf-8"

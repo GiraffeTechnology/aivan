@@ -251,7 +251,17 @@ retryable, evidence_digest`。
 - [x] Demo UI 的 API 数据插值转义、ID 编码、凭据仅保存于 sessionStorage；
 - [x] “Approve & Send”拆分为准确的审批/relay/delivery 结果；
 - [x] Windows 文档契约测试显式 UTF-8；
-- [ ] Claude Code 对本 PR 的 P0 路径做交叉 CI/评审。
+- [x] Claude Code 对 PR #59 的 P0 路径完成交叉 CI/评审。
+
+Stage 7A.1 复审增补（PR #59 合并后发现）：
+
+- [x] GPM 生产认证复用可信请求上下文，禁止仅凭 `X-Tenant-ID` 写入；
+- [x] 生产 GPM 在 giraffe-db 缺失、不可用或非 durable 时失败关闭；
+- [x] 实际审批 API 的发送失败落入 `send_failed` 并可重试；
+- [x] 数据库默认名统一为 `aivan.db`，旧 `aiven.db` 兼容且双文件歧义失败关闭；
+- [x] 生产模板补齐租户、CORS、显式数据库、GPM 持久化与 qwen3.5:9b 现场值；
+- [x] 旧 CTYun 执行手册替换为无命令 quarantine notice；
+- [ ] Stage 7A.1 PR 由另一执行方完成交叉 CI/评审。
 
 验收：新增安全回归测试通过；代码中不存在 Harness `assistantTexts: [replyText]`；
 部署 workflow 不含 SSH/Secret/远端变更；默认生产 CORS 无 wildcard。
