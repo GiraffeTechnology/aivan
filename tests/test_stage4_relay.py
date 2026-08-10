@@ -105,7 +105,7 @@ def test_guided_relay_approval_outbox_confirmation_and_audit(relay_api):
         json={"receipt_reference": "wechat-screen-1"},
     )
     assert confirmed.status_code == 200
-    assert confirmed.json()["status"] == "sent"
+    assert confirmed.json()["status"] == "relayed"
     assert confirmed.json()["idempotent_replay"] is False
 
     replay = client.post(
@@ -117,7 +117,7 @@ def test_guided_relay_approval_outbox_confirmation_and_audit(relay_api):
     assert replay.json()["idempotent_replay"] is True
     assert replay.json()["receipt"]["receipt_id"] == confirmed.json()["receipt"]["receipt_id"]
     assert db.query(RelayReceiptRecord).count() == 1
-    assert DraftRepository(db).get(draft.draft_id).status == "sent"
+    assert DraftRepository(db).get(draft.draft_id).status == "relayed"
     assert db.query(AuditLogRecord).filter(
         AuditLogRecord.event_type == "RELAY_DELIVERY_CONFIRMED"
     ).count() == 1
@@ -249,5 +249,5 @@ def test_wechat_guided_relay_acceptance_runs_five_consecutive_times(relay_api):
             json={"receipt_reference": f"manual-proof-{run}"},
         )
         assert confirmed.status_code == 200, f"run {run}: confirmation failed"
-        assert confirmed.json()["status"] == "sent"
+        assert confirmed.json()["status"] == "relayed"
     assert db.query(RelayReceiptRecord).count() == 5

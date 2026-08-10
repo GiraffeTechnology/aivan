@@ -96,6 +96,18 @@ class DraftRepository:
             self.db.flush()
         return d
 
+    def mark_relayed(self, draft_id: str) -> InquiryDraftRecord | None:
+        """Record human-confirmed guided relay without claiming an API send."""
+        d = self.get(draft_id)
+        if d:
+            d.status = "relayed"
+            # The existing timestamp is the terminal delivery timestamp for both
+            # adapter sends and human-confirmed relays; the status distinguishes
+            # the two delivery mechanisms.
+            d.sent_at = datetime.now(timezone.utc)
+            self.db.flush()
+        return d
+
     def mark_approved_pending_send(self, draft_id: str, approved_by: str = "user") -> InquiryDraftRecord | None:
         """Transition a pending_approval draft to approved_pending_send.
 

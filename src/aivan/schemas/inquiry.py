@@ -6,6 +6,7 @@ class DraftStatus(str, Enum):
     approved = "approved"
     rejected = "rejected"
     sent = "sent"
+    relayed = "relayed"
     failed = "failed"
 
 class InquiryDraft(BaseModel):

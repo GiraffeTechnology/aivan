@@ -151,6 +151,52 @@ jobs:
       - name: Gateway harness E2E (against the just-built dist/)
         run: npm test
 
+  quality:
+    name: Coverage, lint, typing, and static security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv==0.7.22
+
+      - name: Install frozen dependencies
+        run: uv sync --frozen
+
+      - name: Enforce module size budgets
+        run: uv run python scripts/check_module_size_budget.py
+
+      - name: Ruff lint
+        run: uvx --from ruff==0.12.4 ruff check src scripts tests
+
+      - name: Mypy safety-boundary type checks
+        run: >-
+          uvx --from mypy==1.17.0 mypy
+          src/aivan/observability/safe_logging.py
+          src/aivan/api/authorization.py
+          src/aivan/api/serializers.py
+          src/aivan/api/relay_routes.py
+          src/aivan/execution/rfq_user_control.py
+          src/aivan/gpm/packet_store.py
+
+      - name: Bandit high-severity security scan
+        run: uvx --from bandit==1.8.6 bandit -q -lll -r src/aivan
+
+      - name: Coverage floor
+        env:
+          AIVAN_LLM_PROVIDER: mock
+          OPENCLAW_MOCK_MODE: "true"
+          AIVAN_DB_URL: "sqlite:///:memory:"
+          AIVAN_REQUIRE_HUMAN_APPROVAL: "true"
+        run: >-
+          uv run --with pytest-cov==6.2.1 pytest --tb=short -q
+          --cov=aivan --cov-report=term-missing --cov-fail-under=75
+
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'

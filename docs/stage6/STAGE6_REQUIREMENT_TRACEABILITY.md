@@ -1,6 +1,6 @@
 # Stage 6 requirement-to-evidence matrix
 
-Baseline: `main@e576e8c7d209c1a6c31dc7712e42a8f5d83c6ca7`.
+Baseline reconciled 2026-08-10: `main@61e456688952cda6e09574b33413b4eb1f84aac3`.
 `automated_preflight` never substitutes for current-candidate production evidence.
 
 | Requirement / gate | Current implementation | Automated evidence | Production evidence | Status at Stage 6 start |
@@ -13,7 +13,7 @@ Baseline: `main@e576e8c7d209c1a6c31dc7712e42a8f5d83c6ca7`.
 | FR-070 MyAIVAN | no approved shared-Core UI delivery | none for complete workbench | UI 5/5 and accessibility evidence | **not delivered (Stage 5B/5D)** |
 | FR-080 Plugin/SKILL | versioned plugin, SKILL, six tools | plugin/Gateway harness | current OpenClaw staging 5/5 | implementation present; current staging evidence pending |
 | FR-090 Email / LINE | capability mode exists | transport tests are not full current-candidate proof | provider receipts and failure/retry 5/5 | **Stage 5C not delivered** |
-| FR-110 correction | impact/reverse and immutable ledger | Stage 5A suite; all 7 blockers required | UI correction + compensation 5/5 | Core present; blocker fast-follow in Stage 6A |
+| FR-110 correction | impact/reverse and immutable ledger | Stage 5A suite; all 7 blocker codes covered | UI correction + compensation 5/5 | Core and blocker coverage present; downstream invalidation/correction draft still pending |
 | FR-121 Token Guard | centralized local-model guard | `test_llm_token_guard.py` | AIVAN Qwen/Ollama capacity run | automated present; production benchmark pending |
 | backup and restore | backup locations/config are operational concerns | no repository test can prove live recovery | approved isolated restore drill | pending |
 | CTYun routing | existing `abcdyi-sin` bridge required | static documentation guard | route/service evidence | pending; all non-China paths must use bridge |
