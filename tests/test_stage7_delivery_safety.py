@@ -99,6 +99,10 @@ def test_production_template_documents_fail_closed_identity_and_persistence():
     assert "AIVAN_TENANT_ID=" in template
     assert "AIVAN_TENANT_API_KEYS={}" in template
     assert "AIVAN_CORS_ORIGINS=" in template
+    assert "AIVAN_UI_SESSION_SECRET=" in template
+    assert "AIVAN_UI_ALLOWED_ROLES=" in template
+    assert "AIVAN_CANDIDATE_SHA=" in template
+    assert "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin" in template
     assert "AIVAN_DB_URL=" in template
     assert "GIRAFFE_DB_BASE_URL=" in template
     assert "OLLAMA_MODEL=qwen3.5:9b" in template
@@ -114,8 +118,10 @@ def test_dashboard_interpolations_escape_api_data_and_auth_is_session_scoped():
         encoding="utf-8"
     )
     assert "function escapeHtml" in script
-    assert "sessionStorage" in script
+    assert "sessionStorage" not in script
     assert "localStorage" not in script
+    assert "/api/session/login" in script
+    assert "keyInput.value = ''" in script
     assert "Approve & Send" not in script
     assert "all data stays on your machine" not in page.lower()
 

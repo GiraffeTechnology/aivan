@@ -76,9 +76,13 @@ def test_production_gpm_route_rejects_forged_tenant_without_credentials(monkeypa
         "aivan.gpm.giraffe_db_client.GiraffeDBClient", FakeGiraffeDBClient
     )
 
-    from aivan.api.main import app
+    from aivan.api import main
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    # This regression targets tenant authentication, using the suite's
+    # isolated database. Production schema startup has dedicated tests.
+    monkeypatch.setattr(main, "init_db", lambda: None)
+
+    with TestClient(main.app, raise_server_exceptions=False) as client:
         response = client.post(
             "/api/gpm/quote-guidance",
             headers={"X-Tenant-ID": "attacker-tenant"},

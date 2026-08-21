@@ -19,6 +19,9 @@ from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
 from aivan.api.authorization import authorize_draft_action as _authorize_draft_action
 from aivan.api.relay_routes import router as _relay_router
+from aivan.api.session_routes import router as _session_router
+from aivan.api.security_headers import add_security_headers
+from aivan.api.workbench_routes import router as _workbench_router
 from aivan.api.serializers import (
     serialize_draft as _serialize_draft,
     serialize_preference as _serialize_preference,
@@ -30,6 +33,8 @@ from aivan.api.request_context import (
     resolve_request_context,
 )
 from aivan.observability.safe_logging import log_exception_safely
+from aivan.observability.metrics import record_request_metrics, router as _metrics_router
+from aivan.observability.readiness import router as _readiness_router
 
 logger = logging.getLogger("aivan.api")
 
@@ -98,6 +103,7 @@ app.add_middleware(
         "Content-Type",
         "Idempotency-Key",
         "X-AIVAN-API-Key",
+        "X-AIVAN-CSRF",
         "X-AIVAN-Actor-ID",
         "X-AIVAN-Channel-Account-ID",
         "X-AIVAN-Conversation-Role",
@@ -113,6 +119,14 @@ app.add_middleware(
 
 app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 app.include_router(_relay_router, tags=["relay"])
+app.include_router(_session_router)
+app.include_router(_workbench_router)
+app.include_router(_metrics_router)
+app.include_router(_readiness_router)
+
+
+app.middleware("http")(add_security_headers)
+app.middleware("http")(record_request_metrics)
 
 
 # OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
@@ -372,7 +386,11 @@ def health():
 @app.get("/app", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def serve_app(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "title": "AIVAN"})
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"title": "AIVAN"},
+    )
 
 
 @app.post("/invoke")

@@ -53,6 +53,8 @@ def client(monkeypatch):
     monkeypatch.setenv("AIVAN_API_KEY", "stage1-secret")
     monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-a")
     monkeypatch.delenv("AIVAN_TENANT_API_KEYS", raising=False)
+    # Schema-startup behavior is tested by the migration-orchestrator suite.
+    monkeypatch.setattr(main, "init_db", lambda: None)
     main.app.dependency_overrides[main.get_db] = override_db
     with TestClient(main.app, raise_server_exceptions=False) as test_client:
         yield test_client

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "id": "aivan-trade-sourcing",
+  "intentBoundary": "intent-boundary.json",
+  "skill": {
+    "slug": "aivan-trade-salesperson",
+    "invocation": "$aivan-trade-salesperson",
+    "selection": "first-when-intent-matches"
+  },
+  "agentHarness": {
+    "id": "openclaw-aivan",
+    "outsideBoundary": "explicit-pass-through"
+  },
+  "outbound": {
+    "authorization": "required",
+    "automaticReply": false
+  }
+}

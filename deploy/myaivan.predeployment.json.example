@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "profile": "ctyun-aivan-myaivan",
+  "cloud": "ctyun-cn",
+  "install_path": "/opt/giraffe/aivan",
+  "service_name": "myaivan.service",
+  "bind_host": "127.0.0.1",
+  "bind_port": 8765,
+  "database_profile": "sqlite:///./data/aivan.db",
+  "non_china_egress_bridge": "abcdyi-sin",
+  "protected_port_owners": {
+    "443": "nginx",
+    "8443": "stalwart"
+  },
+  "reverse_bridge": {
+    "remote_host_profile": "abcdyi-sin",
+    "remote_bind": "127.0.0.1",
+    "remote_port": 18765,
+    "health_path": "/health"
+  },
+  "expected_local_model": "qwen3.5:9b",
+  "observations": {
+    "target_path_verified": false,
+    "service_identity_verified": false,
+    "service_health_ok": false,
+    "bridge_active": false,
+    "bridge_health_ok": false,
+    "protected_ports_preserved": false,
+    "database_profile_verified": false,
+    "language_provider_real": false,
+    "outbound_render_verified": false,
+    "proofreading_boundary_verified": false
+  },
+  "observation_digests": {
+    "target_path_verified": "",
+    "service_identity_verified": "",
+    "service_health_ok": "",
+    "bridge_active": "",
+    "bridge_health_ok": "",
+    "protected_ports_preserved": "",
+    "database_profile_verified": "",
+    "language_provider_real": "",
+    "outbound_render_verified": "",
+    "proofreading_boundary_verified": ""
+  }
+}

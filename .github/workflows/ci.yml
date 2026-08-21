@@ -183,6 +183,13 @@ jobs:
           src/aivan/api/relay_routes.py
           src/aivan/execution/rfq_user_control.py
           src/aivan/gpm/packet_store.py
+          src/aivan/api/session_auth.py
+          src/aivan/api/session_routes.py
+          src/aivan/api/workbench_routes.py
+          src/aivan/db/schema_validation.py
+          src/aivan/observability/metrics.py
+          src/aivan/observability/readiness.py
+          scripts/run_stage7f_predeployment.py
 
       - name: Bandit high-severity security scan
         run: uvx --from bandit==1.8.6 bandit -q -lll -r src/aivan

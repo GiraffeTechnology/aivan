@@ -81,7 +81,9 @@ def _tenant_key_map() -> dict[str, str]:
     return {key.strip(): value.strip() for key, value in parsed.items()}
 
 
-def resolve_request_context(request: Request) -> RequestContext:
+def resolve_request_context(
+    request: Request, *, allow_ui_session: bool = True
+) -> RequestContext:
     """Authenticate the caller and resolve trusted tenant/trace identity."""
 
     environment = os.environ.get("AIVAN_ENV", "local").strip().lower()
@@ -119,7 +121,18 @@ def resolve_request_context(request: Request) -> RequestContext:
         if authorization.lower().startswith("bearer "):
             provided = authorization[7:].strip()
 
-    if configured:
+    session = None
+    if allow_ui_session and not provided:
+        from aivan.api.session_auth import read_ui_session, require_session_csrf
+
+        session = read_ui_session(request)
+        if session is not None:
+            require_session_csrf(request, session)
+            if tenant_id and session.tenant_id != tenant_id:
+                raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
+            tenant_id = session.tenant_id
+
+    if configured and session is None:
         if not provided:
             raise HTTPException(
                 status_code=401,
@@ -156,7 +169,9 @@ def resolve_request_context(request: Request) -> RequestContext:
     idempotency_key = _safe_identifier(
         _header(request, "Idempotency-Key"), field="idempotency_key"
     )
-    if tenant_keys:
+    if session is not None:
+        authorization_basis = "ui_session"
+    elif tenant_keys:
         authorization_basis = "tenant_api_key"
     elif api_key:
         authorization_basis = "deployment_api_key"
@@ -165,14 +180,22 @@ def resolve_request_context(request: Request) -> RequestContext:
     else:
         authorization_basis = "local_compatibility"
 
+    header_actor_id = _safe_identifier(_header(request, "X-AIVAN-Actor-ID"), field="actor_id")
+    header_role = _safe_identifier(
+        _header(request, "X-AIVAN-Role-Context"), field="role_context"
+    )
+    if session is not None:
+        if header_actor_id and header_actor_id != session.actor_id:
+            raise HTTPException(status_code=403, detail={"error": "ACTOR_MISMATCH"})
+        if header_role and header_role != session.role:
+            raise HTTPException(status_code=403, detail={"error": "ROLE_MISMATCH"})
+
     context = RequestContext(
         tenant_id=tenant_id,
         trace_id=trace_id,
         idempotency_key=idempotency_key,
-        actor_id=_safe_identifier(_header(request, "X-AIVAN-Actor-ID"), field="actor_id"),
-        role_context=_safe_identifier(
-            _header(request, "X-AIVAN-Role-Context"), field="role_context"
-        ),
+        actor_id=session.actor_id if session is not None else header_actor_id,
+        role_context=session.role if session is not None else header_role,
         conversation_role=_safe_identifier(
             _header(request, "X-AIVAN-Conversation-Role"), field="conversation_role"
         ),

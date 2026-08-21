@@ -14,11 +14,23 @@ Evidence: PR #58 established the runner and digest-only evidence; PR #59 added
 candidate CI execution; PR #60 passed 6/6 CI and Claude Code cross-review before
 merge. These automated gates are not production acceptance.
 
+## Stage 7B–7E candidate under review
+
+The `codex/stage7b-myaivan-workbench` candidate adds a trusted HttpOnly UI
+session, role projections, workbench APIs/UI, digest-only message evidence,
+schema validation and migration orchestration, readiness/metrics, security
+headers and CodeQL. Local evidence is 797 passed / 2 skipped with 81.52%
+coverage, plus Ruff, 12-file Mypy and Bandit gates. This is a candidate, not a
+merged release or production acceptance.
+
 ## Required before candidate freeze
 
-- [ ] Stage 5B MyAIVAN shared-Core API
+- [ ] Stage 5B MyAIVAN shared-Core API (candidate implements the workbench
+  aggregate API; separately paginated child collections and attachment storage
+  remain)
 - [ ] Stage 5C Email/LINE controlled adapters and real receipts
-- [ ] Stage 5D MyAIVAN operator UI
+- [ ] Stage 5D MyAIVAN operator UI (responsive candidate implemented; real
+  device end-to-end and attachment upload recovery remain)
 - [ ] current-main transfer card and attachment placeholder evidence
 
 ## Production acceptance

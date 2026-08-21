@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 @pytest.fixture
 def client_and_session(monkeypatch):
-    from aivan.api.main import app, get_db
+    from aivan.api import main
     from aivan.db.models import Base
 
     engine = create_engine(
@@ -31,10 +31,13 @@ def client_and_session(monkeypatch):
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.setenv("AIVAN_API_KEY", "stage1-secret")
     monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-a")
-    app.dependency_overrides[get_db] = override_db
-    with TestClient(app, raise_server_exceptions=False) as client:
+    # This suite exercises production authorization against its own fully
+    # bootstrapped database. Schema-startup behavior is covered separately.
+    monkeypatch.setattr(main, "init_db", lambda: None)
+    main.app.dependency_overrides[main.get_db] = override_db
+    with TestClient(main.app, raise_server_exceptions=False) as client:
         yield client, Session
-    app.dependency_overrides.clear()
+    main.app.dependency_overrides.clear()
     engine.dispose()
 
 
