@@ -19,6 +19,7 @@ from aivan.openclaw.contracts import OpenClawEvent
 @pytest.fixture
 def workbench(monkeypatch):
     monkeypatch.setenv("AIVAN_API_KEY", "test-deployment-key")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "test_tenant")
     monkeypatch.setenv("AIVAN_UI_SESSION_SECRET", "s" * 48)
     monkeypatch.setenv("AIVAN_UI_ACTOR_ID", "operator-1")
     monkeypatch.setenv("AIVAN_UI_ALLOWED_ROLES", "admin,buyer,approver,auditor")
@@ -295,3 +296,16 @@ def test_session_cookie_writer_rejects_unvalidated_values():
             "unsafe; value",
             int(time.time()) + 60,
         )
+
+
+def test_production_ui_login_requires_deployment_bound_tenant(monkeypatch):
+    from fastapi import HTTPException
+
+    from aivan.api.session_routes import _configured_ui_tenant
+
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.delenv("AIVAN_TENANT_ID", raising=False)
+    with pytest.raises(HTTPException) as raised:
+        _configured_ui_tenant()
+    assert raised.value.status_code == 503
+    assert raised.value.detail["error"] == "UI_TENANT_MISCONFIGURED"
