@@ -1,7 +1,7 @@
 # Stage 7F production-predeployment runbook
 
-Status: candidate procedure; **not production acceptance**  
-Target: CTYun AIVAN `/opt/giraffe/aivan`, `myaivan.service`, `127.0.0.1:8765`  
+Status: candidate procedure; **not production acceptance**
+Target: CTYun AIVAN `/opt/giraffe/aivan`, `myaivan.service`, `127.0.0.1:8765`
 Public route: `myaivan.com` through the existing `abcdyi-sin` bridge
 
 ## Non-negotiable safety boundary

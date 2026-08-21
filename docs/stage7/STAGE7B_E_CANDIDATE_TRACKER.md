@@ -1,6 +1,6 @@
 # Stage 7B–7E myAIVAN candidate tracker
 
-Status date: 2026-08-20  
+Status date: 2026-08-20
 Status: **code candidate; not merged, deployed, or production accepted**
 
 ## Delivered in the candidate

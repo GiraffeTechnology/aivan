@@ -120,4 +120,3 @@ def _translated_text(data: dict[str, Any]) -> str:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return ""
-
