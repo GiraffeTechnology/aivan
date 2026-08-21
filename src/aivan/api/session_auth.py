@@ -79,8 +79,19 @@ def _configured_identity() -> tuple[str, tuple[str, ...], str]:
 
 def configured_ui_identity(requested_role: str = "") -> tuple[str, tuple[str, ...], str]:
     actor_id, roles, default_role = _configured_identity()
-    role = requested_role.strip().lower() or default_role
-    if role not in roles:
+    requested = requested_role.strip().lower()
+    if requested:
+        role = next(
+            (
+                configured_role
+                for configured_role in roles
+                if hmac.compare_digest(requested, configured_role)
+            ),
+            "",
+        )
+    else:
+        role = default_role
+    if not role:
         raise HTTPException(status_code=403, detail={"error": "ROLE_SWITCH_FORBIDDEN"})
     return actor_id, roles, role
 
@@ -99,10 +110,10 @@ def issue_ui_session(
         "csrf_digest": hashlib.sha256(csrf_token.encode("utf-8")).hexdigest(),
         "expires_at": expires_at,
     }
-    encoded = _b64encode(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded = _b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    signature = _b64encode(
+        hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
     )
-    signature = _b64encode(hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest())
     return f"{encoded}.{signature}", csrf_token, expires_at
 
 

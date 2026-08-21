@@ -309,3 +309,15 @@ def test_production_ui_login_requires_deployment_bound_tenant(monkeypatch):
         _configured_ui_tenant()
     assert raised.value.status_code == 503
     assert raised.value.detail["error"] == "UI_TENANT_MISCONFIGURED"
+
+
+def test_requested_role_is_canonicalized_from_server_allowlist(monkeypatch):
+    from aivan.api.session_auth import configured_ui_identity
+
+    monkeypatch.setenv("AIVAN_UI_ACTOR_ID", "operator-1")
+    monkeypatch.setenv("AIVAN_UI_ALLOWED_ROLES", "admin,buyer")
+    monkeypatch.setenv("AIVAN_UI_DEFAULT_ROLE", "admin")
+    actor_id, roles, role = configured_ui_identity("BUYER")
+    assert actor_id == "operator-1"
+    assert roles == ("admin", "buyer")
+    assert role == roles[1]
