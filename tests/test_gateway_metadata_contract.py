@@ -92,6 +92,7 @@ def test_package_entry_points_resolve_to_committed_dist():
     assert (PLUGIN_DIR / "dist" / "index.js").is_file(), "committed dist/index.js missing"
     assert (PLUGIN_DIR / "dist" / "index.d.ts").is_file(), "committed dist/index.d.ts missing"
     assert (PLUGIN_DIR / "dist" / "intent-boundary.json").is_file(), "runtime intent boundary missing"
+    assert (PLUGIN_DIR / "dist" / "workflow.json").is_file(), "runtime workflow contract missing"
 
 
 def test_openclaw_extensions_point_to_dist_entry():
@@ -142,6 +143,33 @@ def test_skill_and_harness_share_intent_boundary_and_pass_through():
     assert "outside trade-sourcing boundary" in source
     assert "intent-boundary.json" in skill
     assert "explicit pass-through" in skill
+
+
+def test_workflow_prioritizes_aivan_skill_without_expanding_authority():
+    workflow_path = PLUGIN_DIR / "workflow.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    source = (PLUGIN_DIR / "index.ts").read_text(encoding="utf-8")
+    skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    readme = (PLUGIN_DIR / "README.md").read_text(encoding="utf-8")
+
+    assert workflow["intentBoundary"] == "intent-boundary.json"
+    assert workflow["skill"] == {
+        "slug": "aivan-trade-salesperson",
+        "invocation": "$aivan-trade-salesperson",
+        "selection": "first-when-intent-matches",
+    }
+    assert workflow["agentHarness"]["id"] == "openclaw-aivan"
+    assert workflow["agentHarness"]["outsideBoundary"] == "explicit-pass-through"
+    assert workflow["outbound"] == {
+        "authorization": "required",
+        "automaticReply": False,
+    }
+    assert 'from "./workflow.json"' not in source
+    assert "Use this skill first" in skill
+    assert "provider/model facts rather than the inbound prompt" in readme
+    assert "$aivan-trade-salesperson" in skill
+    assert "$aivan-trade-salesperson" in readme
+    assert (PLUGIN_DIR / "dist" / "workflow.json").read_bytes() == workflow_path.read_bytes()
 
 
 # ── Entrypoint contract: registerAgentHarness via default plugin entry ───────

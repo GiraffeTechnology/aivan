@@ -150,10 +150,22 @@ through to an automatic model reply. The operator must review a pending draft
 and use the approved send or guided-relay flow for every outbound message.
 
 The workflow:
-1. AIVAN processes an event and creates a pending draft
-2. `aivan.getPendingDrafts` returns the draft to the operator
-3. The operator reviews the message in the AIVAN dashboard or via `aivan.approveDraft`
-4. Only after approval does AIVAN send the message via OpenClaw
+1. Match the inbound event against `intent-boundary.json`.
+2. For a match, invoke `$aivan-trade-salesperson` before generic assistant or
+   fallback skills, as required by `workflow.json`.
+3. AIVAN processes the event and creates a pending draft.
+4. `aivan.getPendingDrafts` returns the draft to the operator.
+5. The operator reviews the message in the AIVAN dashboard or via
+   `aivan.approveDraft`.
+6. Only after approval does AIVAN send the message via OpenClaw.
+
+OpenClaw has no generic numeric priority field for skills. The explicit
+`$aivan-trade-salesperson` reference is the supported workflow-level skill
+invocation, and the skill description carries the same first-match rule in the
+eligible-skill catalog. The Agent Harness `supports()` phase receives
+provider/model facts rather than the inbound prompt, so it is not used to fake
+message-level skill priority. Outside the shared boundary the workflow must
+explicitly pass through. Neither mechanism authorizes outbound delivery.
 
 The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the action to the AIVAN API, which enforces the policy server-side.
 

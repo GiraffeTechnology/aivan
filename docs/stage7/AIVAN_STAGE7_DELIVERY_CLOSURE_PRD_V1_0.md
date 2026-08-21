@@ -272,9 +272,9 @@ Stage 7A.1 复审增补（PR #59 合并后发现）：
 
 - [ ] 提供分页的 cases/conversations/messages/participants/approvals/audit API；
 - [ ] 所有 API 强制 Tenant、Actor、Role、Trace，写请求强制 Idempotency-Key；
-- [ ] 实现受控 role switch 和角色可见性投影；
-- [ ] 保存原始 inbound message 的受控内容引用与不可变 digest/version；
-- [ ] 提供 Markdown/JSON 审计导出，包含版本和纠错链；
+- [x] 实现受控 role switch 和角色可见性投影；
+- [x] 保存原始 inbound message 的受控内容引用与不可变 digest/version；
+- [x] 提供 Markdown/JSON 审计导出，包含版本和纠错链；
 - [ ] 实现附件上传授权、对象存储接口、类型/大小/恶意内容检查和生命周期；
 - [ ] Stage 5A 补上下游 invalidation、补偿任务与 correction draft。
 
@@ -299,13 +299,13 @@ Stage 7A.1 复审增补（PR #59 合并后发现）：
 
 任务：
 
-- [ ] 建立登录/会话恢复与 Core identity bootstrap；
-- [ ] Case 列表、对话时间线、参与者和角色切换；
-- [ ] Approval、Relay、Correction、Receipt、Dependency Health 卡片；
+- [x] 建立登录/会话恢复与 Core identity bootstrap；
+- [x] Case 列表、对话时间线、参与者和角色切换；
+- [x] Approval、Relay、Correction、Receipt、Dependency Health 卡片；
 - [ ] 附件/语音占位与上传进度、失败恢复；
 - [ ] 审计筛选和 Markdown/JSON 导出；
 - [ ] 移动端与桌面响应式、键盘、焦点、ARIA、对比度；
-- [ ] 删除硬编码 Demo 身份，开发演示必须显式标识 Mock；
+- [x] 删除硬编码 Demo 身份，开发演示必须显式标识 Mock；
 - [ ] myaivan.com 构建产物与 Core API 版本固定到同一 candidate。
 
 验收：五种角色端到端任务；无 DOM XSS；无浏览器持久保存 API key；移动真机
@@ -324,7 +324,7 @@ Stage 7A.1 复审增补（PR #59 合并后发现）：
 - [ ] Python/JavaScript CodeQL 工作流与扫描结果；
 - [ ] main ruleset 要求交叉评审、所需 CI 和 code scanning；
 - [ ] 仓库 Actions full-SHA enforcement、2FA、App/协作者权限复核；
-- [ ] 选择并固化数据库 profile，建立迁移编排器和 schema version；
+- [x] 选择并固化数据库 profile，建立迁移编排器和 schema version；
 - [ ] 生成 SBOM、构建 provenance、签名/摘要和 release manifest；
 - [ ] `/metrics`、结构化日志、告警、容量和备份恢复演练；
 - [ ] 更新 Stage 6 tracker/traceability 到最终 candidate。
@@ -438,6 +438,20 @@ PR CI 与另一执行方评审后才可标记为 merged。Stage 7B–7D、依赖
 - 技术债清理候选新增安全日志、生产 GPM 无缓存、`relayed` 终态、模块体积预算以及
   Ruff/Mypy/Bandit/覆盖率门禁；在其 PR 合并前仅记为 candidate，不记为 delivered。
 - Stage 7F 继续保持 `blocked_by_authorization`；443/8443 和 `abcdyi-sin` 约束不变。
+
+### 2026-08-20 生产前部署校准
+
+- 新增 Stage 7F 只读生产前门禁：候选必须为完整 40 位 SHA；核验生产配置结构、
+  精确 CORS、固定 SQLite profile、Singapore bridge、443/8443 端口归属、锁摘要
+  与当前 schema。证据固定为 `production_predeployment` 且
+  `production_acceptance=false`，禁止把 predeployment 冒充生产验收。
+- 新增 `STAGE7F_PREDEPLOYMENT_RUNBOOK.md`，明确备份校验、迁移 preview/apply
+  授权、MyAivan 任务交接、回滚触发与证据边界。
+- 2026-08-20 已恢复既有 AIVAN → `abcdyi-sin` 反向隧道并通过桥接 `/health`；
+  AIVAN 443 仍由 nginx、8443 仍由 Stalwart 占用，均未重启或改绑。
+- 上述仅关闭桥接与生产前门禁 gap。候选合并、数据库备份/迁移、UI 实机部署、
+  `https://myaivan.com` 证书/路由、五轮生产验收、真实通道证据和主管签署仍须按
+  Stage 7F 顺序完成，未完成项不得勾选。
 
 ---
 

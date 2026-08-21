@@ -88,4 +88,9 @@ def db_session() -> Session:
 def init_db():
     from aivan.db.models import Base
     engine = get_engine()
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        from aivan.db.schema_validation import require_current_schema
+
+        require_current_schema(engine)
+        return
     Base.metadata.create_all(bind=engine)

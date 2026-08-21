@@ -10,6 +10,11 @@ action (PRD §9).
 from __future__ import annotations
 
 from aivan.schemas.rfq import RFQExecutionResult
+from aivan.integrations.outbound_translation import (
+    GENERATED_TARGETS,
+    TranslationUnavailable,
+    translate_authoritative_english,
+)
 
 
 def _is_chinese(result: RFQExecutionResult, language: str) -> bool:
@@ -51,7 +56,34 @@ def _product_label(req: dict, zh: bool) -> str:
 
 def render_operator_reply(result: RFQExecutionResult, language: str = "") -> str:
     """Render the operator-facing reply for an RFQ execution result."""
-    zh = _is_chinese(result, language)
+    target_language = _target_language(result, language)
+    if target_language in GENERATED_TARGETS:
+        canonical_english = _render_operator_reply(result, False)
+        try:
+            return translate_authoritative_english(
+                canonical_english,
+                target_language,
+            ).text
+        except TranslationUnavailable:
+            # Safe public fallback: complete authoritative English, never a
+            # partial/mixed translation or an internal service error.
+            return canonical_english
+    return _render_operator_reply(result, _is_chinese(result, language))
+
+
+def _target_language(result: RFQExecutionResult, language: str) -> str:
+    if language:
+        return language.strip().lower()
+    req = result.requirement or {}
+    extra = req.get("extra") or {}
+    if isinstance(extra, dict):
+        value = extra.get("final_output_language") or extra.get("requested_output_language")
+        if value:
+            return str(value).strip().lower()
+    return str(req.get("language") or "en").strip().lower()
+
+
+def _render_operator_reply(result: RFQExecutionResult, zh: bool) -> str:
     action = result.action or ""
     req = result.requirement or {}
 

@@ -109,3 +109,21 @@ def test_english_input_gets_english_reply():
     assert "pending human approval" in reply.lower()
     assert "draft_x" not in reply
     assert "Osaka" in reply
+
+
+def test_generated_language_failure_falls_back_to_complete_english(monkeypatch):
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_BASE_URL", "http://127.0.0.1:1")
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_TIMEOUT_SECONDS", "0.01")
+    req = {
+        "raw_text": "Order 5000 plaid shirts to Osaka in 45 days.",
+        "language": "en",
+        "product_type": "plaid shirt",
+        "quantity": 5000,
+        "quantity_unit": "pcs",
+        "destination": "Osaka",
+        "delivery_days": 45,
+        "extra": {"final_output_language": "fr"},
+    }
+    reply = render_operator_reply(_result("pending_email_approval", req, ["draft_x"]), "fr")
+    assert "RFQ created, pending human approval" in reply
+    assert "draft_x" not in reply

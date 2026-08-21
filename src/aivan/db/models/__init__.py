@@ -15,6 +15,7 @@ from aivan.db.models.platform import PlatformRecord
 from aivan.db.models.account import OpenClawAccountRecord
 from aivan.db.models.preference import UserPreferenceRecord
 from aivan.db.models.relay import RelayReceiptRecord
+from aivan.db.models.migration import SchemaMigrationRecord
 from aivan.db.models.domain import (
     ApprovalRecord,
     AuditLogRecord,
@@ -35,6 +36,7 @@ __all__ = [
     "OpenClawAccountRecord",
     "UserPreferenceRecord",
     "RelayReceiptRecord",
+    "SchemaMigrationRecord",
     "ApprovalRecord",
     "AuditLogRecord",
     "CaseConversationRecord",

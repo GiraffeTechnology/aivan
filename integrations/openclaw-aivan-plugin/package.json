@@ -29,7 +29,7 @@
     "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
   },
   "scripts": {
-    "build": "tsc && node -e \"require('node:fs').copyFileSync('intent-boundary.json','dist/intent-boundary.json')\"",
+    "build": "tsc && node -e \"const fs=require('node:fs'); for (const file of ['intent-boundary.json','workflow.json']) fs.copyFileSync(file,'dist/'+file)\"",
     "typecheck": "tsc --noEmit",
     "test": "node test-gateway-harness.mjs",
     "pack:check": "npm pack --dry-run",
@@ -39,6 +39,7 @@
     "dist/",
     "openclaw.plugin.json",
     "intent-boundary.json",
+    "workflow.json",
     "README.md",
     "SECURITY.md",
     "COMPATIBILITY.md",

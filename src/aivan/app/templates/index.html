@@ -1,125 +1,133 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIVAN - AI Trade Salesperson</title>
-    <link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>myAIVAN 工作台</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-    <h1>AIVAN <span class="badge">AI Trade Salesperson</span></h1>
-    <nav>
-        <button onclick="showPanel('projects')">Projects</button>
-        <button onclick="showPanel('messages')">Messages</button>
-        <button onclick="showPanel('suppliers')">Suppliers</button>
-        <button onclick="showPanel('marketplace')">Marketplace</button>
-        <button onclick="showPanel('platforms')">Platforms</button>
-        <button onclick="showPanel('accounts')">Accounts</button>
-        <button onclick="showPanel('approvals')">Approvals</button>
-        <button onclick="showPanel('settings')">Connection</button>
-    </nav>
-</header>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<div class="warning-banner">
-    ⚠️ AIVAN does not store your platform passwords. Accounts are managed by OpenClaw. All outbound messages require your approval before sending.
-</div>
-<div class="warning-banner info">
-    ℹ️ Adding a platform to the whitelist only means AIVAN may use it as a supplier source. It does not mean suppliers on that platform are automatically trusted.
-</div>
+  <main id="login-view" class="login-shell">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand-mark" aria-hidden="true">A</div>
+      <p class="eyebrow">Giraffe Technology</p>
+      <h1 id="login-title">登录 myAIVAN</h1>
+      <p class="muted">访问凭据仅用于换取 HttpOnly 会话，不会保存在浏览器存储中。</p>
+      <form id="login-form">
+        <label for="access-key">部署访问凭据</label>
+        <input id="access-key" name="access-key" type="password" autocomplete="current-password" required>
+        <button class="primary full" type="submit">安全登录</button>
+      </form>
+      <p id="login-error" class="error" role="alert" hidden></p>
+    </section>
+  </main>
 
-<main>
-    <!-- Projects Panel -->
-    <div id="panel-projects" class="panel active">
-        <h2>Projects</h2>
-        <button onclick="loadProjects()">Refresh</button>
-        <div id="projects-list" class="card-list"></div>
-    </div>
-
-    <!-- Messages Panel -->
-    <div id="panel-messages" class="panel">
-        <h2>Incoming Messages</h2>
-        <div class="form-group">
-            <label>Simulate Customer Message:</label>
-            <textarea id="msg-text" rows="4" placeholder="e.g. 我需要采购10000件白色纯棉男士衬衣..."></textarea>
-            <input id="msg-conv" placeholder="Conversation ID (required)">
-            <input id="msg-sender" placeholder="Sender / participant ID (required)">
-            <button onclick="sendMessage()">Send to AIVAN</button>
+  <div id="app-shell" class="app-shell" hidden>
+    <header class="topbar">
+      <a class="brand" href="#dashboard" aria-label="myAIVAN 首页">
+        <span class="brand-mark small" aria-hidden="true">A</span>
+        <span><strong>myAIVAN</strong><small>贸易业务工作台</small></span>
+      </a>
+      <div class="top-actions">
+        <div class="language-control">
+          <button id="language-trigger" class="ghost compact language-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="language-menu" aria-label="简体中文 — Language">简</button>
+          <div id="language-menu" class="language-menu" role="menu" aria-label="Language" hidden>
+            <button type="button" role="menuitem" data-language="en" aria-label="English">EN</button>
+            <button type="button" role="menuitem" data-language="zh" aria-label="简体中文">简</button>
+            <button type="button" role="menuitem" data-language="zht" aria-label="繁體中文">繁</button>
+            <button type="button" role="menuitem" data-language="fr" aria-label="Français">FR</button>
+            <button type="button" role="menuitem" data-language="es" aria-label="Español">ES</button>
+            <button type="button" role="menuitem" data-language="de" aria-label="Deutsch">DE</button>
+            <button type="button" role="menuitem" data-language="ko" aria-label="한국어">한</button>
+            <button type="button" role="menuitem" data-language="ja" aria-label="日本語">日</button>
+            <span id="language-status" class="language-status" role="status" hidden></span>
+          </div>
         </div>
-        <div id="message-result" class="result-box"></div>
+        <label class="role-control" for="role-select">
+          <span>当前角色</span>
+          <select id="role-select" aria-label="切换业务角色"></select>
+        </label>
+        <button id="logout-button" class="ghost" type="button">退出</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <nav class="sidebar" aria-label="主导航">
+        <button class="nav-item active" data-view="dashboard" type="button"><span aria-hidden="true">◫</span>总览</button>
+        <button class="nav-item" data-view="cases" type="button"><span aria-hidden="true">▤</span>业务案例</button>
+        <button class="nav-item" data-view="new-inquiry" type="button"><span aria-hidden="true">＋</span>录入询盘</button>
+        <button class="nav-item" data-view="relay" type="button"><span aria-hidden="true">⇄</span>人工转发</button>
+        <button class="nav-item" data-view="health" type="button"><span aria-hidden="true">♡</span>依赖健康</button>
+      </nav>
+
+      <main class="content" id="content">
+        <section id="view-dashboard" class="view active" aria-labelledby="dashboard-title">
+          <div class="page-heading">
+            <div><p class="eyebrow">今日业务</p><h1 id="dashboard-title">运营总览</h1></div>
+            <button class="primary" data-open-view="new-inquiry" type="button">录入新询盘</button>
+          </div>
+          <div id="candidate-banner" class="candidate-banner"></div>
+          <div id="metric-grid" class="metric-grid" aria-live="polite"></div>
+          <section class="panel">
+            <div class="panel-heading"><h2>最近更新</h2><button class="link-button" data-open-view="cases" type="button">查看全部</button></div>
+            <div id="recent-cases" class="case-list loading">正在读取案例…</div>
+          </section>
+        </section>
+
+        <section id="view-cases" class="view" aria-labelledby="cases-title">
+          <div class="page-heading"><div><p class="eyebrow">Shared Core</p><h1 id="cases-title">业务案例</h1></div></div>
+          <div class="toolbar">
+            <label for="case-state-filter">状态筛选</label>
+            <select id="case-state-filter">
+              <option value="">全部状态</option>
+              <option value="inquiry">询盘</option><option value="sourcing">寻源</option>
+              <option value="awaiting_supplier">等待供应商</option><option value="supplier_replied">供应商已回复</option>
+              <option value="awaiting_approval">等待审批</option><option value="approved">已审批</option>
+              <option value="qc">质检</option><option value="logistics">物流</option><option value="completed">完成</option>
+            </select>
+            <button id="refresh-cases" class="secondary" type="button">刷新</button>
+          </div>
+          <div id="case-list" class="case-list"></div>
+          <div class="pagination"><button id="prev-page" class="ghost" type="button">上一页</button><span id="page-summary"></span><button id="next-page" class="ghost" type="button">下一页</button></div>
+        </section>
+
+        <section id="view-case-detail" class="view" aria-labelledby="case-detail-title">
+          <button class="back-button" data-open-view="cases" type="button">← 返回案例</button>
+          <div id="case-detail" class="detail-layout"></div>
+        </section>
+
+        <section id="view-new-inquiry" class="view" aria-labelledby="new-inquiry-title">
+          <div class="page-heading"><div><p class="eyebrow">Human-in-the-loop</p><h1 id="new-inquiry-title">录入买家询盘</h1></div></div>
+          <form id="inquiry-form" class="panel form-grid">
+            <div><label for="buyer-id">买家标识</label><input id="buyer-id" required placeholder="buyer-001"></div>
+            <div><label for="buyer-name">买家名称</label><input id="buyer-name" placeholder="客户或公司名称"></div>
+            <div class="span-2"><label for="inquiry-text">询盘原文</label><textarea id="inquiry-text" rows="8" required placeholder="粘贴中文、英文或其他语言的原始询盘…"></textarea></div>
+            <div class="span-2 attachment-placeholder" aria-label="附件功能状态"><strong>附件 / 语音</strong><span>当前候选仅提供元数据占位；对象存储授权与恶意内容扫描未完成前禁止上传。</span></div>
+            <div class="span-2 form-actions"><button class="primary" type="submit">创建案例并生成待审批草稿</button></div>
+          </form>
+          <pre id="inquiry-result" class="result" aria-live="polite" hidden></pre>
+        </section>
+
+        <section id="view-relay" class="view" aria-labelledby="relay-title">
+          <div class="page-heading"><div><p class="eyebrow">Guided Relay</p><h1 id="relay-title">微信 / 旺旺人工转发</h1></div></div>
+          <div class="notice">AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。</div>
+          <div id="relay-list" class="case-list"></div>
+        </section>
+
+        <section id="view-health" class="view" aria-labelledby="health-title">
+          <div class="page-heading"><div><p class="eyebrow">Release Readiness</p><h1 id="health-title">依赖健康</h1></div></div>
+          <div id="health-grid" class="health-grid"></div>
+          <div class="notice warning">此页面只显示配置状态，不主动连接外部依赖，也不替代 CTYun、桥接、备份恢复和真机五轮验收证据。</div>
+        </section>
+      </main>
     </div>
+  </div>
 
-    <!-- Suppliers Panel -->
-    <div id="panel-suppliers" class="panel">
-        <h2>Supplier Registry</h2>
-        <button onclick="loadSuppliers()">Load Suppliers</button>
-        <div id="suppliers-list" class="card-list"></div>
-    </div>
-
-    <!-- Marketplace Panel -->
-    <div id="panel-marketplace" class="panel">
-        <h2>Marketplace Search</h2>
-        <p>Marketplace search is triggered automatically when local registry has insufficient matches.</p>
-        <div id="marketplace-results" class="card-list"></div>
-    </div>
-
-    <!-- Platforms Panel -->
-    <div id="panel-platforms" class="panel">
-        <h2>Trusted Platform Whitelist</h2>
-        <button onclick="loadPlatforms()">Refresh</button>
-        <div id="platforms-list" class="card-list"></div>
-        <h3>Platform Suggestions (pending review)</h3>
-        <button onclick="loadSuggestions()">Load Suggestions</button>
-        <div id="suggestions-list" class="card-list"></div>
-    </div>
-
-    <!-- Accounts Panel -->
-    <div id="panel-accounts" class="panel">
-        <h2>Connected OpenClaw Accounts</h2>
-        <button onclick="loadAccounts()">Refresh</button>
-        <div id="accounts-list" class="card-list"></div>
-        <h3>Register Account (Demo)</h3>
-        <button onclick="registerDemoAccount()">Register Demo 1688 Account</button>
-    </div>
-
-    <!-- Approvals Panel -->
-    <div id="panel-approvals" class="panel">
-        <h2>Pending Outbound Drafts (Approval Required)</h2>
-        <input id="approval-project-id" placeholder="Project ID">
-        <button onclick="loadDrafts()">Load Drafts</button>
-        <div id="drafts-list" class="card-list"></div>
-    </div>
-
-    <!-- Authenticated Core connection settings. Secrets stay in sessionStorage. -->
-    <div id="panel-settings" class="panel">
-        <h2>AIVAN Core Connection</h2>
-        <p>Use the trusted identity assigned by the operator. These values do not grant permissions; Core validates every request.</p>
-        <div class="form-group">
-            <label for="cfg-api-key">API key</label>
-            <input id="cfg-api-key" type="password" autocomplete="off" placeholder="Session only">
-            <label for="cfg-tenant-id">Tenant ID</label>
-            <input id="cfg-tenant-id" placeholder="tenant id">
-            <label for="cfg-actor-id">Actor ID</label>
-            <input id="cfg-actor-id" placeholder="actor id">
-            <label for="cfg-role-context">Business role</label>
-            <input id="cfg-role-context" placeholder="sales / approver / admin">
-            <label for="cfg-conversation-role">Conversation role</label>
-            <input id="cfg-conversation-role" placeholder="internal_thread / buyer_thread / supplier_thread">
-            <label for="cfg-execution-mode">Execution mode</label>
-            <input id="cfg-execution-mode" placeholder="manual / approval">
-            <label for="cfg-channel-account-id">Channel account ID</label>
-            <input id="cfg-channel-account-id" placeholder="trusted channel binding">
-            <button onclick="saveConnectionSettings()">Save for this tab</button>
-            <button onclick="clearConnectionSettings()">Clear</button>
-        </div>
-        <div id="settings-result" class="result-box"></div>
-    </div>
-</main>
-
-<footer>
-    <p>AIVAN v0.3.0 — Local-first Core. External delivery occurs only through an explicitly authorized adapter or guided relay.</p>
-</footer>
-
-<script src="/static/app.js"></script>
+  <template id="empty-template"><div class="empty"><strong>暂无数据</strong><span>当前筛选条件下没有可显示的记录。</span></div></template>
+  <script src="/static/i18n.js" defer></script>
+  <script src="/static/app.js" defer></script>
 </body>
 </html>

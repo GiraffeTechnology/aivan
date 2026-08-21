@@ -53,15 +53,22 @@ section("Compiled dist output (install-time artifacts)")
 dist_js = PLUGIN_DIR / "dist" / "index.js"
 dist_dts = PLUGIN_DIR / "dist" / "index.d.ts"
 dist_boundary = PLUGIN_DIR / "dist" / "intent-boundary.json"
+dist_workflow = PLUGIN_DIR / "dist" / "workflow.json"
 check("dist/index.js exists", dist_js.is_file(),
       "run: cd integrations/openclaw-aivan-plugin && npm run build")
 check("dist/index.d.ts exists", dist_dts.is_file(),
       "run: cd integrations/openclaw-aivan-plugin && npm run build")
 check("dist/intent-boundary.json exists", dist_boundary.is_file(),
       "runtime JSON import must ship beside dist/index.js")
+check("dist/workflow.json exists", dist_workflow.is_file(),
+      "runtime workflow contract must ship beside dist/index.js")
 if dist_boundary.is_file():
     check("dist intent boundary is byte-identical to source contract",
           dist_boundary.read_bytes() == (PLUGIN_DIR / "intent-boundary.json").read_bytes(),
+          "run npm run build; the explicit post-tsc copy must be preserved")
+if dist_workflow.is_file():
+    check("dist workflow contract is byte-identical to source contract",
+          dist_workflow.read_bytes() == (PLUGIN_DIR / "workflow.json").read_bytes(),
           "run npm run build; the explicit post-tsc copy must be preserved")
 if dist_js.is_file():
     dist_js_text = dist_js.read_text(encoding="utf-8")
@@ -185,9 +192,20 @@ section("Stage 3 version and provenance")
 release_path = PLUGIN_DIR / "release-manifest.json"
 compatibility_path = PLUGIN_DIR / "COMPATIBILITY.md"
 boundary_path = PLUGIN_DIR / "intent-boundary.json"
+workflow_path = PLUGIN_DIR / "workflow.json"
 check("release-manifest.json exists", release_path.is_file())
 check("COMPATIBILITY.md exists", compatibility_path.is_file())
 check("intent-boundary.json exists", boundary_path.is_file())
+check("workflow.json exists", workflow_path.is_file())
+if workflow_path.is_file():
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    check("workflow prioritizes explicit AIVAN skill invocation for matching intent",
+          workflow.get("skill", {}).get("invocation") == "$aivan-trade-salesperson"
+          and workflow.get("skill", {}).get("selection") == "first-when-intent-matches")
+    check("workflow priority cannot authorize automatic outbound",
+          workflow.get("outbound") == {
+              "authorization": "required", "automaticReply": False,
+          })
 if release_path.is_file():
     release = json.loads(release_path.read_text(encoding="utf-8"))
     check("Core, Plugin, and SKILL release versions align",
