@@ -276,3 +276,22 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL", "opus-mt")
     monkeypatch.setenv("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "true")
     assert all(readiness_checks().values())
+
+
+def test_session_cookie_writer_rejects_unvalidated_values():
+    import time
+
+    import pytest
+    from fastapi import Response
+
+    from aivan.api.session_routes import _set_session_cookie
+
+    with pytest.raises(RuntimeError, match="invalid signed session cookie"):
+        _set_session_cookie(Response(), "unsafe; value", "x" * 43, int(time.time()) + 60)
+    with pytest.raises(RuntimeError, match="invalid CSRF cookie"):
+        _set_session_cookie(
+            Response(),
+            f"{'a' * 10}.{'b' * 43}",
+            "unsafe; value",
+            int(time.time()) + 60,
+        )

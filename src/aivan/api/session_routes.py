@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import time
 
 from fastapi import APIRouter, Depends, Request, Response
 
@@ -15,16 +17,20 @@ from aivan.api.session_auth import (
 
 
 router = APIRouter(prefix="/api/session", tags=["session"])
+_SIGNED_SESSION_COOKIE = re.compile(r"^[A-Za-z0-9_-]{1,8192}\.[A-Za-z0-9_-]{43}$")
+_CSRF_COOKIE_VALUE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 
 
 def _cookie_secure() -> bool:
     return os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
 
 
-def _set_session_cookie(
-    response: Response, token: str, csrf_token: str, expires_at: int
-) -> None:
-    max_age = max(0, int(expires_at - __import__("time").time()))
+def _set_session_cookie(response: Response, token: str, csrf_token: str, expires_at: int) -> None:
+    if not _SIGNED_SESSION_COOKIE.fullmatch(token):
+        raise RuntimeError("refusing to set an invalid signed session cookie")
+    if not _CSRF_COOKIE_VALUE.fullmatch(csrf_token):
+        raise RuntimeError("refusing to set an invalid CSRF cookie")
+    max_age = max(0, int(expires_at - time.time()))
     response.set_cookie(
         SESSION_COOKIE,
         token,
@@ -74,9 +80,7 @@ def _require_context(request: Request) -> RequestContext:
 
 
 @router.get("")
-def current_session(
-    request: Request, context: RequestContext = Depends(_require_context)
-):
+def current_session(request: Request, context: RequestContext = Depends(_require_context)):
     session = read_ui_session(request)
     return {
         "actor_id": context.actor_id,
