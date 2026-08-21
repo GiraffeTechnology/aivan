@@ -1,4 +1,5 @@
 """Deterministic operator reply renderer tests (PRD §9)."""
+
 from __future__ import annotations
 
 from aivan.rfq.operator_reply import render_operator_reply
@@ -14,27 +15,45 @@ from aivan.schemas.rfq import (
 
 def _gltg() -> GLTGSimulation:
     return GLTGSimulation(
-        p50_days=30, p80_days=38, p90_days=45, minimum_feasible_days=25,
-        supplier_set_feasibility="sufficient", known_suppliers_first_feasibility="feasible",
-        public_bidding_time_cost_days=5, fallback_trigger_recommendation=FallbackTrigger(),
+        p50_days=30,
+        p80_days=38,
+        p90_days=45,
+        minimum_feasible_days=25,
+        supplier_set_feasibility="sufficient",
+        known_suppliers_first_feasibility="feasible",
+        public_bidding_time_cost_days=5,
+        fallback_trigger_recommendation=FallbackTrigger(),
         selected_confidence_days=38,
     )
 
 
-def _result(action: str, requirement: dict, drafts: list[str], user_message: str = "") -> RFQExecutionResult:
+def _result(
+    action: str, requirement: dict, drafts: list[str], user_message: str = ""
+) -> RFQExecutionResult:
     return RFQExecutionResult(
-        project_id="p1", event_type="user_command", action=action, message="",
-        strategy=RFQStrategy(), requirement=requirement, giraffe_context=GiraffeContext(),
-        gltg_simulation=_gltg(), supplier_routing=SupplierRoutingDecision(),
-        drafts_created=drafts, user_control_message=user_message,
+        project_id="p1",
+        event_type="user_command",
+        action=action,
+        message="",
+        strategy=RFQStrategy(),
+        requirement=requirement,
+        giraffe_context=GiraffeContext(),
+        gltg_simulation=_gltg(),
+        supplier_routing=SupplierRoutingDecision(),
+        drafts_created=drafts,
+        user_control_message=user_message,
     )
 
 
 def _chinese_requirement() -> dict:
     return {
         "raw_text": "询价 5000 件格子衬衫，45天交东京，高品质",
-        "language": "zh", "product_type": "格子衬衫", "quantity": 5000,
-        "quantity_unit": "件", "destination": "Tokyo", "delivery_days": 45,
+        "language": "zh",
+        "product_type": "格子衬衫",
+        "quantity": 5000,
+        "quantity_unit": "件",
+        "destination": "Tokyo",
+        "delivery_days": 45,
         "extra": {"quality_level": "high", "destination_raw": "东京"},
     }
 
@@ -89,10 +108,17 @@ def test_reply_does_not_claim_drafts_when_none_created():
 
 
 def test_destination_confirmation_action_does_not_say_ready():
-    req = {"raw_text": "询价 5000 件，45天", "language": "zh", "quantity": 5000, "delivery_days": 45,
-           "extra": {"destination_raw": "东京"}}
+    req = {
+        "raw_text": "询价 5000 件，45天",
+        "language": "zh",
+        "quantity": 5000,
+        "delivery_days": 45,
+        "extra": {"destination_raw": "东京"},
+    }
     result = _result(
-        "pending_destination_confirmation", req, [],
+        "pending_destination_confirmation",
+        req,
+        [],
         user_message="RFQ 已记录，但目的地尚未确认：请确认交货城市。",
     )
     reply = render_operator_reply(result, "zh")
@@ -101,9 +127,16 @@ def test_destination_confirmation_action_does_not_say_ready():
 
 
 def test_english_input_gets_english_reply():
-    req = {"raw_text": "Order 5000 plaid shirts to Osaka in 45 days.", "language": "en",
-           "product_type": "plaid shirt", "quantity": 5000, "quantity_unit": "pcs",
-           "destination": "Osaka", "delivery_days": 45, "extra": {}}
+    req = {
+        "raw_text": "Order 5000 plaid shirts to Osaka in 45 days.",
+        "language": "en",
+        "product_type": "plaid shirt",
+        "quantity": 5000,
+        "quantity_unit": "pcs",
+        "destination": "Osaka",
+        "delivery_days": 45,
+        "extra": {},
+    }
     result = _result("pending_email_approval", req, ["draft_x"])
     reply = render_operator_reply(result, "en")
     assert "pending human approval" in reply.lower()
@@ -127,3 +160,32 @@ def test_generated_language_failure_falls_back_to_complete_english(monkeypatch):
     reply = render_operator_reply(_result("pending_email_approval", req, ["draft_x"]), "fr")
     assert "RFQ created, pending human approval" in reply
     assert "draft_x" not in reply
+
+
+def test_requested_output_language_overrides_detected_source_language(monkeypatch):
+    req = {
+        "raw_text": "Order 5000 plaid shirts to Osaka in 45 days. Reply in Japanese.",
+        "language": "en",
+        "product_type": "plaid shirt",
+        "quantity": 5000,
+        "quantity_unit": "pcs",
+        "destination": "Osaka",
+        "delivery_days": 45,
+        "extra": {"final_output_language": "ja"},
+    }
+    captured = {}
+
+    def translate(text, target_language):
+        captured["source"] = text
+        captured["target"] = target_language
+        return type("Translation", (), {"text": "日本語の返信"})()
+
+    monkeypatch.setattr("aivan.rfq.operator_reply.translate_authoritative_english", translate)
+    reply = render_operator_reply(
+        _result("pending_email_approval", req, ["draft_x"]),
+        "en",
+    )
+
+    assert reply == "日本語の返信"
+    assert captured["target"] == "ja"
+    assert "RFQ created, pending human approval" in captured["source"]

@@ -173,9 +173,7 @@ def test_admin_export_includes_frozen_candidate_and_digest_only_messages(workben
     project = _seed_case(db, "operator-1", "export-thread")
     _login(client)
 
-    response = client.get(
-        f"/api/workbench/cases/{project.project_id}/export?format=json"
-    )
+    response = client.get(f"/api/workbench/cases/{project.project_id}/export?format=json")
     assert response.status_code == 200
     payload = response.json()
     assert payload["candidate_sha"] == "a" * 40
@@ -215,7 +213,7 @@ def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
     ):
         assert f'data-language="{code}"' in response.text
         assert f'aria-label="{accessible_name}"' in response.text
-        assert f'>{label}</button>' in response.text
+        assert f">{label}</button>" in response.text
 
     root = Path(__file__).resolve().parents[1]
     i18n = (root / "src/aivan/app/static/i18n.js").read_text(encoding="utf-8")
@@ -233,6 +231,7 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
         "AIVAN_DB_URL",
         "AIVAN_TENANT_ID",
         "AIVAN_API_KEY",
+        "AIVAN_AUTH_SECRET",
         "AIVAN_UI_SESSION_SECRET",
         "AIVAN_UI_ACTOR_ID",
         "GIRAFFE_DB_BASE_URL",
@@ -248,6 +247,12 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AIVAN_TENANT_API_KEYS", "{}")
     assert not all(readiness_checks().values())
+
+    for value in ('{"": "key"}', '{"tenant": ""}', "not-json"):
+        monkeypatch.setenv("AIVAN_TENANT_API_KEYS", value)
+        checks = readiness_checks()
+        assert checks["tenant_configured"] is False
+        assert checks["api_auth_configured"] is False
 
     monkeypatch.setenv("AIVAN_CANDIDATE_SHA", "b" * 40)
     monkeypatch.setenv("AIVAN_DB_URL", "sqlite:///./data/aivan.db")

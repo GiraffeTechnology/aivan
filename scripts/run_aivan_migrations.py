@@ -5,6 +5,7 @@ The default mode is read-only. Applying requires an immutable candidate SHA,
 an approved authorization reference, and a verified backup reference. Reference
 values are stored only as SHA-256 digests.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -12,7 +13,9 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
@@ -34,6 +37,23 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _checkout_commit(repository_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository_root.resolve()), "rev-parse", "--verify", "HEAD^{commit}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("repository root must be an immutable Git checkout") from exc
+    commit = result.stdout.strip().lower()
+    if not _SHA.fullmatch(commit):
+        raise ValueError("repository HEAD is not a full Git commit SHA")
+    return commit
 
 
 def plan(database_url: str, tenant_id: str) -> dict:
@@ -58,9 +78,12 @@ def apply(
     authorization_reference: str,
     backup_reference: str,
     bootstrap_empty: bool = False,
+    repository_root: Path = Path.cwd(),
 ) -> dict:
     if not _SHA.fullmatch(candidate_sha):
         raise ValueError("candidate SHA must be 40 lowercase hexadecimal characters")
+    if _checkout_commit(repository_root) != candidate_sha:
+        raise ValueError("candidate SHA does not match the executing Git checkout")
     if not tenant_id.strip():
         raise ValueError("verified tenant id is required")
     if not authorization_reference.strip() or not backup_reference.strip():
@@ -120,6 +143,7 @@ def main() -> int:
     parser.add_argument("--candidate-sha", default=os.environ.get("AIVAN_CANDIDATE_SHA", ""))
     parser.add_argument("--authorization-reference", default="")
     parser.add_argument("--backup-reference", default="")
+    parser.add_argument("--repository-root", type=Path, default=Path.cwd())
     parser.add_argument("--bootstrap-empty", action="store_true")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
@@ -133,6 +157,7 @@ def main() -> int:
             authorization_reference=args.authorization_reference,
             backup_reference=args.backup_reference,
             bootstrap_empty=args.bootstrap_empty,
+            repository_root=args.repository_root,
         )
         if args.apply
         else plan(args.database_url, args.tenant_id)

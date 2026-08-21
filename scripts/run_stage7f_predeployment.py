@@ -7,12 +7,14 @@ topology descriptor, and the current database schema. It never deploys,
 migrates, restarts services, changes ports, or emits production-acceptance
 evidence.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -89,6 +91,41 @@ def _has_value(environment: dict[str, str | None], key: str) -> bool:
     return bool((environment.get(key) or "").strip())
 
 
+def _has_usable_tenant_keys(environment: dict[str, str | None]) -> bool:
+    raw = (environment.get("AIVAN_TENANT_API_KEYS") or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    return (
+        bool(parsed)
+        and isinstance(parsed, dict)
+        and all(
+            isinstance(key, str) and isinstance(value, str) and key.strip() and value.strip()
+            for key, value in parsed.items()
+        )
+    )
+
+
+def _checkout_commit(repository_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository_root), "rev-parse", "--verify", "HEAD^{commit}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("repository_root must be an immutable Git checkout") from exc
+    commit = result.stdout.strip().lower()
+    if not CANDIDATE_PATTERN.fullmatch(commit):
+        raise ValueError("repository_root HEAD is not a full Git commit SHA")
+    return commit
+
+
 def _descriptor_has_forbidden_keys(value: Any) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -128,6 +165,7 @@ def run_predeployment_gate(
     candidate_commit = candidate_commit.strip().lower()
     if not CANDIDATE_PATTERN.fullmatch(candidate_commit):
         raise ValueError("candidate_commit must be a full 40-character lowercase Git SHA")
+    checkout_commit = _checkout_commit(repository_root)
 
     environment = dict(dotenv_values(environment_file, interpolate=False))
     topology = _load_topology(topology_file)
@@ -138,7 +176,10 @@ def run_predeployment_gate(
 
     check("descriptor_contains_no_secret_fields", not _descriptor_has_forbidden_keys(topology))
     check("environment_is_production", environment.get("AIVAN_ENV") == "production")
-    check("candidate_matches_environment", environment.get("AIVAN_CANDIDATE_SHA") == candidate_commit)
+    check("candidate_matches_checkout", checkout_commit == candidate_commit)
+    check(
+        "candidate_matches_environment", environment.get("AIVAN_CANDIDATE_SHA") == candidate_commit
+    )
     check("application_loopback_bind", environment.get("AIVAN_HOST") == "127.0.0.1")
     check("application_port_8765", environment.get("AIVAN_PORT") == "8765")
     check("fixed_database_profile", environment.get("AIVAN_DB_URL") == DATABASE_PROFILE)
@@ -153,16 +194,25 @@ def run_predeployment_gate(
     }
     check("cors_exact_origin", REQUIRED_ORIGIN in origins and "*" not in origins)
     check("human_approval_required", _truthy(environment.get("AIVAN_REQUIRE_HUMAN_APPROVAL")))
-    check("external_model_api_disabled", _falsey(environment.get("AIVAN_EXTERNAL_MODEL_API_ENABLED")))
-    check("external_model_auto_disabled", _falsey(environment.get("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED")))
+    check(
+        "external_model_api_disabled", _falsey(environment.get("AIVAN_EXTERNAL_MODEL_API_ENABLED"))
+    )
+    check(
+        "external_model_auto_disabled",
+        _falsey(environment.get("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED")),
+    )
     check("stub_suppliers_disabled", _falsey(environment.get("AIVAN_ALLOW_STUB_SUPPLIERS")))
     check("openclaw_mock_disabled", _falsey(environment.get("OPENCLAW_MOCK_MODE")))
     check(
         "api_auth_configured",
         _has_value(environment, "AIVAN_API_KEY")
-        or _has_value(environment, "AIVAN_TENANT_API_KEYS"),
+        or _has_value(environment, "AIVAN_AUTH_SECRET")
+        or _has_usable_tenant_keys(environment),
     )
-    check("tenant_identity_configured", _has_value(environment, "AIVAN_TENANT_ID"))
+    check(
+        "tenant_identity_configured",
+        _has_value(environment, "AIVAN_TENANT_ID") or _has_usable_tenant_keys(environment),
+    )
     check("ui_actor_configured", _has_value(environment, "AIVAN_UI_ACTOR_ID"))
     session_secret = environment.get("AIVAN_UI_SESSION_SECRET") or ""
     check("ui_session_secret_minimum_length", len(session_secret) >= 32)
@@ -196,7 +246,10 @@ def run_predeployment_gate(
             "health_path": "/health",
         },
     )
-    check("local_model_matches_profile", topology.get("expected_local_model") == environment.get("OLLAMA_MODEL"))
+    check(
+        "local_model_matches_profile",
+        topology.get("expected_local_model") == environment.get("OLLAMA_MODEL"),
+    )
     check("language_skill_enabled", _truthy(environment.get("AIVAN_LANGUAGE_SKILL_ENABLED")))
     check(
         "language_provider_not_mock",
@@ -208,7 +261,9 @@ def run_predeployment_gate(
         _has_value(environment, "AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL")
         or _has_value(environment, "AIVAN_LANGUAGE_SKILL_EXPECTED_BACKEND"),
     )
-    check("qwen_proofreading_enabled", _truthy(environment.get("AIVAN_TRANSLATION_PROOFREAD_ENABLED")))
+    check(
+        "qwen_proofreading_enabled", _truthy(environment.get("AIVAN_TRANSLATION_PROOFREAD_ENABLED"))
+    )
     check("qwen_proofreader_exact", environment.get("OLLAMA_MODEL") == "qwen3.5:9b")
 
     observations = topology.get("observations") or {}
@@ -271,9 +326,7 @@ def run_predeployment_gate(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--repository-root", type=Path, default=Path(__file__).resolve().parents[1]
-    )
+    parser.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--candidate-commit")
     parser.add_argument("--environment-file", type=Path)
     parser.add_argument("--topology-file", type=Path)

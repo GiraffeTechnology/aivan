@@ -94,9 +94,10 @@ def _topology(path, *, preserved=True):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_predeployment_gate_passes_without_recording_secrets(tmp_path):
+def test_predeployment_gate_passes_without_recording_secrets(tmp_path, monkeypatch):
     repository = _repository(tmp_path)
     candidate = "c" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
     environment = tmp_path / "production.env"
     topology = tmp_path / "topology.json"
     output = tmp_path / "evidence.jsonl"
@@ -123,9 +124,10 @@ def test_predeployment_gate_passes_without_recording_secrets(tmp_path):
     assert "AIVAN_API_KEY=" not in stored_text
 
 
-def test_predeployment_gate_fails_closed_for_cors_or_protected_port_gap(tmp_path):
+def test_predeployment_gate_fails_closed_for_cors_or_protected_port_gap(tmp_path, monkeypatch):
     repository = _repository(tmp_path)
     candidate = "d" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
     environment = tmp_path / "production.env"
     topology = tmp_path / "topology.json"
     _environment(environment, candidate, cors="*")
@@ -164,3 +166,29 @@ def test_predeployment_gate_requires_immutable_candidate(tmp_path):
         assert "full 40-character" in str(exc)
     else:
         raise AssertionError("mutable candidate identity must fail closed")
+
+
+def test_predeployment_gate_fails_for_checkout_mismatch_or_empty_tenant_keys(tmp_path, monkeypatch):
+    repository = _repository(tmp_path)
+    candidate = "f" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: "a" * 40)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate)
+    text = environment.read_text(encoding="utf-8")
+    text = text.replace("AIVAN_API_KEY=must-not-enter-evidence-api", "")
+    text += "AIVAN_TENANT_API_KEYS={}\n"
+    environment.write_text(text, encoding="utf-8")
+    _topology(topology)
+
+    result = run_predeployment_gate(
+        repository_root=repository,
+        candidate_commit=candidate,
+        environment_file=environment,
+        topology_file=topology,
+        output_path=tmp_path / "evidence.jsonl",
+    )
+
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert "candidate_matches_checkout" in failed
+    assert "api_auth_configured" in failed

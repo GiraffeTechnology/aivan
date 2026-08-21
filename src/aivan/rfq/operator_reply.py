@@ -72,14 +72,14 @@ def render_operator_reply(result: RFQExecutionResult, language: str = "") -> str
 
 
 def _target_language(result: RFQExecutionResult, language: str) -> str:
-    if language:
-        return language.strip().lower()
     req = result.requirement or {}
     extra = req.get("extra") or {}
     if isinstance(extra, dict):
         value = extra.get("final_output_language") or extra.get("requested_output_language")
         if value:
             return str(value).strip().lower()
+    if language:
+        return language.strip().lower()
     return str(req.get("language") or "en").strip().lower()
 
 
@@ -107,8 +107,14 @@ def _render_operator_reply(result: RFQExecutionResult, zh: bool) -> str:
         if qty is not None:
             lines.append(f"- 数量：{qty} {unit}")
         if dest:
-            dest_raw = (req.get("extra") or {}).get("destination_raw") if isinstance(req.get("extra"), dict) else None
-            lines.append(f"- 目的地：{dest}（原文：{dest_raw}）" if dest_raw else f"- 目的地：{dest}")
+            dest_raw = (
+                (req.get("extra") or {}).get("destination_raw")
+                if isinstance(req.get("extra"), dict)
+                else None
+            )
+            lines.append(
+                f"- 目的地：{dest}（原文：{dest_raw}）" if dest_raw else f"- 目的地：{dest}"
+            )
         if days is not None:
             lines.append(f"- 目标交期：{days} 天")
         if draft_count:
@@ -129,16 +135,15 @@ def _render_operator_reply(result: RFQExecutionResult, zh: bool) -> str:
     if draft_count:
         lines.append(f"- Draft count: {draft_count}")
     lines.append("")
-    lines.append("Note: supplier emails have NOT been sent; human approval is still required before sending.")
+    lines.append(
+        "Note: supplier emails have NOT been sent; human approval is still required before sending."
+    )
     return "\n".join(lines)
 
 
 def _fallback_blocked_message(result: RFQExecutionResult, zh: bool) -> str:
     if zh:
-        return (
-            "RFQ 已记录，但尚未满足执行条件，需人工确认后 AIVAN 才会继续。"
-            "供应商邮件尚未发送。"
-        )
+        return "RFQ 已记录，但尚未满足执行条件，需人工确认后 AIVAN 才会继续。供应商邮件尚未发送。"
     return (
         "RFQ recorded, but execution prerequisites are not yet met; AIVAN needs "
         "human confirmation before continuing. No supplier emails were sent."
