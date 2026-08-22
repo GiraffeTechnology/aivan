@@ -81,9 +81,17 @@ def _tenant_key_map() -> dict[str, str]:
     return {key.strip(): value.strip() for key, value in parsed.items()}
 
 
-def resolve_request_context(
-    request: Request, *, allow_ui_session: bool = True
-) -> RequestContext:
+def configured_tenant_ids() -> set[str]:
+    """Return every tenant identity reserved by deployment authentication."""
+
+    tenant_ids = set(_tenant_key_map())
+    deployment_tenant = os.environ.get("AIVAN_TENANT_ID", "").strip()
+    if deployment_tenant:
+        tenant_ids.add(deployment_tenant)
+    return tenant_ids
+
+
+def resolve_request_context(request: Request, *, allow_ui_session: bool = True) -> RequestContext:
     """Authenticate the caller and resolve trusted tenant/trace identity."""
 
     environment = os.environ.get("AIVAN_ENV", "local").strip().lower()
@@ -93,9 +101,7 @@ def resolve_request_context(
     deployment_tenant = os.environ.get("AIVAN_TENANT_ID", "").strip()
     tenant_keys = _tenant_key_map()
 
-    requested_tenant = _header(request, "X-AIVAN-Tenant-ID") or _header(
-        request, "X-Tenant-ID"
-    )
+    requested_tenant = _header(request, "X-AIVAN-Tenant-ID") or _header(request, "X-Tenant-ID")
     if deployment_tenant and requested_tenant and requested_tenant != deployment_tenant:
         raise HTTPException(
             status_code=403,
@@ -129,23 +135,33 @@ def resolve_request_context(
         if session is not None:
             require_session_csrf(request, session)
             if session.test_account:
-                enabled = os.environ.get(
-                    "AIVAN_UI_TEST_ACCOUNT_ENABLED", ""
-                ).strip().lower() in {"1", "true", "yes", "on"}
+                enabled = os.environ.get("AIVAN_UI_TEST_ACCOUNT_ENABLED", "").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
                 test_tenant = os.environ.get("AIVAN_UI_TEST_TENANT_ID", "").strip()
+                test_actor = os.environ.get("AIVAN_UI_TEST_ACTOR_ID", "").strip()
                 safe_method = request.method.upper() in {"GET", "HEAD"}
                 allowed_path = (
                     request.url.path.startswith("/api/session")
-                    or (
-                        safe_method
-                        and request.url.path.startswith("/api/workbench")
-                    )
+                    or (safe_method and request.url.path.startswith("/api/workbench"))
                     or (safe_method and request.url.path == "/api/relay/outbox")
                 )
-                if not enabled or not test_tenant or session.tenant_id != test_tenant:
-                    raise HTTPException(
-                        status_code=403, detail={"error": "INVALID_TEST_SESSION"}
-                    )
+                valid_identity = (
+                    enabled
+                    and test_tenant
+                    and test_tenant not in configured_tenant_ids()
+                    and test_actor
+                    and session.tenant_id == test_tenant
+                    and session.actor_id == test_actor
+                    and session.role == "auditor"
+                    and session.allowed_roles == ("auditor",)
+                    and bool(session.authorization_reference)
+                )
+                if not valid_identity:
+                    raise HTTPException(status_code=403, detail={"error": "INVALID_TEST_SESSION"})
                 if not allowed_path:
                     raise HTTPException(
                         status_code=403,
@@ -191,9 +207,7 @@ def resolve_request_context(
         field="trace_id",
         required=True,
     )
-    idempotency_key = _safe_identifier(
-        _header(request, "Idempotency-Key"), field="idempotency_key"
-    )
+    idempotency_key = _safe_identifier(_header(request, "Idempotency-Key"), field="idempotency_key")
     if session is not None:
         authorization_basis = "ui_test_session" if session.test_account else "ui_session"
     elif tenant_keys:
@@ -206,9 +220,7 @@ def resolve_request_context(
         authorization_basis = "local_compatibility"
 
     header_actor_id = _safe_identifier(_header(request, "X-AIVAN-Actor-ID"), field="actor_id")
-    header_role = _safe_identifier(
-        _header(request, "X-AIVAN-Role-Context"), field="role_context"
-    )
+    header_role = _safe_identifier(_header(request, "X-AIVAN-Role-Context"), field="role_context")
     if session is not None:
         if header_actor_id and header_actor_id != session.actor_id:
             raise HTTPException(status_code=403, detail={"error": "ACTOR_MISMATCH"})
@@ -267,9 +279,7 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
         event["channel_account_id"] = context.channel_account_id
     body_conversation_role = str(event.get("conversation_role", "") or "").strip()
     if context.production and body_conversation_role and not context.participant_conversation_role:
-        raise HTTPException(
-            status_code=403, detail={"error": "UNTRUSTED_CONVERSATION_ROLE"}
-        )
+        raise HTTPException(status_code=403, detail={"error": "UNTRUSTED_CONVERSATION_ROLE"})
     if context.production and not context.actor_id:
         raise HTTPException(
             status_code=400,
@@ -325,8 +335,8 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
         else ""
     )
     local_body_actor_id = (
-        explicit_body_actor_id or local_command_sender
-    ) if not context.production else ""
+        (explicit_body_actor_id or local_command_sender) if not context.production else ""
+    )
     event["authenticated_actor_id"] = context.actor_id or local_body_actor_id or None
     event["authenticated_actor_role"] = context.role_context or (
         body_role if local_body_actor_id else ""
@@ -346,9 +356,7 @@ def apply_trusted_identity(event_data: dict, context: RequestContext) -> dict:
     return event
 
 
-def actor_identity_from_context(
-    context: RequestContext, *, default_mode: str = "command"
-):
+def actor_identity_from_context(context: RequestContext, *, default_mode: str = "command"):
     """Build an authorized business identity for non-event API operations.
 
     Local development retains an explicit admin compatibility identity. Production
@@ -381,4 +389,3 @@ def actor_identity_from_context(
             status_code=status,
             detail={"error": exc.code, "reason": exc.reason},
         ) from exc
-

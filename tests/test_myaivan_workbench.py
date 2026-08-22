@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -328,10 +331,11 @@ def test_requested_role_is_canonicalized_from_server_allowlist(monkeypatch):
     assert role == roles[1]
 
 
-def _enable_isolated_test_account(monkeypatch):
+def _enable_isolated_test_account(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.setenv("AIVAN_UI_TEST_ACCOUNT_ENABLED", "true")
     monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(tmp_path / "ticket-ledger.sqlite3"))
     monkeypatch.setenv("AIVAN_UI_TEST_TENANT_ID", "myaivan_ui_test")
     monkeypatch.setenv("AIVAN_UI_TEST_ACTOR_ID", "myaivan-ui-test")
     monkeypatch.setenv("AIVAN_UI_TEST_ALLOWED_ROLES", "auditor")
@@ -345,11 +349,11 @@ def test_test_account_direct_entry_is_disabled_by_default(workbench):
     assert response.json()["detail"]["error"] == "TEST_ACCOUNT_DISABLED"
 
 
-def test_test_account_direct_entry_isolated_and_read_only(workbench, monkeypatch):
+def test_test_account_direct_entry_isolated_and_read_only(workbench, monkeypatch, tmp_path):
     from aivan.api.session_auth import issue_test_login_ticket
 
     client, _ = workbench
-    _enable_isolated_test_account(monkeypatch)
+    _enable_isolated_test_account(monkeypatch, tmp_path)
 
     wrong = client.post("/api/session/test-login", json={"ticket": "invalid"})
     assert wrong.status_code == 403
@@ -398,15 +402,13 @@ def test_test_account_direct_entry_isolated_and_read_only(workbench, monkeypatch
     assert forbidden.json()["detail"]["error"] == "TEST_ACCOUNT_ROUTE_FORBIDDEN"
 
 
-def test_test_account_rejects_production_tenant_or_short_token(workbench, monkeypatch):
+def test_test_account_rejects_production_tenant_or_short_token(workbench, monkeypatch, tmp_path):
     from aivan.api.session_auth import issue_test_login_ticket
 
     client, _ = workbench
-    _enable_isolated_test_account(monkeypatch)
+    _enable_isolated_test_account(monkeypatch, tmp_path)
     monkeypatch.setenv("AIVAN_UI_TEST_TENANT_ID", "test_tenant")
-    response = client.post(
-        "/api/session/test-login", json={"ticket": issue_test_login_ticket()}
-    )
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
     assert response.status_code == 503
     assert response.json()["detail"]["error"] == "TEST_ACCOUNT_MISCONFIGURED"
 
@@ -416,10 +418,11 @@ def test_test_account_rejects_production_tenant_or_short_token(workbench, monkey
     assert response.status_code == 503
 
 
-def test_test_login_ticket_expires_and_secret_rotation_revokes(monkeypatch):
+def test_test_login_ticket_expires_and_secret_rotation_revokes(monkeypatch, tmp_path):
     from aivan.api.session_auth import consume_test_login_ticket, issue_test_login_ticket
 
     monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(tmp_path / "ticket-ledger.sqlite3"))
     expired = issue_test_login_ticket(now=1_000, ttl_seconds=30)
     with pytest.raises(ValueError, match="invalid test login ticket"):
         consume_test_login_ticket(expired, now=1_031)
@@ -428,3 +431,90 @@ def test_test_login_ticket_expires_and_secret_rotation_revokes(monkeypatch):
     monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "r" * 48)
     with pytest.raises(ValueError, match="invalid test login ticket"):
         consume_test_login_ticket(current, now=2_001)
+
+
+def test_test_login_ticket_is_single_use_across_processes(monkeypatch, tmp_path):
+    from aivan.api.session_auth import issue_test_login_ticket
+
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(tmp_path / "ticket-ledger.sqlite3"))
+    ticket = issue_test_login_ticket()
+    command = (
+        "from aivan.api.session_auth import consume_test_login_ticket; "
+        "import sys; consume_test_login_ticket(sys.argv[1])"
+    )
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(Path.cwd() / "src")
+    first = subprocess.run(
+        [sys.executable, "-c", command, ticket],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    second = subprocess.run(
+        [sys.executable, "-c", command, ticket],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert first.returncode == 0
+    assert second.returncode != 0
+    assert "already consumed" in second.stderr
+
+
+def test_test_account_rejects_tenant_key_role_override_and_existing_data(
+    workbench, monkeypatch, tmp_path
+):
+    from aivan.api.session_auth import issue_test_login_ticket
+
+    client, db = workbench
+    _enable_isolated_test_account(monkeypatch, tmp_path)
+    monkeypatch.setenv("AIVAN_TENANT_API_KEYS", '{"myaivan_ui_test":"reserved-key"}')
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_ACCOUNT_MISCONFIGURED"
+
+    monkeypatch.delenv("AIVAN_TENANT_API_KEYS")
+    monkeypatch.setenv("AIVAN_UI_TEST_ALLOWED_ROLES", "admin")
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_ACCOUNT_MISCONFIGURED"
+
+    monkeypatch.setenv("AIVAN_UI_TEST_ALLOWED_ROLES", "auditor")
+    ProjectRepository(db).create(
+        conversation_id="test-account-existing-data",
+        customer_id="existing-customer",
+        customer_display_name="Existing customer",
+        channel="myaivan",
+        tenant_id="myaivan_ui_test",
+    )
+    db.commit()
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_TENANT_NOT_EMPTY"
+
+
+def test_test_ticket_ledger_rejects_business_database_path(monkeypatch, tmp_path):
+    from aivan.api.session_auth import validate_test_ticket_configuration
+
+    database_path = tmp_path / "shared.sqlite3"
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(database_path))
+    monkeypatch.setenv("AIVAN_DB_URL", f"sqlite:///{database_path}")
+    with pytest.raises(ValueError, match="must not share the business database"):
+        validate_test_ticket_configuration()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission contract")
+def test_test_ticket_ledger_rejects_shared_parent_directory(monkeypatch, tmp_path):
+    from aivan.api.session_auth import validate_test_ticket_configuration
+
+    shared_parent = tmp_path / "shared"
+    shared_parent.mkdir(mode=0o770)
+    shared_parent.chmod(0o770)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(shared_parent / "ledger.sqlite3"))
+    with pytest.raises(ValueError, match="inaccessible to group/other users"):
+        validate_test_ticket_configuration()

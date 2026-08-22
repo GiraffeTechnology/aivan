@@ -7,7 +7,8 @@ import hmac
 import json
 import os
 import secrets
-import threading
+import sqlite3
+import stat
 import time
 from dataclasses import dataclass
 
@@ -19,8 +20,6 @@ CSRF_COOKIE = "aivan_csrf"
 SESSION_TTL_SECONDS = 8 * 60 * 60
 TEST_SESSION_TTL_SECONDS = 30 * 60
 TEST_TICKET_TTL_SECONDS = 5 * 60
-_CONSUMED_TEST_TICKETS: dict[str, int] = {}
-_TEST_TICKET_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -143,14 +142,99 @@ def _test_ticket_secret() -> bytes:
 
 def validate_test_ticket_configuration() -> None:
     _test_ticket_secret()
+    path = _test_ticket_ledger_path()
+    _open_test_ticket_ledger(path)
+
+
+def _test_ticket_ledger_path() -> str:
+    path = os.environ.get("AIVAN_UI_TEST_TICKET_LEDGER_PATH", "").strip()
+    if not path or not os.path.isabs(path):
+        raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH must be an absolute regular path")
+    parent = os.path.dirname(path)
+    if not os.path.isdir(parent):
+        raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH parent must already exist")
+    parent_metadata = os.stat(parent, follow_symlinks=False)
+    if not stat.S_ISDIR(parent_metadata.st_mode):
+        raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH parent must not be a symlink")
+    if os.name != "nt" and (
+        parent_metadata.st_uid != os.geteuid() or parent_metadata.st_mode & 0o077
+    ):
+        raise ValueError(
+            "AIVAN_UI_TEST_TICKET_LEDGER_PATH parent must be owned by the "
+            "service user and inaccessible to group/other users"
+        )
+    if os.path.lexists(path):
+        metadata = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH must be a regular file")
+    normalized_path = os.path.normcase(os.path.realpath(path))
+    database_url = os.environ.get("AIVAN_DB_URL", "").strip()
+    database_paths = {"data/aivan.db", "data/aiven.db"}
+    if database_url.startswith("sqlite:///"):
+        configured_database = database_url.removeprefix("sqlite:///")
+        if configured_database != ":memory:":
+            database_paths.add(configured_database)
+    if normalized_path in {
+        os.path.normcase(os.path.realpath(database_path)) for database_path in database_paths
+    }:
+        raise ValueError("test ticket ledger must not share the business database path")
+    return path
+
+
+def _open_test_ticket_ledger(path: str) -> None:
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise ValueError("unable to safely open test ticket ledger") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("test ticket ledger must be a regular file")
+        if os.name != "nt" and (metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077):
+            raise ValueError("test ticket ledger must be owned by the service user and mode 0600")
+    finally:
+        os.close(descriptor)
+
+
+def _consume_test_ticket_digest(digest: str, expires_at: int, current: int) -> None:
+    """Atomically persist a consumed digest across workers and restarts."""
+
+    path = _test_ticket_ledger_path()
+    _open_test_ticket_ledger(path)
+    connection = sqlite3.connect(path, timeout=5, isolation_level=None)
+    try:
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS consumed_test_tickets ("
+            "digest TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)"
+        )
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DELETE FROM consumed_test_tickets WHERE expires_at <= ?", (current,))
+        connection.execute(
+            "INSERT INTO consumed_test_tickets (digest, expires_at) VALUES (?, ?)",
+            (digest, expires_at),
+        )
+        connection.execute("COMMIT")
+    except sqlite3.IntegrityError as exc:
+        connection.execute("ROLLBACK")
+        raise ValueError("test login ticket already consumed") from exc
+    except sqlite3.Error:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+    finally:
+        connection.close()
 
 
 def test_session_ttl_seconds() -> int:
     try:
         configured = int(
-            os.environ.get(
-                "AIVAN_UI_TEST_SESSION_TTL_SECONDS", str(TEST_SESSION_TTL_SECONDS)
-            )
+            os.environ.get("AIVAN_UI_TEST_SESSION_TTL_SECONDS", str(TEST_SESSION_TTL_SECONDS))
         )
     except ValueError:
         configured = TEST_SESSION_TTL_SECONDS
@@ -171,9 +255,7 @@ def issue_test_login_ticket(
         "issued_at": issued_at,
         "expires_at": issued_at + ttl,
     }
-    encoded = _b64encode(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    )
+    encoded = _b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
     signature = _b64encode(
         hmac.new(_test_ticket_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
     )
@@ -190,9 +272,7 @@ def consume_test_login_ticket(ticket: str, *, now: int | None = None) -> str:
     try:
         encoded, signature = ticket.split(".", 1)
         expected = _b64encode(
-            hmac.new(
-                _test_ticket_secret(), encoded.encode("ascii"), hashlib.sha256
-            ).digest()
+            hmac.new(_test_ticket_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
         )
         if not hmac.compare_digest(signature, expected):
             raise ValueError("signature")
@@ -217,13 +297,7 @@ def consume_test_login_ticket(ticket: str, *, now: int | None = None) -> str:
         raise ValueError("invalid test login ticket") from exc
 
     digest = hashlib.sha256(ticket.encode("utf-8")).hexdigest()
-    with _TEST_TICKET_LOCK:
-        expired = [key for key, expiry in _CONSUMED_TEST_TICKETS.items() if expiry <= current]
-        for key in expired:
-            _CONSUMED_TEST_TICKETS.pop(key, None)
-        if digest in _CONSUMED_TEST_TICKETS:
-            raise ValueError("test login ticket already consumed")
-        _CONSUMED_TEST_TICKETS[digest] = expires_at
+    _consume_test_ticket_digest(digest, expires_at, current)
     return digest[:16]
 
 

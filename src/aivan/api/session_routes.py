@@ -5,8 +5,13 @@ import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy.orm import Session
 
-from aivan.api.request_context import RequestContext, resolve_request_context
+from aivan.api.request_context import (
+    RequestContext,
+    configured_tenant_ids,
+    resolve_request_context,
+)
 from aivan.api.session_auth import (
     CSRF_COOKIE,
     SESSION_COOKIE,
@@ -17,6 +22,18 @@ from aivan.api.session_auth import (
     test_session_ttl_seconds,
     validate_test_ticket_configuration,
 )
+from aivan.db.models import (
+    ApprovalRecord,
+    AuditLogRecord,
+    CaseConversationRecord,
+    CaseMessageRecord,
+    CaseParticipantRecord,
+    ExecutionEventRecord,
+    InquiryDraftRecord,
+    Project,
+    RelayReceiptRecord,
+)
+from aivan.db.session import get_db
 
 
 router = APIRouter(prefix="/api/session", tags=["session"])
@@ -55,22 +72,17 @@ def _configured_test_identity() -> tuple[str, str, tuple[str, ...], str]:
     tenant_id = os.environ.get("AIVAN_UI_TEST_TENANT_ID", "").strip()
     actor_id = os.environ.get("AIVAN_UI_TEST_ACTOR_ID", "").strip()
     roles = tuple(
-        dict.fromkeys(
-            item.strip().lower()
-            for item in os.environ.get(
-                "AIVAN_UI_TEST_ALLOWED_ROLES", "auditor"
-            ).split(",")
-            if item.strip()
-        )
+        item.strip().lower()
+        for item in os.environ.get("AIVAN_UI_TEST_ALLOWED_ROLES", "auditor").split(",")
+        if item.strip()
     )
     default_role = os.environ.get("AIVAN_UI_TEST_DEFAULT_ROLE", "auditor").strip().lower()
-    production_tenant = os.environ.get("AIVAN_TENANT_ID", "").strip()
     if (
         not tenant_id
-        or tenant_id == production_tenant
+        or tenant_id in configured_tenant_ids()
         or not actor_id
-        or not roles
-        or default_role not in roles
+        or roles != ("auditor",)
+        or default_role != "auditor"
     ):
         raise HTTPException(
             status_code=503,
@@ -140,17 +152,35 @@ def login(request: Request, response: Response, body: dict | None = None):
 
 
 @router.post("/test-login")
-def test_login(response: Response, body: dict | None = None):
+def test_login(
+    response: Response,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+):
     """Issue an isolated test session without the ordinary login ceremony."""
 
     tenant_id, actor_id, allowed_roles, role = _configured_test_identity()
+    tenant_models = (
+        Project,
+        InquiryDraftRecord,
+        RelayReceiptRecord,
+        ExecutionEventRecord,
+        CaseConversationRecord,
+        CaseParticipantRecord,
+        CaseMessageRecord,
+        ApprovalRecord,
+        AuditLogRecord,
+    )
+    if any(
+        db.query(model).filter(model.tenant_id == tenant_id).first() is not None
+        for model in tenant_models
+    ):
+        raise HTTPException(status_code=503, detail={"error": "TEST_TENANT_NOT_EMPTY"})
     ticket = str((body or {}).get("ticket") or "").strip()
     try:
         ticket_digest = consume_test_login_ticket(ticket)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=403, detail={"error": "INVALID_TEST_ACCESS"}
-        ) from exc
+        raise HTTPException(status_code=403, detail={"error": "INVALID_TEST_ACCESS"}) from exc
     token, csrf_token, expires_at = issue_ui_session(
         tenant_id=tenant_id,
         actor_id=actor_id,
@@ -202,9 +232,7 @@ def switch_role(
     if session is None:
         raise HTTPException(status_code=403, detail={"error": "UI_SESSION_REQUIRED"})
     if session.test_account:
-        raise HTTPException(
-            status_code=403, detail={"error": "TEST_ACCOUNT_ROLE_FIXED"}
-        )
+        raise HTTPException(status_code=403, detail={"error": "TEST_ACCOUNT_ROLE_FIXED"})
     actor_id, allowed_roles, role = configured_ui_identity(str(body.get("role") or ""))
     if actor_id != context.actor_id or role not in session.allowed_roles:
         raise HTTPException(status_code=403, detail={"error": "ROLE_SWITCH_FORBIDDEN"})
