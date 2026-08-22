@@ -1,0 +1,49 @@
+name: Block myAIVAN to main
+
+on:
+  pull_request_target:
+    branches: ["main"]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  direction-policy:
+    name: myAIVAN never merges to main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce permanent branch separation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          shopt -s nocasematch
+          if [[ "$HEAD_REF" == *myaivan* ]]; then
+            echo "myAIVAN branches are permanent and may never target main."
+            exit 1
+          fi
+
+          page=1
+          while true; do
+            response="$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$API_URL/repos/$REPOSITORY/pulls/$PR_NUMBER/files?per_page=100&page=$page")"
+            jq -e 'type == "array"' >/dev/null <<<"$response"
+            count="$(jq -e 'length' <<<"$response")"
+            if jq -r '.[].filename' <<<"$response" | grep -E \
+              '^(docs/MYAIVAN_BRANCH_POLICY\.md|src/aivan/app/static/giraffe-(icon-tight|logo)\.png)$'; then
+              echo "myAIVAN-owned assets and policy may never merge into main."
+              exit 1
+            fi
+            if [[ "$count" -lt 100 ]]; then
+              break
+            fi
+            page=$((page + 1))
+          done
