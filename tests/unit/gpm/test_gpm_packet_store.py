@@ -1,6 +1,7 @@
 """GPMPacketStore unit tests — 12 scenarios with mock GiraffeDBClient."""
 import pytest
 from unittest.mock import MagicMock
+from fastapi import HTTPException
 
 from aivan.gpm.packet_store import GPMPacketStore
 from aivan.gpm.giraffe_db_client import GiraffeDBClientError
@@ -128,3 +129,50 @@ def test_list_by_tenant_degrades_to_memory(store, mock_db):
     store._mem["gpm_pkt_test001"] = SAMPLE
     result = store.list_by_tenant(tenant_id="default")
     assert len(result) >= 1
+
+
+@pytest.mark.parametrize("operation", ["save", "get", "update", "audit", "list"])
+def test_production_db_failure_never_degrades_to_memory(monkeypatch, mock_db, operation):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    store = GPMPacketStore(db_client=mock_db)
+    store._mem["gpm_pkt_test001"] = dict(SAMPLE)
+
+    if operation == "save":
+        mock_db.create_packet.side_effect = GiraffeDBClientError("err", 503)
+        call = lambda: store.save(SAMPLE)
+    elif operation == "get":
+        mock_db.get_packet.side_effect = GiraffeDBClientError("err", 503)
+        call = lambda: store.get("gpm_pkt_test001", tenant_id="default")
+    elif operation == "update":
+        mock_db.update_packet_status.side_effect = GiraffeDBClientError("err", 503)
+        call = lambda: store.update_status(
+            "gpm_pkt_test001", "approved", "op-001", tenant_id="default"
+        )
+    elif operation == "audit":
+        mock_db.create_audit_record.side_effect = GiraffeDBClientError("err", 503)
+        call = lambda: store.write_audit("gpm_pkt_test001", "op-001", "approved")
+    else:
+        mock_db.list_packets.side_effect = GiraffeDBClientError("err", 503)
+        call = lambda: store.list_by_tenant(tenant_id="default")
+
+    with pytest.raises(HTTPException) as exc_info:
+        call()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "GPM_PERSISTENCE_UNAVAILABLE"
+
+
+def test_production_durable_success_never_populates_memory(monkeypatch, mock_db):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    store = GPMPacketStore(db_client=mock_db)
+    approved = {**SAMPLE, "approval_status": "approved"}
+    mock_db.create_packet.return_value = SAMPLE
+    mock_db.get_packet.return_value = SAMPLE
+    mock_db.update_packet_status.return_value = approved
+
+    assert store.save(SAMPLE) == SAMPLE
+    assert store.get(SAMPLE["packet_id"], tenant_id="default") == SAMPLE
+    assert store.update_status(
+        SAMPLE["packet_id"], "approved", "op-001", tenant_id="default"
+    ) == approved
+    assert store._mem == {}

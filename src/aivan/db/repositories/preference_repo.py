@@ -17,12 +17,14 @@ class UserPreferenceRepository:
         value: dict,
         source: str = "",
         confidence: float = 0.5,
+        tenant_id: str = "legacy",
     ) -> UserPreferenceRecord:
         record = (
             self.db.query(UserPreferenceRecord)
             .filter(
                 UserPreferenceRecord.user_id == user_id,
                 UserPreferenceRecord.preference_type == preference_type,
+                UserPreferenceRecord.tenant_id == tenant_id,
             )
             .order_by(UserPreferenceRecord.updated_at.desc())
             .first()
@@ -30,6 +32,7 @@ class UserPreferenceRepository:
         if record is None:
             record = UserPreferenceRecord(
                 preference_id=f"pref_{new_id()}",
+                tenant_id=tenant_id,
                 user_id=user_id,
                 preference_type=preference_type,
             )
@@ -40,13 +43,14 @@ class UserPreferenceRepository:
         self.db.flush()
         return record
 
-    def list_for_user(self, user_id: str) -> list[UserPreferenceRecord]:
+    def list_for_user(self, user_id: str, *, tenant_id: str = "legacy") -> list[UserPreferenceRecord]:
         return (
             self.db.query(UserPreferenceRecord)
-            .filter(UserPreferenceRecord.user_id == user_id)
+            .filter(UserPreferenceRecord.user_id == user_id, UserPreferenceRecord.tenant_id == tenant_id)
             .order_by(UserPreferenceRecord.updated_at.desc())
             .all()
         )
 
-    def list_all(self) -> list[UserPreferenceRecord]:
-        return self.db.query(UserPreferenceRecord).order_by(UserPreferenceRecord.updated_at.desc()).all()
+    def list_all(self, *, tenant_id: str = "legacy") -> list[UserPreferenceRecord]:
+        return self.db.query(UserPreferenceRecord).filter(UserPreferenceRecord.tenant_id == tenant_id).order_by(UserPreferenceRecord.updated_at.desc()).all()
+

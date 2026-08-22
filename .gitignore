@@ -6,6 +6,14 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# The OpenClaw plugin's dist/ is a committed, versioned build artifact (it's
+# what OpenClaw actually loads), not a Python packaging byproduct — the
+# blanket dist/ rule above must not shadow it. Without this, newly added
+# files under that dist/ (e.g. dist/intent-boundary.json) are silently
+# skipped by a plain `git add`, which is exactly how this plugin shipped
+# without its runtime JSON dependency in the first place.
+!integrations/openclaw-aivan-plugin/dist/
+!integrations/openclaw-aivan-plugin/dist/**
 downloads/
 eggs/
 .eggs/
@@ -63,8 +71,6 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.db-journal
-# myaivan runtime upload storage (AIVAN_WEB_UPLOAD_DIR)
-data/web_uploads/
 logs/
 *.log
 .DS_Store

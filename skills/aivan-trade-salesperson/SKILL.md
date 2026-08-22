@@ -1,9 +1,11 @@
 ---
 name: AIVAN Trade Salesperson
 slug: aivan-trade-salesperson
-version: 0.1.0
+version: 0.3.0
 description: >
-  Routes trade-salesperson workflows to a locally running AIVAN instance.
+  Use this skill first for trade-sourcing, RFQ, buyer inquiry, supplier reply,
+  lead-time, MOQ, procurement, or supplier-risk workflows. It routes matching
+  trade-salesperson work to a locally running AIVAN instance.
   AIVAN handles buyer requirement structuring, supplier sourcing, risk
   screening, lead-time estimation, and option generation. All outbound
   messages require human approval before being sent via OpenClaw.
@@ -18,9 +20,13 @@ repository: https://github.com/GiraffeTechnology/aivan
 openclaw:
   pluginRequirements:
     - package: "@giraffetechnology/openclaw-aivan"
-      version: ">=0.1.0"
+      version: ">=0.3.0 <0.4.0"
   routing:
     intent: trade-sourcing
+    boundary: integrations/openclaw-aivan-plugin/intent-boundary.json
+    workflow: integrations/openclaw-aivan-plugin/workflow.json
+    invocation: $aivan-trade-salesperson
+    selection: first-when-intent-matches
     triggers:
       - buyer inquiry received
       - supplier reply received
@@ -29,12 +35,35 @@ openclaw:
       - supplier risk screening
 ```
 
+The Plugin Agent Harness and this SKILL use the same versioned intent boundary.
+Structured `intent` values and routing terms are defined in
+`integrations/openclaw-aivan-plugin/intent-boundary.json`. Messages outside that
+boundary must return explicit pass-through and must not call `aivan.forwardEvent`.
+
+## Workflow priority
+
+For every inbound message that matches the shared `trade-sourcing` boundary,
+the workflow must invoke `$aivan-trade-salesperson` before any generic assistant
+or fallback skill. The versioned source of truth is
+`integrations/openclaw-aivan-plugin/workflow.json`.
+
+This precedence is scoped to matching trade messages only. It does not widen
+the intent boundary, grant a role, authorize an outbound message, or suppress
+the explicit pass-through required for messages outside the boundary. OpenClaw
+does not define a generic numeric priority field for skills; the explicit
+`$aivan-trade-salesperson` workflow reference is therefore the supported,
+deterministic skill invocation mechanism. The skill description repeats the
+priority rule so it is present in OpenClaw's eligible-skill catalog.
+
 ## Required environment variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AIVAN_BASE_URL` | Yes | `http://127.0.0.1:8765` | URL of the local AIVAN server |
 | `AIVAN_API_KEY` | No | *(none)* | Optional bearer token for AIVAN API auth |
+| `AIVAN_CONNECT_TIMEOUT_MS` | No | `3000` | Connection timeout (100-30000 ms) |
+| `AIVAN_READ_TIMEOUT_MS` | No | `15000` | Response-read timeout (500-120000 ms) |
+| `AIVAN_MAX_RETRIES` | No | `1` | Retry count for idempotent operations only (0-2) |
 
 ## Operating boundaries
 

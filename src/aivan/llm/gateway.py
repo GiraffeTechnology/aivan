@@ -9,6 +9,12 @@ from aivan.llm.policy import (
     is_external_provider,
     llm_api_enabled,
 )
+from aivan.llm.errors import (
+    LlmAbortedError,
+    LlmBusyError,
+    LlmContextOverflowError,
+    LlmTimeoutError,
+)
 
 _provider_instance: LLMProvider | None = None
 
@@ -132,6 +138,17 @@ def llm_complete_json(
         ))
         return result
     except ExternalModelApiRequiresApprovalError:
+        raise
+    except (LlmBusyError, LlmContextOverflowError, LlmTimeoutError, LlmAbortedError) as exc:
+        # Deliberate Token-Guard decisions (server-protection circuit-breaks),
+        # not "the local model is unavailable". Surface them unchanged so the API
+        # layer can map busy->503, overflow->413, etc. Never a mock fallback.
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        _emit(ProviderCallEvent(
+            task=task, configured_provider=name, used_provider=name, model=model, ok=False,
+            fell_back_to_mock=False, external_api_called=is_external_provider(name),
+            latency_ms=latency_ms, error=f"{exc.__class__.__name__}: {exc.error_code}",
+        ))
         raise
     except Exception as exc:
         latency_ms = (time.perf_counter() - started) * 1000.0

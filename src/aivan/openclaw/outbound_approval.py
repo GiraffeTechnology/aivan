@@ -21,15 +21,22 @@ def send_if_approved(draft_id: str, db_session) -> OpenClawSendResponse:
         from aivan.execution.channel_policy import validate_draft_send_policy
         validate_draft_send_policy(draft)
     except ValueError as exc:
+        repo.mark_send_failed(draft_id, reason="channel_policy_blocked")
         return OpenClawSendResponse(success=False, error=str(exc))
 
     if (draft.channel or "").strip().lower() in {"email", "smtp"}:
         from aivan.openclaw.email_transport import is_real_test_email_mode, send_real_test_email
 
         if is_real_test_email_mode():
-            response = send_real_test_email(draft)
+            try:
+                response = send_real_test_email(draft)
+            except Exception:
+                repo.mark_send_failed(draft_id, reason="email_transport_error")
+                return OpenClawSendResponse(success=False, error="email transport failed")
             if response.success:
                 repo.mark_sent(draft_id)
+            else:
+                repo.mark_send_failed(draft_id, reason="email_transport_failed")
             return response
 
     client = get_openclaw_client()
@@ -41,7 +48,13 @@ def send_if_approved(draft_id: str, db_session) -> OpenClawSendResponse:
         message_type=draft.message_type or "text",
         attachments=draft.attachments_json or [],
     )
-    response = client.send_message(request)
+    try:
+        response = client.send_message(request)
+    except Exception:
+        repo.mark_send_failed(draft_id, reason="transport_error")
+        return OpenClawSendResponse(success=False, error="outbound transport failed")
     if response.success:
         repo.mark_sent(draft_id)
+    else:
+        repo.mark_send_failed(draft_id, reason="transport_failed")
     return response

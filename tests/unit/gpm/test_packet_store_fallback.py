@@ -1,6 +1,9 @@
 """GPMPacketStore in-memory fallback tenant isolation tests."""
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
+
 from aivan.gpm.packet_store import GPMPacketStore
 
 
@@ -95,3 +98,15 @@ class TestUpdateStatusInMemoryTenantIsolation:
         result = store.update_status("pkt-a1", "approved", "op-a", tenant_id="tenant-a")
         assert result is not None
         assert result["approval_status"] == "approved"
+
+
+def test_production_store_without_database_rejects_memory_write(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    store = GPMPacketStore(db_client=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save(_packet("pkt-prod", "tenant-prod"))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "GPM_PERSISTENCE_UNAVAILABLE"
+    assert store._mem == {}

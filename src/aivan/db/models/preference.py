@@ -12,6 +12,7 @@ class UserPreferenceRecord(Base):
     __tablename__ = "user_preferences"
 
     preference_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
     preference_type: Mapped[str] = mapped_column(String(128), index=True)
     value_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -23,3 +24,4 @@ class UserPreferenceRecord(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+

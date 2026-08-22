@@ -1,6 +1,6 @@
 # AIVAN — Private-Domain AI Trade Execution Worker
 
-`Python 3.11+` | `AIVAN v0.2.0` | `Standalone Product` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
+`Python 3.11+` | `AIVAN v0.3.0` | `Standalone Product` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
 
 AIVAN is a private-domain AI trade execution worker for high-stakes RFQ and quote workflows.
 
@@ -36,19 +36,6 @@ uv run aivan demo              # offline core RFQ demo (mock providers)
 ```
 
 The local dashboard is served at `http://127.0.0.1:8765/app`.
-
-The myaivan conversation UI (digital trade assistant, myaivan.com) is served at
-`http://127.0.0.1:8765/myaivan`: paste an inquiry, review AIVAN-generated
-outbound drafts, copy them for manual IM paste (WeChat / WhatsApp / LINE /
-Wangwang are never auto-sent), send email through aivan-openclaw with explicit
-confirmation, and export a Markdown case backup. All outbound content requires
-human confirmation.
-
-Access control: in local/dev with no key configured, myaivan runs in open demo
-mode. In production (`AIVAN_ENV=production`) it fails closed — `AIVAN_API_KEY`
-or `AIVAN_AUTH_SECRET` must be set, browsers sign in at `/myaivan/login`
-(session cookie), and API clients send `X-AIVAN-API-Key` or a Bearer token.
-Only the i18n string catalog (no user/case data) stays public.
 
 ## Test
 
@@ -126,7 +113,7 @@ Supplier-side events are never misclassified as new buyer inquiries;
 
 ```text
 Current product role: standalone private-domain trade execution worker
-Current package: AIVAN v0.2.0
+Current package: AIVAN v0.3.0
 Primary runtime: FastAPI + local DB + OpenClaw bridge
 Primary channel path: OpenClaw normalized events
 GLTG integration: v1 HTTP client, v2 contract target
@@ -373,6 +360,20 @@ AIVAN_LANGUAGE_SKILL_FAIL_SOFT=true
 
 See `.env.example` for the full annotated list.
 
+Production is intentionally stricter:
+
+- set `AIVAN_DB_URL` explicitly through the authorized configuration store;
+- bind `AIVAN_API_KEY` to `AIVAN_TENANT_ID`, or use a reviewed
+  `AIVAN_TENANT_API_KEYS` mapping;
+- set `GIRAFFE_DB_BASE_URL` for GPM durable persistence and active-tenant checks;
+- set `AIVAN_CORS_ORIGINS` to an exact comma-separated browser allowlist
+  (production defaults to none and rejects `*`);
+- treat `deploy/aivan.production.env.example` as a schema, not as authorization
+  to deploy or modify a host.
+
+In production, a caller-supplied `X-Tenant-ID` is never authentication. GPM
+fails closed when giraffe-db is missing, unavailable, or not durable.
+
 LLM providers are optional and must not bypass deterministic gates, GLTG, giraffe-db, or the language boundary.
 
 ---
@@ -407,6 +408,22 @@ Channel connectivity comes from OpenClaw.
 Execution control lives in AIVAN.
 Final responsibility stays with humans.
 ```
+
+### Stage 4 channel delivery contract
+
+| Channel | Delivery mode |
+| --- | --- |
+| Email | `auto_send` |
+| LINE | `auto_send` |
+| WeChat / Wangwang | `guided_relay` |
+| WhatsApp | `unsupported` |
+
+Guided relay keeps approved messages in `GET /api/relay/outbox`. After a human
+copies and sends the message in the channel client, the client records delivery
+through `POST /api/relay/{draft_id}/confirm` with an `Idempotency-Key` and a
+receipt reference. Relayed replies enter the same tenant-scoped Case pipeline
+through `POST /api/relay/inbound`; they are not attributed to a fixed service
+actor.
 
 ---
 

@@ -2,37 +2,45 @@ from __future__ import annotations
 import threading
 from aivan.sourcing.supplier_models import SupplierProfile
 
-_registry: dict[str, SupplierProfile] = {}
+_registry: dict[tuple[str, str], SupplierProfile] = {}
 _lock = threading.Lock()
 
-def register_supplier(profile: SupplierProfile) -> None:
+def register_supplier(profile: SupplierProfile, *, tenant_id: str = "legacy") -> None:
     with _lock:
-        _registry[profile.supplier_id] = profile
+        _registry[(tenant_id, profile.supplier_id)] = profile
 
-def get_supplier(supplier_id: str) -> SupplierProfile | None:
-    return _registry.get(supplier_id)
+def get_supplier(supplier_id: str, *, tenant_id: str = "legacy") -> SupplierProfile | None:
+    return _registry.get((tenant_id, supplier_id))
 
-def list_suppliers() -> list[SupplierProfile]:
-    return list(_registry.values())
+def list_suppliers(*, tenant_id: str = "legacy") -> list[SupplierProfile]:
+    return [profile for (scope, _), profile in _registry.items() if scope == tenant_id]
 
-def list_active() -> list[SupplierProfile]:
-    return [s for s in _registry.values() if s.active]
+def list_active(*, tenant_id: str = "legacy") -> list[SupplierProfile]:
+    return [s for s in list_suppliers(tenant_id=tenant_id) if s.active]
 
-def count() -> int:
-    return len(_registry)
+def count(*, tenant_id: str = "legacy") -> int:
+    return len(list_suppliers(tenant_id=tenant_id))
 
-def clear_registry() -> None:
+def clear_registry(*, tenant_id: str | None = None) -> None:
     with _lock:
-        _registry.clear()
+        if tenant_id is None:
+            _registry.clear()
+        else:
+            for key in [key for key in _registry if key[0] == tenant_id]:
+                _registry.pop(key, None)
 
-def load_from_db(db_session) -> int:
+def load_from_db(db_session, *, tenant_id: str | None = "legacy") -> int:
     from aivan.db.repositories.supplier_repo import SupplierRepository
     repo = SupplierRepository(db_session)
-    records = repo.list_active()
+    records = (
+        repo.list_active_all_tenants()
+        if tenant_id is None
+        else repo.list_active(tenant_id=tenant_id)
+    )
     loaded = 0
     for r in records:
         profile = SupplierProfile(
-            supplier_id=r.supplier_id,
+            supplier_id=r.supplier_id or r.storage_key,
             name=r.name,
             company_type=r.company_type or "",
             categories=r.categories_json or [],
@@ -59,6 +67,7 @@ def load_from_db(db_session) -> int:
             notes=r.notes or "",
             active=r.active,
         )
-        register_supplier(profile)
+        register_supplier(profile, tenant_id=r.tenant_id or "legacy")
         loaded += 1
     return loaded
+

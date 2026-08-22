@@ -16,11 +16,13 @@ from aivan.utils.ids import new_id
 
 def build_inbound_idempotency_key(
     *,
+    tenant_id: str = "legacy",
     source: str,
     channel: str,
     channel_account_id: str,
     conversation_id: str,
     message_id: str,
+    explicit_idempotency_key: str = "",
 ) -> str | None:
     """Build a stable idempotency key for an inbound event.
 
@@ -28,10 +30,14 @@ def build_inbound_idempotency_key(
     deduplicate (no message id and no conversation id) — such events are
     processed without idempotency rather than being wrongly collapsed together.
     """
+    if explicit_idempotency_key.strip():
+        raw = f"{tenant_id.strip()}|explicit|{explicit_idempotency_key.strip()}"
+        return f"inb_{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:48]}"
     if not (message_id or "").strip() and not (conversation_id or "").strip():
         return None
     raw = "|".join(
         [
+            (tenant_id or "legacy").strip(),
             (source or "").strip(),
             (channel or "").strip(),
             (channel_account_id or "").strip(),
@@ -58,6 +64,7 @@ class InboundEventRepository:
         self,
         idempotency_key: str,
         *,
+        tenant_id: str = "legacy",
         project_id: str,
         event_type: str,
         result_json: dict,
@@ -72,6 +79,7 @@ class InboundEventRepository:
             return existing
         record = ProcessedInboundEvent(
             id=f"pie_{new_id()}",
+            tenant_id=tenant_id or "legacy",
             idempotency_key=idempotency_key,
             project_id=project_id or "",
             event_type=event_type or "",

@@ -203,7 +203,8 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert {draft["status"] for draft in supplier_drafts} == {"pending_approval"}
     assert {draft["draft_type"] for draft in supplier_drafts} == {"supplier_inquiry_email"}
     assert user_notifications[0]["draft_type"] == "approval_request_im"
-    assert user_notifications[0]["status"] == "sent"
+    assert user_notifications[0]["status"] == "pending_approval"
+    assert "outbound_authorization=required" in user_notifications[0]["notes"]
 
 
 def test_chinese_user_control_message_is_localized_and_pending_approval():
@@ -380,7 +381,8 @@ def test_customer_email_ingestion_creates_user_im_approval_notification(api_clie
     assert user_notifications[0]["channel"] == "im"
     assert user_notifications[0]["target_peer_id"] == "user_001"
     assert user_notifications[0]["draft_type"] == "approval_request_im"
-    assert user_notifications[0]["status"] == "sent"
+    assert user_notifications[0]["status"] == "pending_approval"
+    assert "outbound_authorization=required" in user_notifications[0]["notes"]
 
 
 def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_client):
@@ -631,7 +633,7 @@ def test_counterparty_personal_im_draft_cannot_be_sent(api_db):
 
     assert result.success is False
     assert "channel policy blocks" in (result.error or "")
-    assert repo.get(draft.draft_id).status == "approved"
+    assert repo.get(draft.draft_id).status == "send_failed"
 
 
 # ── P2 acceptance tests ───────────────────────────────────────────────────────

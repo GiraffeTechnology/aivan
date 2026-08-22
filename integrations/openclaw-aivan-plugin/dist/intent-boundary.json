@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "intent": "trade-sourcing",
+  "structuredIntents": ["trade-sourcing", "trade_sourcing", "rfq", "sourcing"],
+  "businessRoles": [
+    "buyer",
+    "customer",
+    "b_side",
+    "supplier",
+    "seller",
+    "m_side",
+    "sales",
+    "operator",
+    "procurement",
+    "follow_up",
+    "qc",
+    "logistics",
+    "approver"
+  ],
+  "routingTerms": {
+    "en": [
+      "request for quotation",
+      "rfq",
+      "supplier quote",
+      "supplier reply",
+      "source suppliers",
+      "sourcing request",
+      "lead time",
+      "minimum order quantity",
+      "moq",
+      "procurement"
+    ],
+    "zh": ["询价", "报价", "供应商", "采购", "交期", "起订量", "质检", "物流"],
+    "ja": ["見積", "仕入", "調達", "納期", "供給者", "最小発注数量"]
+  }
+}

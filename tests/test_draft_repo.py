@@ -102,6 +102,16 @@ def test_mark_sent(db_session):
     assert sent.sent_at is not None
 
 
+def test_mark_relayed_records_distinct_terminal_status(db_session):
+    repo = DraftRepository(db_session)
+    draft = _create_draft(repo)
+    repo.mark_approved_pending_send(draft.draft_id)
+    relayed = repo.mark_relayed(draft.draft_id)
+    assert relayed is not None
+    assert relayed.status == "relayed"
+    assert relayed.sent_at is not None
+
+
 def test_list_all_pending(db_session):
     repo = DraftRepository(db_session)
     _create_draft(repo, "proj_A")

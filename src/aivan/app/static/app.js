@@ -1,252 +1,451 @@
-// AIVAN Frontend Application
+'use strict';
 
-function showPanel(name) {
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    const panel = document.getElementById('panel-' + name);
-    if (panel) panel.classList.add('active');
-    if (name === 'projects') loadProjects();
-    if (name === 'suppliers') loadSuppliers();
-    if (name === 'platforms') { loadPlatforms(); loadSuggestions(); }
-    if (name === 'accounts') loadAccounts();
+const state = {
+  csrf: '',
+  session: null,
+  bootstrap: null,
+  cases: [],
+  offset: 0,
+  limit: 20,
+  total: 0,
+  selectedCase: null,
+};
+
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const roleLabels = {
+  admin: '管理员', sales: '销售', procurement: '采购', follow_up: '跟单',
+  approver: '审批人', auditor: '审计员', qc: '质检', logistics: '物流',
+  buyer: '买家', supplier: '供应商',
+};
+const stateLabels = {
+  inquiry: '询盘', sourcing: '寻源', awaiting_supplier: '等待供应商',
+  supplier_replied: '供应商已回复', awaiting_approval: '等待审批',
+  approved: '已审批', qc: '质检', logistics: '物流', completed: '已完成',
+  cancelled: '已取消',
+};
+const t = (source) => window.myAivanI18n?.t(source) || source;
+const roleLabel = (role) => t(roleLabels[role] || role);
+const stateLabel = (caseState) => t(stateLabels[caseState] || caseState);
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[char]);
 }
 
-async function apiFetch(url, options = {}) {
-    const res = await fetch(url, {
+function cookie(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const item = document.cookie.split('; ').find((entry) => entry.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+}
+
+function requestId(prefix = 'ui') {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function toast(message, kind = 'info') {
+  const node = $('#toast');
+  node.textContent = message;
+  node.className = `toast ${kind}`;
+  node.hidden = false;
+  window.clearTimeout(toast.timer);
+  toast.timer = window.setTimeout(() => { node.hidden = true; }, 4200);
+}
+
+async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const headers = new Headers(options.headers || {});
+  if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    state.csrf = state.csrf || cookie('aivan_csrf');
+    if (state.csrf) headers.set('X-AIVAN-CSRF', state.csrf);
+    if (!headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestId('myaivan'));
+  }
+  const response = await fetch(path, { ...options, method, headers, credentials: 'same-origin' });
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('json') ? await response.json() : await response.text();
+  if (!response.ok) {
+    const detail = payload && typeof payload === 'object' ? payload.detail : payload;
+    const message = typeof detail === 'string' ? detail : (detail?.error || `HTTP ${response.status}`);
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+function showLogin(message = '') {
+  $('#login-view').hidden = false;
+  $('#app-shell').hidden = true;
+  const error = $('#login-error');
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function showApp() {
+  $('#login-view').hidden = true;
+  $('#app-shell').hidden = false;
+}
+
+function setView(name) {
+  $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
+  $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
+  history.replaceState(null, '', `#${name}`);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (name === 'cases') loadCases();
+  if (name === 'relay') loadRelay();
+  if (name === 'health') loadHealth();
+}
+
+function populateRoles(roles, selected) {
+  const select = $('#role-select');
+  select.replaceChildren(...roles.map((role) => {
+    const option = document.createElement('option');
+    option.value = role;
+    option.textContent = roleLabel(role);
+    option.selected = role === selected;
+    return option;
+  }));
+}
+
+async function establishSession() {
+  state.csrf = cookie('aivan_csrf');
+  try {
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const testTicket = fragment.get('test');
+    if (testTicket) {
+      history.replaceState(null, '', `${location.pathname}${location.search}#dashboard`);
+      const response = await fetch('/api/session/test-login', {
+        method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        ...options,
+        body: JSON.stringify({ ticket: testTicket }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        const error = new Error(payload.detail?.error || t('测试账号不可用'));
+        error.status = response.status;
+        throw error;
+      }
+      state.csrf = payload.csrf_token;
+    }
+    state.session = await api('/api/session');
+    showApp();
+    $('#test-account-banner').hidden = !state.session.test_account;
+    $$('.test-account-restricted').forEach((node) => {
+      node.hidden = Boolean(state.session.test_account);
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-    return res.json();
+    populateRoles(state.session.allowed_roles || [state.session.role], state.session.role);
+    await loadBootstrap();
+    await Promise.all([loadCases(true), loadHealth()]);
+    const requestedView = location.hash.slice(1);
+    const recoverableViews = ['dashboard', 'cases', 'new-inquiry', 'relay', 'health'];
+    setView(recoverableViews.includes(requestedView) ? requestedView : 'dashboard');
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) showLogin();
+    else showLogin(t('无法恢复会话，请重新登录。'));
+  }
 }
 
-async function sendMessage() {
-    const text = document.getElementById('msg-text').value.trim();
-    const conv = document.getElementById('msg-conv').value.trim();
-    const sender = document.getElementById('msg-sender').value.trim();
-    if (!text) return;
-    const resultBox = document.getElementById('message-result');
-    resultBox.textContent = 'Sending...';
-    try {
-        const data = await apiFetch('/api/openclaw/events', {
-            method: 'POST',
-            body: JSON.stringify({
-                source: 'openclaw',
-                channel: 'openclaw-weixin',
-                channel_account_id: 'salesperson-main',
-                conversation_id: conv || 'conv_demo_001',
-                message_id: 'msg_' + Date.now(),
-                sender_id: sender || 'customer_001',
-                sender_display_name: sender || 'Customer',
-                message_text: text,
-                message_type: 'text',
-                attachments: [],
-                timestamp: new Date().toISOString(),
-                mode: 'auto',
-            }),
-        });
-        resultBox.textContent = JSON.stringify(data, null, 2);
-    } catch (e) {
-        resultBox.textContent = 'Error: ' + e.message;
-    }
+async function login(event) {
+  event.preventDefault();
+  const keyInput = $('#access-key');
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/session/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-AIVAN-API-Key': keyInput.value },
+      body: '{}',
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail?.error || t('登录失败'));
+    state.csrf = payload.csrf_token;
+    keyInput.value = '';
+    state.session = payload;
+    showApp();
+    $('#test-account-banner').hidden = true;
+    populateRoles(payload.allowed_roles, payload.role);
+    await Promise.all([loadBootstrap(), loadCases(true), loadHealth()]);
+    setView('dashboard');
+  } catch (error) {
+    showLogin(error.message);
+  } finally {
+    keyInput.value = '';
+    button.disabled = false;
+  }
 }
 
-async function loadProjects() {
-    const list = document.getElementById('projects-list');
-    try {
-        const data = await apiFetch('/api/projects');
-        if (!data.projects.length) {
-            list.innerHTML = '<p style="color:#888">No projects yet. Send a message to create one.</p>';
-            return;
-        }
-        list.innerHTML = data.projects.map(p => `
-            <div class="card">
-                <h3>${p.project_id}</h3>
-                <p>Status: <span class="tag">${p.status}</span></p>
-                <p>Category: ${p.category || 'unknown'}</p>
-                <p>Customer: ${p.customer_id}</p>
-                <p>Created: ${p.created_at}</p>
-                <button onclick="loadProjectEvents('${p.project_id}')">View Events</button>
-                <div id="events-${p.project_id}" style="margin-top:1rem;font-size:0.8rem;color:#555;display:none;"></div>
-            </div>
-        `).join('');
-    } catch (e) {
-        list.innerHTML = '<p style="color:red">Error: ' + e.message + '</p>';
-    }
+async function logout() {
+  try { await api('/api/session/logout', { method: 'POST', body: '{}' }); } catch (_) { /* expire locally */ }
+  state.csrf = '';
+  state.session = null;
+  showLogin();
 }
 
-async function loadProjectEvents(projectId) {
-    const el = document.getElementById('events-' + projectId);
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-    if (el.style.display === 'none') return;
-    try {
-        const data = await apiFetch('/api/projects/' + projectId + '/events');
-        el.innerHTML = data.events.map(e =>
-            `<div style="padding:4px 0;border-top:1px solid #eee">[${e.event_type}] ${e.summary}</div>`
-        ).join('') || '<p>No events yet</p>';
-    } catch (e) {
-        el.innerHTML = 'Error: ' + e.message;
-    }
+async function switchRole(event) {
+  const previous = state.session.role;
+  try {
+    const payload = await api('/api/session/role', {
+      method: 'POST', body: JSON.stringify({ role: event.target.value }),
+    });
+    state.session = payload;
+    state.csrf = payload.csrf_token;
+    state.selectedCase = null;
+    setView('dashboard');
+    await Promise.all([loadBootstrap(), loadCases(true), loadHealth()]);
+    toast(`${t('已切换为')}${roleLabel(payload.role)}`, 'success');
+  } catch (error) {
+    event.target.value = previous;
+    toast(`${t('角色切换失败：')}${error.message}`, 'error');
+  }
 }
 
-async function loadSuppliers() {
-    const list = document.getElementById('suppliers-list');
-    try {
-        const data = await apiFetch('/api/suppliers');
-        if (!data.suppliers.length) {
-            list.innerHTML = '<p style="color:#888">No suppliers loaded. Run: uv run aivan import-suppliers data/sample_suppliers.csv</p>';
-            return;
-        }
-        list.innerHTML = data.suppliers.map(s => `
-            <div class="card">
-                <h3>${s.name}</h3>
-                <p>Type: <span class="tag">${s.company_type}</span></p>
-                <p>Categories: ${s.categories.map(c => '<span class="tag blue">'+c+'</span>').join('')}</p>
-                <p>MOQ: ${s.moq_min} – ${s.moq_max} | Daily capacity: ${s.daily_capacity}</p>
-                <p>Region: ${s.region}, ${s.country}</p>
-                <p>Quality: ${(s.quality_score*100).toFixed(0)}% | Delivery: ${(s.delivery_score*100).toFixed(0)}%</p>
-            </div>
-        `).join('');
-    } catch (e) {
-        list.innerHTML = '<p style="color:red">Error: ' + e.message + '</p>';
-    }
+async function loadBootstrap() {
+  state.bootstrap = await api('/api/workbench/bootstrap');
+  const sha = state.bootstrap.candidate_sha;
+  $('#candidate-banner').innerHTML = sha
+    ? `<strong>${t('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(state.bootstrap.api_version)}</span>`
+    : `<strong>${t('候选未冻结')}</strong><span>${t('仅可作为非生产工作台使用。')}</span>`;
 }
 
-async function loadPlatforms() {
-    const list = document.getElementById('platforms-list');
-    try {
-        const data = await apiFetch('/api/platforms');
-        list.innerHTML = data.platforms.map(p => `
-            <div class="card platform-${p.status}">
-                <h3>${p.display_name} ${p.built_in ? '<span class="tag green">Built-in</span>' : ''}</h3>
-                <p>Status: <span class="tag">${p.status}</span></p>
-                <p>Domains: ${p.domain_patterns.join(', ')}</p>
-                <p>Search: ${p.allow_marketplace_search ? '✓' : '✗'} | Account mgmt: ${p.allow_openclaw_account_management ? '✓' : '✗'}</p>
-            </div>
-        `).join('');
-    } catch (e) {
-        list.innerHTML = '<p style="color:red">Error: ' + e.message + '</p>';
-    }
+function caseCard(item) {
+  const summary = item.requirement_summary || {};
+  return `<article class="case-card" tabindex="0" data-case-id="${escapeHtml(item.case_id)}">
+    <div class="case-main"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>
+      <h3>${escapeHtml(summary.product_name || item.category || t('未命名询盘'))}</h3>
+      <p>${escapeHtml(item.customer_display_name || item.customer_id || t('未知客户'))} · ${escapeHtml(item.channel || 'manual')}</p>
+    </div>
+    <div class="case-meta"><code>${escapeHtml(item.case_id)}</code><time>${escapeHtml(formatTime(item.updated_at))}</time></div>
+  </article>`;
 }
 
-async function loadSuggestions() {
-    const list = document.getElementById('suggestions-list');
-    try {
-        const data = await apiFetch('/api/platforms/suggestions');
-        if (!data.suggestions.length) {
-            list.innerHTML = '<p style="color:#888">No pending platform suggestions.</p>';
-            return;
-        }
-        list.innerHTML = data.suggestions.map(s => `
-            <div class="card platform-pending">
-                <h3>${s.display_name}</h3>
-                <p>Domain: ${s.domain}</p>
-                <p>Reason: ${s.reason}</p>
-                <button class="approve" onclick="approveS('${s.suggestion_id}')">Approve</button>
-                <button class="reject" onclick="rejectS('${s.suggestion_id}')">Reject</button>
-                <button onclick="blockS('${s.suggestion_id}')">Block</button>
-            </div>
-        `).join('');
-    } catch (e) {
-        list.innerHTML = '<p style="color:red">Error: ' + e.message + '</p>';
-    }
+function formatTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  const locale = document.documentElement.lang || 'en';
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
-async function approveS(id) { await apiFetch('/api/platforms/suggestions/'+id+'/approve',{method:'POST'}); loadSuggestions(); loadPlatforms(); }
-async function rejectS(id) { await apiFetch('/api/platforms/suggestions/'+id+'/reject',{method:'POST'}); loadSuggestions(); }
-async function blockS(id) { await apiFetch('/api/platforms/suggestions/'+id+'/block',{method:'POST'}); loadSuggestions(); }
-
-async function loadAccounts() {
-    const list = document.getElementById('accounts-list');
-    try {
-        const data = await apiFetch('/api/openclaw/accounts');
-        if (!data.accounts.length) {
-            list.innerHTML = '<p style="color:#888">No OpenClaw accounts registered. AIVAN does not store platform credentials — accounts are managed by OpenClaw.</p>';
-            return;
-        }
-        list.innerHTML = data.accounts.map(a => `
-            <div class="card">
-                <h3>${a.display_name || a.account_connection_id}</h3>
-                <p>Platform: <span class="tag blue">${a.platform}</span></p>
-                <p>Status: <span class="tag ${a.status==='connected'?'green':a.status==='revoked'?'red':'yellow'}">${a.status}</span></p>
-                <p>Permissions: ${a.permissions.join(', ')}</p>
-                <button onclick="revokeAccount('${a.account_connection_id}')">Revoke</button>
-            </div>
-        `).join('');
-    } catch (e) {
-        list.innerHTML = '<p style="color:red">Error: ' + e.message + '</p>';
-    }
+async function loadCases(reset = false) {
+  if (reset) state.offset = 0;
+  const filter = $('#case-state-filter')?.value || '';
+  const params = new URLSearchParams({ offset: state.offset, limit: state.limit });
+  if (filter) params.set('state', filter);
+  try {
+    const payload = await api(`/api/workbench/cases?${params}`);
+    state.cases = payload.items;
+    state.total = payload.page.total;
+    const html = payload.items.length ? payload.items.map(caseCard).join('') : emptyHtml();
+    $('#case-list').innerHTML = html;
+    $('#recent-cases').innerHTML = payload.items.slice(0, 5).map(caseCard).join('') || emptyHtml();
+    $('#page-summary').textContent = `${state.offset + 1}-${Math.min(state.offset + payload.items.length, state.total)} / ${state.total}`;
+    $('#prev-page').disabled = state.offset === 0;
+    $('#next-page').disabled = !payload.page.has_more;
+    renderMetrics(payload.items);
+  } catch (error) {
+    $('#case-list').innerHTML = `<p class="error">${t('读取案例失败：')}${escapeHtml(error.message)}</p>`;
+  }
 }
 
-async function registerDemoAccount() {
-    try {
-        const data = await apiFetch('/api/openclaw/accounts/register', {
-            method: 'POST',
-            body: JSON.stringify({
-                account_connection_id: 'oc_acc_1688_demo',
-                platform: '1688',
-                channel: 'openclaw-1688-im',
-                channel_account_id: 'demo_1688_account',
-                display_name: 'Demo 1688 Account',
-                status: 'connected',
-                permissions: ['read_messages', 'send_approved_messages', 'read_marketplace_search_results', 'open_seller_chat'],
-                allowed_actions: ['search_suppliers', 'send_approved_message'],
-            }),
-        });
-        alert('Account registered: ' + data.account_connection_id);
-        loadAccounts();
-    } catch (e) {
-        alert('Error: ' + e.message);
-    }
+function renderMetrics(items) {
+  const pending = items.filter((item) => item.case_state === 'awaiting_approval').length;
+  const active = items.filter((item) => !['completed', 'cancelled'].includes(item.case_state)).length;
+  const cards = [
+    [t('可见案例'), state.total, t('当前角色投影')], [t('活跃案例'), active, t('本页统计')],
+    [t('等待审批'), pending, t('需要人工决定')], [t('当前角色'), roleLabel(state.session?.role), t('服务器授权')],
+  ];
+  $('#metric-grid').innerHTML = cards.map(([label, value, note]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`).join('');
 }
 
-async function revokeAccount(id) {
-    if (!confirm('Revoke account ' + id + '?')) return;
-    await apiFetch('/api/openclaw/accounts/'+id+'/revoke', {method:'POST'});
-    loadAccounts();
+function emptyHtml() {
+  return `<div class="empty"><strong>${t('暂无数据')}</strong><span>${t('当前筛选条件下没有可显示的记录。')}</span></div>`;
 }
 
-async function loadDrafts() {
-    const projectId = document.getElementById('approval-project-id').value.trim();
-    if (!projectId) { alert('Enter a Project ID'); return; }
-    const list = document.getElementById('drafts-list');
-    try {
-        const data = await apiFetch('/api/openclaw/projects/'+projectId+'/pending-drafts');
-        if (!data.drafts.length) {
-            list.innerHTML = '<p style="color:#888">No pending drafts for this project.</p>';
-            return;
-        }
-        list.innerHTML = data.drafts.map(d => `
-            <div class="card">
-                <h3>Draft: ${d.draft_id}</h3>
-                <p>To: ${d.target_role}</p>
-                <p>Created by: ${d.created_by_agent}</p>
-                <pre style="background:#f8f9fa;padding:8px;border-radius:4px;font-size:0.8rem;white-space:pre-wrap;margin:8px 0">${d.message_text}</pre>
-                <button class="approve" onclick="approveDraft('${d.draft_id}')">✓ Approve & Send</button>
-                <button class="reject" onclick="rejectDraft('${d.draft_id}')">✗ Reject</button>
-            </div>
-        `).join('');
-    } catch (e) {
-        list.innerHTML = '<p style="color:red">Error: ' + e.message + '</p>';
-    }
+function section(title, items, renderer) {
+  return `<section class="detail-section"><div class="panel-heading"><h2>${escapeHtml(title)}</h2><span class="count">${items.length}</span></div>${items.length ? `<div class="timeline">${items.map(renderer).join('')}</div>` : emptyHtml()}</section>`;
+}
+
+async function openCase(caseId) {
+  setView('case-detail');
+  $('#case-detail').innerHTML = `<div class="loading-card">${t('正在读取共享 Core 数据…')}</div>`;
+  try {
+    const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
+    state.selectedCase = payload;
+    const item = payload.case;
+    const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
+    $('#case-detail').innerHTML = `<section class="case-hero">
+      <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
+      <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${t('导出审计')}</a>` : ''}</div>
+    </section>
+    <div class="detail-grid"><section class="panel"><h2>${t('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
+    <section class="panel"><h2>${t('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
+    ${section(t('待办与草稿'), payload.drafts, draftRow)}
+    ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
+    ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
+    ${section(t('回执'), payload.receipts, (r) => `<article><strong>${escapeHtml(r.channel)} · ${escapeHtml(r.receipt_id)}</strong><span>${escapeHtml(r.receipt_reference || r.external_message_id || t('摘要回执'))}</span><time>${escapeHtml(formatTime(r.confirmed_at))}</time></article>`)}
+    ${section(t('事件时间线'), payload.events, eventRow)}
+    ${section(t('审计记录'), payload.audit, (a) => `<article><strong>${escapeHtml(a.event_type)}</strong><span>${escapeHtml(a.actor_role)} · ${escapeHtml(a.actor_id)}</span><code>${escapeHtml(a.source_trace_id)}</code><time>${escapeHtml(formatTime(a.created_at))}</time></article>`)}`;
+  } catch (error) {
+    $('#case-detail').innerHTML = `<p class="error">${t('读取案例失败：')}${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function draftRow(draft) {
+  const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
+  const action = draft.status === 'pending_approval' && canApprove
+    ? `<button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${t('审批')}</button>` : '';
+  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${t('复制')}</button>${action}</div></article>`;
+}
+
+function eventRow(event) {
+  const canReverse = state.bootstrap.actor.capabilities.includes('reverse_event');
+  return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${t('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${t('纠错')}</button></span>` : ''}</article>`;
+}
+
+async function submitInquiry(event) {
+  event.preventDefault();
+  const buyerId = $('#buyer-id').value.trim();
+  const text = $('#inquiry-text').value.trim();
+  const conversation = requestId('manual-conversation');
+  const headers = {
+    'X-AIVAN-Participant-ID': buyerId,
+    'X-AIVAN-Participant-Role': 'buyer',
+    'X-AIVAN-Participant-Conversation-Role': 'buyer_thread',
+  };
+  try {
+    const payload = await api('/invoke', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        source: 'myaivan', channel: 'myaivan', conversation_id: conversation,
+        message_id: requestId('manual-message'), sender_id: buyerId,
+        sender_display_name: $('#buyer-name').value.trim(), message_text: text,
+      }),
+    });
+    const result = $('#inquiry-result');
+    result.hidden = false;
+    result.textContent = `${t('案例')} ${payload.project_id || t('已创建')}\n${payload.user_control_message || payload.message || payload.reply_text || t('已进入 Core 工作流')}`;
+    event.target.reset();
+    await loadCases(true);
+    toast(t('询盘已写入共享 Core'), 'success');
+  } catch (error) {
+    toast(`${t('创建失败：')}${error.message}`, 'error');
+  }
 }
 
 async function approveDraft(draftId) {
-    try {
-        const data = await apiFetch('/api/openclaw/drafts/'+draftId+'/approve', {method:'POST', body: JSON.stringify({approved_by:'user'})});
-        alert('Approved and sent: ' + JSON.stringify(data));
-        const projectId = document.getElementById('approval-project-id').value.trim();
-        if (projectId) loadDrafts();
-    } catch (e) { alert('Error: ' + e.message); }
+  try {
+    const payload = await api(`/api/drafts/${encodeURIComponent(draftId)}/approve`, { method: 'POST', body: '{}' });
+    toast(payload.relay_required ? t('已审批，等待人工转发') : (payload.sent ? t('已审批并产生发送回执') : t('审批完成')), 'success');
+    if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
+  } catch (error) { toast(`${t('审批失败：')}${error.message}`, 'error'); }
 }
 
-async function rejectDraft(draftId) {
-    try {
-        await apiFetch('/api/openclaw/drafts/'+draftId+'/reject', {method:'POST'});
-        alert('Draft rejected');
-        const projectId = document.getElementById('approval-project-id').value.trim();
-        if (projectId) loadDrafts();
-    } catch (e) { alert('Error: ' + e.message); }
+async function showImpact(eventId) {
+  try {
+    const payload = await api(`/api/events/${encodeURIComponent(eventId)}/impact`);
+    toast(`${t('影响范围：')}${JSON.stringify(payload).slice(0, 220)}`, 'info');
+  } catch (error) { toast(`${t('预览失败：')}${error.message}`, 'error'); }
 }
 
-// Load initial state
-window.onload = () => { loadProjects(); };
+async function reverseEvent(eventId) {
+  const reason = window.prompt(t('请输入纠错原因。操作将写入不可变审计记录；不物理删除历史。'));
+  if (!reason?.trim()) return;
+  try {
+    const payload = await api(`/api/events/${encodeURIComponent(eventId)}/reverse`, {
+      method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
+    });
+    toast(payload.status === 'applied' ? t('纠错已应用') : t('已创建补偿任务'), 'success');
+    if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
+  } catch (error) { toast(`${t('纠错失败：')}${error.message}`, 'error'); }
+}
+
+async function loadRelay() {
+  const list = $('#relay-list');
+  list.innerHTML = `<div class="loading-card">${t('正在读取转发队列…')}</div>`;
+  try {
+    const payload = await api('/api/relay/outbox');
+    list.innerHTML = payload.outbox.length ? payload.outbox.map((item) => `<article class="relay-card">
+      <div><span class="status-pill">${escapeHtml(item.channel)}</span><code>${escapeHtml(item.draft_id)}</code></div>
+      <p>${escapeHtml(item.message_text)}</p>
+      <button class="secondary" data-action="copy" data-copy="${escapeHtml(item.message_text)}" type="button">${t('复制内容')}</button>
+      <form class="relay-confirm" data-draft-id="${escapeHtml(item.draft_id)}"><label>${t('发送后的回执编号')}<input name="receipt" required placeholder="${t('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${t('确认已人工转发')}</button></form>
+    </article>`).join('') : emptyHtml();
+  } catch (error) { list.innerHTML = `<p class="error">${t('读取转发队列失败：')}${escapeHtml(error.message)}</p>`; }
+}
+
+async function confirmRelay(event) {
+  event.preventDefault();
+  const draftId = event.target.dataset.draftId;
+  const receipt = new FormData(event.target).get('receipt').trim();
+  try {
+    await api(`/api/relay/${encodeURIComponent(draftId)}/confirm`, {
+      method: 'POST', body: JSON.stringify({ receipt_reference: receipt, metadata: { source: 'myaivan_mobile' } }),
+    });
+    toast(t('已记录 relayed 回执'), 'success');
+    await loadRelay();
+  } catch (error) { toast(`${t('确认失败：')}${error.message}`, 'error'); }
+}
+
+async function loadHealth() {
+  try {
+    const health = await api('/api/workbench/health');
+    const entries = [
+      [t('数据库'), health.database.configured, t('运行时配置')],
+      ['GPM', !health.gpm.durable_required || health.gpm.backend !== 'memory', health.gpm.backend],
+      ['OpenClaw', health.openclaw.configured, t('只读配置检查')],
+      [t('本地模型'), health.model.configured, t('只读配置检查')],
+      [t('候选版本'), Boolean(health.candidate_sha), health.candidate_sha || t('未冻结')],
+    ];
+    $('#health-grid').innerHTML = entries.map(([label, ok, note]) => `<article class="health-card ${ok ? 'ok' : 'pending'}"><span class="health-dot" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><p>${escapeHtml(note)}</p></div><span>${ok ? t('已配置') : t('待完成')}</span></article>`).join('');
+  } catch (error) { $('#health-grid').innerHTML = `<p class="error">${t('读取健康状态失败：')}${escapeHtml(error.message)}</p>`; }
+}
+
+document.addEventListener('click', async (event) => {
+  const open = event.target.closest('[data-open-view]');
+  if (open) return setView(open.dataset.openView);
+  const nav = event.target.closest('[data-view]');
+  if (nav) return setView(nav.dataset.view);
+  const card = event.target.closest('[data-case-id]');
+  if (card) return openCase(card.dataset.caseId);
+  const action = event.target.closest('[data-action]');
+  if (!action) return;
+  if (action.dataset.action === 'copy') {
+    await navigator.clipboard.writeText(action.dataset.copy || '');
+    toast(t('已复制到剪贴板'), 'success');
+  }
+  if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
+  if (action.dataset.action === 'impact') await showImpact(action.dataset.eventId);
+  if (action.dataset.action === 'reverse') await reverseEvent(action.dataset.eventId);
+});
+
+document.addEventListener('keydown', (event) => {
+  const card = event.target.closest?.('[data-case-id]');
+  if (card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openCase(card.dataset.caseId); }
+});
+
+document.addEventListener('submit', (event) => {
+  if (event.target.id === 'login-form') login(event);
+  if (event.target.id === 'inquiry-form') submitInquiry(event);
+  if (event.target.matches('.relay-confirm')) confirmRelay(event);
+});
+
+$('#logout-button').addEventListener('click', logout);
+$('#role-select').addEventListener('change', switchRole);
+$('#case-state-filter').addEventListener('change', () => loadCases(true));
+$('#refresh-cases').addEventListener('click', () => loadCases());
+$('#prev-page').addEventListener('click', () => { state.offset = Math.max(0, state.offset - state.limit); loadCases(); });
+$('#next-page').addEventListener('click', () => { state.offset += state.limit; loadCases(); });
+
+window.addEventListener('myaivan:locale', async () => {
+  if (!state.session) return;
+  populateRoles(state.session.allowed_roles || [state.session.role], state.session.role);
+  await Promise.all([loadBootstrap(), loadCases(), loadHealth()]);
+  if (state.selectedCase && $('#view-case-detail').classList.contains('active')) {
+    await openCase(state.selectedCase.case.case_id);
+  }
+});
+
+establishSession();

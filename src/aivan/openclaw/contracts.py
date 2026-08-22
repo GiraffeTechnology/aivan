@@ -1,6 +1,9 @@
 from pydantic import BaseModel, Field
 
 class OpenClawEvent(BaseModel):
+    tenant_id: str = ""
+    source_trace_id: str = ""
+    idempotency_key: str = ""
     source: str = "openclaw"
     channel: str = ""
     channel_account_id: str = ""
@@ -14,6 +17,12 @@ class OpenClawEvent(BaseModel):
     timestamp: str = ""
     project_id: str | None = None
     actor_id: str | None = None
+    authenticated_actor_id: str | None = None
+    authenticated_actor_role: str = ""
+    business_role: str = ""
+    conversation_role: str = ""
+    execution_mode: str = ""
+    authorization_basis: str = ""
     role_context: str | None = None
     mode: str = "auto"
 
@@ -71,3 +80,4 @@ FORBIDDEN_ACTIONS = [
     "bypass_captcha",
     "bypass_platform_controls",
 ]
+

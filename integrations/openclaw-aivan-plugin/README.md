@@ -93,8 +93,31 @@ clawhub package link .
 |---|---|---|---|
 | `AIVAN_BASE_URL` | Yes | `http://127.0.0.1:8765` | URL of the local AIVAN server |
 | `AIVAN_API_KEY` | No | *(none)* | Optional API key sent as `X-AIVAN-API-Key` header; set in AIVAN `.env` to enable auth |
+| `AIVAN_CONNECT_TIMEOUT_MS` | No | `3000` | Explicit connection timeout in milliseconds |
+| `AIVAN_READ_TIMEOUT_MS` | No | `15000` | Explicit response-read timeout in milliseconds |
+| `AIVAN_MAX_RETRIES` | No | `1` | Bounded retries (0-2) for idempotent calls only |
+| `AIVAN_TENANT_ID` | Production | *(none)* | Static trusted tenant identity for this plugin process |
+| `AIVAN_ACTOR_ID` | Production | *(none)* | Static trusted service actor for this plugin process |
+| `AIVAN_ROLE_CONTEXT` | Production | *(none)* | Static Core role context for the service actor |
+| `AIVAN_CONVERSATION_ROLE` | No | *(none)* | Static conversation role for the service actor |
+| `AIVAN_EXECUTION_MODE` | No | *(none)* | Static execution mode for the service actor |
+
+`aivan.forwardEvent` supplies a stable `Idempotency-Key`, so connection, 429 and
+5xx failures can be retried without duplicating an inbound event. Approval and
+rejection actions are never automatically retried. Failures are returned as
+user-visible `AIVAN_*` error codes with a `retryable` flag.
 
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
+
+### Stage 3 trusted-identity limitation
+
+The identity variables above are read from the process environment and apply to
+every message handled by that OpenClaw process. Stage 3 does **not** map an
+individual WeChat participant to a trusted AIVAN actor or role. Do not enable this
+bridge for production multi-participant role attribution until Stage 4 adds a
+per-channel/per-participant trust binding. In production mode, missing required
+service identity values fail closed; using one fixed identity does not make every
+participant that identity. AIVAN Core RBAC and human approval remain mandatory.
 
 ---
 
@@ -120,11 +143,29 @@ In mock mode:
 
 **Every outbound message drafted by AIVAN requires explicit human approval before it is sent.**
 
+Inbound trade messages handled by the Agent Harness are intentionally silent on
+personal IM channels: the harness records the AIVAN result but returns no
+`assistantTexts`. It also marks the attempt as handled so OpenClaw cannot fall
+through to an automatic model reply. The operator must review a pending draft
+and use the approved send or guided-relay flow for every outbound message.
+
 The workflow:
-1. AIVAN processes an event and creates a pending draft
-2. `aivan.getPendingDrafts` returns the draft to the operator
-3. The operator reviews the message in the AIVAN dashboard or via `aivan.approveDraft`
-4. Only after approval does AIVAN send the message via OpenClaw
+1. Match the inbound event against `intent-boundary.json`.
+2. For a match, invoke `$aivan-trade-salesperson` before generic assistant or
+   fallback skills, as required by `workflow.json`.
+3. AIVAN processes the event and creates a pending draft.
+4. `aivan.getPendingDrafts` returns the draft to the operator.
+5. The operator reviews the message in the AIVAN dashboard or via
+   `aivan.approveDraft`.
+6. Only after approval does AIVAN send the message via OpenClaw.
+
+OpenClaw has no generic numeric priority field for skills. The explicit
+`$aivan-trade-salesperson` reference is the supported workflow-level skill
+invocation, and the skill description carries the same first-match rule in the
+eligible-skill catalog. The Agent Harness `supports()` phase receives
+provider/model facts rather than the inbound prompt, so it is not used to fake
+message-level skill priority. Outside the shared boundary the workflow must
+explicitly pass through. Neither mechanism authorizes outbound delivery.
 
 The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the action to the AIVAN API, which enforces the policy server-side.
 

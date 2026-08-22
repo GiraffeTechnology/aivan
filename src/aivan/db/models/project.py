@@ -7,12 +7,15 @@ class Project(Base):
     __tablename__ = "projects"
 
     project_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), default="legacy", index=True)
     conversation_id: Mapped[str] = mapped_column(String(128), index=True)
     channel: Mapped[str] = mapped_column(String(64), default="")
     channel_account_id: Mapped[str] = mapped_column(String(128), default="")
     customer_id: Mapped[str] = mapped_column(String(128), index=True)
     customer_display_name: Mapped[str] = mapped_column(String(256), default="")
     status: Mapped[str] = mapped_column(String(64), default="active", index=True)
+    case_state: Mapped[str] = mapped_column(String(64), default="inquiry", index=True)
+    source_trace_id: Mapped[str] = mapped_column(String(255), default="", index=True)
     category: Mapped[str] = mapped_column(String(128), default="")
     requirement_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     selected_option_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
