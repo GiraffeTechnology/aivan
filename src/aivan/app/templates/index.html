@@ -12,7 +12,21 @@
 
   <main id="login-view" class="login-shell">
     <section class="login-card" aria-labelledby="login-title">
-      <img class="giraffe-brand-mark login-logo" src="/static/giraffe-icon-tight.png" alt="">
+      <div class="language-control login-language-control">
+        <button id="login-language-trigger" class="ghost compact language-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="login-language-menu" aria-label="简体中文 — Language">简</button>
+        <div id="login-language-menu" class="language-menu" role="menu" aria-label="Language" hidden>
+          <button type="button" role="menuitem" data-language="en" aria-label="English">EN</button>
+          <button type="button" role="menuitem" data-language="zh" aria-label="简体中文">简</button>
+          <button type="button" role="menuitem" data-language="zht" aria-label="繁體中文">繁</button>
+          <button type="button" role="menuitem" data-language="fr" aria-label="Français">FR</button>
+          <button type="button" role="menuitem" data-language="es" aria-label="Español">ES</button>
+          <button type="button" role="menuitem" data-language="de" aria-label="Deutsch">DE</button>
+          <button type="button" role="menuitem" data-language="ko" aria-label="한국어">한</button>
+          <button type="button" role="menuitem" data-language="ja" aria-label="日本語">日</button>
+          <span class="language-status" role="status" hidden></span>
+        </div>
+      </div>
+      <span class="giraffe-brand-mark login-logo" aria-hidden="true"><img src="/static/giraffe-logo-graphic-mark-approved-pdf-derived.png" alt=""></span>
       <p class="eyebrow">Giraffe Technology</p>
       <h1 id="login-title">登录 myAIVAN</h1>
       <p class="muted">访问凭据仅用于换取 HttpOnly 会话，不会保存在浏览器存储中。</p>
@@ -28,8 +42,8 @@
   <div id="app-shell" class="app-shell" hidden>
     <header class="topbar">
       <a class="brand" href="#dashboard" aria-label="myAIVAN 首页">
-        <img class="giraffe-brand-mark" src="/static/giraffe-icon-tight.png" alt="">
-        <span><strong>myAIVAN</strong><small>贸易业务工作台</small></span>
+        <span class="giraffe-brand-mark" aria-hidden="true"><img src="/static/giraffe-logo-graphic-mark-approved-pdf-derived.png" alt=""></span>
+        <span><strong>myAIVAN</strong><small>Giraffe Technology</small></span>
       </a>
       <div class="top-actions">
         <div class="language-control">

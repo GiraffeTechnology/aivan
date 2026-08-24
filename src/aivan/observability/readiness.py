@@ -7,6 +7,8 @@ import re
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from aivan.app.ui_catalog import GENERATED_LOCALES, ready_locales
+
 
 router = APIRouter(tags=["observability"])
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -89,6 +91,10 @@ def readiness_checks() -> dict[str, bool]:
         "non_china_policy_declared": os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
         == "abcdyi-sin",
     }
+    catalog_ready = set(ready_locales(candidate))
+    checks.update(
+        {f"ui_catalog_{locale}_ready": locale in catalog_ready for locale in GENERATED_LOCALES}
+    )
     return checks
 
 

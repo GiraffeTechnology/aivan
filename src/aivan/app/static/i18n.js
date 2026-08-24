@@ -65,6 +65,8 @@
     '只读配置检查': 'Read-only configuration check', '本地模型': 'Local model', '候选版本': 'Candidate version',
     '未冻结': 'Not frozen', '已配置': 'Configured', '待完成': 'Pending',
     '读取健康状态失败：': 'Could not load health status: ', '已复制到剪贴板': 'Copied to clipboard',
+    '正在加载翻译…': 'Loading translation…',
+    '翻译暂不可用，正在显示权威英文。': 'Translation is unavailable; authoritative English is shown.',
   };
   const zht = {
     '登录 myAIVAN': '登入 myAIVAN', '安全登录': '安全登入', '退出': '登出',
@@ -82,7 +84,59 @@
   };
   const sourceByNode = new WeakMap();
   const generatedCatalogs = {};
+  const generatedMetadata = {};
+  const catalogPromises = {};
+  const catalogErrors = {};
+  let sourceIds = {};
+  let catalogVersion = '';
+  let candidateSha = '';
+  let statusMessage = '';
+  let localeEpoch = 0;
   let locale = readLocale();
+
+  let manifestReady = loadCanonicalManifest();
+
+  async function loadCanonicalManifest(expectedCandidate = '') {
+    const query = expectedCandidate ? `?candidate=${encodeURIComponent(expectedCandidate)}` : '';
+    const response = await fetch(`/api/ui/catalogs/en${query}`, { credentials: 'omit', cache: 'no-store' });
+    if (!response.ok) throw new Error('UI_CATALOG_MANIFEST_UNAVAILABLE');
+    const payload = await response.json();
+    if (payload.schema_version !== 'myaivan.ui-catalog.v1' || payload.locale !== 'en') {
+      throw new Error('UI_CATALOG_MANIFEST_INVALID');
+    }
+    const sources = payload.source_map;
+    const messages = payload.messages;
+    if (!sources || !messages || typeof sources !== 'object' || typeof messages !== 'object') {
+      throw new Error('UI_CATALOG_MANIFEST_INVALID');
+    }
+    const sourceKeys = Object.keys(en).sort();
+    if (JSON.stringify(Object.keys(sources).sort()) !== JSON.stringify(sourceKeys)) {
+      throw new Error('UI_CATALOG_MANIFEST_INCOMPLETE');
+    }
+    for (const source of sourceKeys) {
+      const id = sources[source];
+      if (typeof id !== 'string' || messages[id] !== en[source]) {
+        throw new Error('UI_CATALOG_MANIFEST_MISMATCH');
+      }
+    }
+    const nextCatalogVersion = String(payload.catalog_version || '');
+    const nextCandidateSha = String(payload.candidate_sha || '');
+    if (!nextCatalogVersion || (expectedCandidate && nextCandidateSha !== expectedCandidate)) {
+      throw new Error('UI_CATALOG_MANIFEST_CANDIDATE_MISMATCH');
+    }
+    sourceIds = Object.freeze({ ...sources });
+    catalogVersion = nextCatalogVersion;
+    candidateSha = nextCandidateSha;
+    return { catalogVersion, candidateSha };
+  }
+
+  async function refreshCanonicalManifest(expectedCandidate) {
+    Object.keys(generatedCatalogs).forEach((code) => delete generatedCatalogs[code]);
+    Object.keys(generatedMetadata).forEach((code) => delete generatedMetadata[code]);
+    Object.keys(catalogPromises).forEach((code) => delete catalogPromises[code]);
+    manifestReady = loadCanonicalManifest(expectedCandidate);
+    return manifestReady;
+  }
 
   function readLocale() {
     const saved = window.localStorage.getItem('myaivan.locale');
@@ -93,7 +147,8 @@
     if (locale === 'zh') return source;
     if (locale === 'zht') return zht[source] || source;
     if (locale === 'en') return en[source] || source;
-    return generatedCatalogs[locale]?.[source] || en[source] || source;
+    const messageId = sourceIds[source];
+    return generatedCatalogs[locale]?.[messageId] || en[source] || source;
   }
 
   function hasGeneratedCatalog(code = locale) {
@@ -127,61 +182,147 @@
     document.title = translate('myAIVAN 工作台');
     const generated = hasGeneratedCatalog();
     document.documentElement.lang = generated ? names[locale].htmlLang : 'en';
-    const trigger = document.querySelector('#language-trigger');
-    if (trigger) {
+    document.querySelectorAll('.language-trigger').forEach((trigger) => {
       trigger.textContent = names[locale].label;
       trigger.setAttribute('aria-label', `${names[locale].name} — Language`);
-    }
+    });
     document.querySelectorAll('[data-language]').forEach((node) => {
       node.setAttribute('aria-current', node.dataset.language === locale ? 'true' : 'false');
     });
-    const status = document.querySelector('#language-status');
-    if (status) {
-      status.hidden = generated;
-      status.textContent = generated ? '' : 'Translation unavailable; showing authoritative English.';
-    }
+    document.querySelectorAll('.language-status').forEach((status) => {
+      const fallback = !generated ? translate('翻译暂不可用，正在显示权威英文。') : '';
+      status.hidden = !(statusMessage || fallback);
+      status.textContent = statusMessage || fallback;
+    });
   }
 
   function setLocale(next) {
     if (!names[next]) return;
     locale = next;
+    localeEpoch += 1;
     window.localStorage.setItem('myaivan.locale', next);
     apply();
     window.dispatchEvent(new CustomEvent('myaivan:locale', { detail: { locale } }));
+    void ensureGeneratedCatalog(next, localeEpoch);
   }
 
-  function bind() {
-    const trigger = document.querySelector('#language-trigger');
-    const menu = document.querySelector('#language-menu');
-    trigger?.addEventListener('click', () => {
-      const open = menu.hidden;
-      menu.hidden = !open;
-      trigger.setAttribute('aria-expanded', String(open));
-    });
-    menu?.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-language]');
-      if (!button) return;
-      setLocale(button.dataset.language);
-      menu.hidden = true;
-      trigger.setAttribute('aria-expanded', 'false');
-      trigger.focus();
+  async function ensureGeneratedCatalog(code = locale, expectedEpoch = localeEpoch) {
+    if (!['fr', 'es', 'de', 'ko', 'ja'].includes(code)) {
+      if (code === locale) { statusMessage = ''; apply(); }
+      return true;
+    }
+    if (generatedCatalogs[code]) {
+      if (code === locale) { statusMessage = ''; apply(); }
+      return true;
+    }
+    if (code === locale && expectedEpoch === localeEpoch) {
+      statusMessage = translate('正在加载翻译…'); apply();
+    }
+    if (!catalogPromises[code]) {
+      catalogPromises[code] = (async () => {
+        await manifestReady;
+        const url = `/api/ui/catalogs/${encodeURIComponent(code)}?candidate=${encodeURIComponent(candidateSha)}`;
+        const response = await fetch(url, { credentials: 'omit', cache: 'default', headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error('UI_CATALOG_NOT_READY');
+        const payload = await response.json();
+        if (payload.candidate_sha !== candidateSha || !installGeneratedCatalog(code, payload)) {
+          throw new Error('UI_CATALOG_INVALID');
+        }
+        return true;
+      })()
+        .catch((error) => {
+          delete catalogPromises[code];
+          catalogErrors[code] = String(error?.message || 'UI_CATALOG_ERROR');
+          throw error;
+        });
+    }
+    try {
+      await catalogPromises[code];
+      if (code === locale && expectedEpoch === localeEpoch) { statusMessage = ''; apply(); }
+      return true;
+    } catch (_) {
+      if (code === locale && expectedEpoch === localeEpoch) {
+        statusMessage = translate('翻译暂不可用，正在显示权威英文。'); apply();
+      }
+      return false;
+    }
+  }
+
+  function installGeneratedCatalog(code, payload) {
+    const allowed = ['fr', 'es', 'de', 'ko', 'ja'];
+    const catalog = payload?.messages;
+    const proofreaderValid = !payload?.proofreader || (payload.proofreader.role === 'proofread-only' && payload.proofreader.model === 'qwen3.5:9b');
+    const generatorValid = payload?.provider && payload?.model && payload?.backend && payload.provider !== 'mock' && !/qwen|ollama/i.test(payload.provider) && !/qwen/i.test(payload.model);
+    if (allowed.includes(code) && payload?.locale === code && payload?.candidate_sha === candidateSha && payload?.catalog_version === catalogVersion && generatorValid && proofreaderValid && catalog && typeof catalog === 'object') {
+      const expected = Object.values(sourceIds).sort();
+      if (JSON.stringify(Object.keys(catalog).sort()) !== JSON.stringify(expected)) return false;
+      if (!Object.values(catalog).every((value) => typeof value === 'string' && value.trim() && value.length <= 2048)) return false;
+      generatedCatalogs[code] = Object.freeze({ ...catalog });
+      delete catalogErrors[code];
+      generatedMetadata[code] = Object.freeze({
+        candidateSha: String(payload.candidate_sha || ''),
+        provider: String(payload.provider || ''), model: String(payload.model || ''), backend: String(payload.backend || ''),
+      });
+      statusMessage = '';
+      if (locale === code) apply();
+      return true;
+    }
+    return false;
+  }
+
+  async function bind() {
+    document.querySelectorAll('.language-control').forEach((control) => {
+      const trigger = control.querySelector('.language-trigger');
+      const menu = control.querySelector('.language-menu');
+      trigger?.addEventListener('click', () => {
+        const open = menu.hidden;
+        menu.hidden = !open;
+        trigger.setAttribute('aria-expanded', String(open));
+      });
+      menu?.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-language]');
+        if (!button) return;
+        setLocale(button.dataset.language);
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.focus();
+      });
     });
     new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach((node) => {
       if (node.nodeType === Node.ELEMENT_NODE) apply(node);
     }))).observe(document.body, { childList: true, subtree: true });
+    try { await manifestReady; } catch (_) { statusMessage = translate('翻译暂不可用，正在显示权威英文。'); }
     apply();
+    window.dispatchEvent(new CustomEvent('myaivan:locale', { detail: { locale } }));
+    void ensureGeneratedCatalog(locale, localeEpoch);
   }
 
   window.myAivanI18n = {
     get locale() { return locale; },
+    get catalogVersion() { return catalogVersion; },
+    get candidateSha() { return candidateSha; },
+    get ready() { return manifestReady; },
     t: translate,
     setLocale,
+    ensureGeneratedCatalog,
     apply,
-    installGeneratedCatalog(code, catalog) {
-      if (['fr', 'es', 'de', 'ko', 'ja'].includes(code) && catalog && typeof catalog === 'object') {
-        generatedCatalogs[code] = Object.freeze({ ...catalog });
-        if (locale === code) apply();
+    installGeneratedCatalog,
+    metadata(code) { return generatedMetadata[code] || null; },
+    catalogError(code) { return catalogErrors[code] || ''; },
+    setStatus(message) { statusMessage = String(message || ''); apply(); },
+    async assertCandidate(expected) {
+      await manifestReady;
+      if (!expected || candidateSha !== expected) {
+        await refreshCanonicalManifest(expected);
       }
+      if (candidateSha !== expected) throw new Error('UI_CATALOG_MANIFEST_CANDIDATE_MISMATCH');
+      Object.keys(generatedMetadata).forEach((code) => {
+        if (generatedMetadata[code].candidateSha !== expected) {
+          delete generatedMetadata[code]; delete generatedCatalogs[code];
+        }
+      });
+      if (locale && !hasGeneratedCatalog(locale)) apply();
+      return true;
     },
     hasGeneratedCatalog,
   };

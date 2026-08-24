@@ -22,6 +22,7 @@ from aivan.api.relay_routes import router as _relay_router
 from aivan.api.session_routes import router as _session_router
 from aivan.api.security_headers import add_security_headers
 from aivan.api.workbench_routes import router as _workbench_router
+from aivan.api.ui_catalog_routes import router as _ui_catalog_router
 from aivan.api.serializers import (
     serialize_draft as _serialize_draft,
     serialize_preference as _serialize_preference,
@@ -121,6 +122,7 @@ app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 app.include_router(_relay_router, tags=["relay"])
 app.include_router(_session_router)
 app.include_router(_workbench_router)
+app.include_router(_ui_catalog_router)
 app.include_router(_metrics_router)
 app.include_router(_readiness_router)
 

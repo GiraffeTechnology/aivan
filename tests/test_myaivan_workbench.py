@@ -190,6 +190,8 @@ def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workb
     client, _ = workbench
     response = client.get("/")
     assert response.status_code == 200
+    assert "giraffe-logo-graphic-mark-approved-pdf-derived.png" in response.text
+    assert "giraffe-icon-tight.png" not in response.text
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert "onclick=" not in response.text
 
@@ -228,11 +230,18 @@ def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
     i18n = (root / "src/aivan/app/static/i18n.js").read_text(encoding="utf-8")
     assert "myaivan.locale" in i18n
     assert "document.documentElement.lang" in i18n
+    assert "installGeneratedCatalog(code, payload)" in i18n
+    assert "ensureGeneratedCatalog(next, localeEpoch)" in i18n
+    assert "?candidate=${encodeURIComponent(candidateSha)}" in i18n
+    assert "cache: 'no-store'" in i18n
     assert "canonical_english" not in response.text
 
 
 def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatch):
-    from aivan.observability.readiness import readiness_checks
+    import aivan.observability.readiness as readiness
+
+    readiness_checks = readiness.readiness_checks
+    monkeypatch.setattr(readiness, "ready_locales", lambda _candidate: ["fr", "es", "de", "ko", "ja"])
 
     monkeypatch.setenv("AIVAN_ENV", "production")
     for name in (

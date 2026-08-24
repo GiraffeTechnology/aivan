@@ -30,6 +30,7 @@ class OutboundTranslation:
     backend: str
     proofread: bool = False
     proofreader_model: str | None = None
+    proofreader_status: str | None = None
 
 
 def translate_authoritative_english(
@@ -38,6 +39,7 @@ def translate_authoritative_english(
     *,
     target_channel: str = "myaivan",
     message_type: str = "operator_reply",
+    business_refs: dict[str, Any] | None = None,
     client: LanguageSkillClient | None = None,
 ) -> OutboundTranslation:
     """Generate a target translation from authoritative English only."""
@@ -53,7 +55,13 @@ def translate_authoritative_english(
     if not models.ok or not isinstance(models.data, dict):
         raise TranslationUnavailable("translation model inventory unavailable")
     provider, model, backend = _provider_identity(models.data)
-    if provider in {"", "mock"} or not (model or backend):
+    if (
+        provider in {"", "mock", "qwen", "ollama"}
+        or "qwen" in provider
+        or "qwen" in model.lower()
+        or not model
+        or not backend
+    ):
         raise TranslationUnavailable("dedicated translation backend is not production-ready")
 
     result = client.render_outbound(
@@ -61,7 +69,7 @@ def translate_authoritative_english(
         canonical_text=source,
         target_channel=target_channel,
         message_type=message_type,
-        business_refs={"source_authority": "canonical_english"},
+        business_refs={**(business_refs or {}), "source_authority": "canonical_english"},
     )
     if not result.ok or not isinstance(result.data, dict):
         raise TranslationUnavailable("dedicated outbound translation failed")
@@ -70,26 +78,36 @@ def translate_authoritative_english(
         raise TranslationUnavailable("dedicated translator returned empty output")
 
     result_provider = str(result.data.get("provider") or provider).strip().lower()
-    if result_provider in {"", "mock"}:
+    if result_provider in {"", "mock", "qwen", "ollama"} or "qwen" in result_provider:
         raise TranslationUnavailable("outbound translation used an untrusted provider")
     result_model = str(result.data.get("model") or model).strip()
+    if not result_model or "qwen" in result_model.lower():
+        raise TranslationUnavailable("outbound translation used an untrusted generator model")
+    result_backend = str(result.data.get("backend") or backend).strip()
+    if not result_backend or any(token in result_backend.lower() for token in ("mock", "qwen", "ollama")):
+        raise TranslationUnavailable("outbound translation used an untrusted generator backend")
     proofreader = result.data.get("proofreader")
     proofread = False
     proofreader_model = None
+    proofreader_status = None
     if isinstance(proofreader, dict):
         role = str(proofreader.get("role") or "").strip().lower()
         proofreader_model = str(proofreader.get("model") or "").strip() or None
         if role != "proofread-only" or proofreader_model != "qwen3.5:9b":
             raise TranslationUnavailable("proofreader boundary is not trustworthy")
-        proofread = str(proofreader.get("status") or "") in {"accepted", "revised"}
+        proofreader_status = str(proofreader.get("status") or "").strip().lower()
+        if proofreader_status not in {"accepted", "revised", "not-required", "unavailable"}:
+            raise TranslationUnavailable("proofreader status is not trustworthy")
+        proofread = proofreader_status in {"accepted", "revised"}
     return OutboundTranslation(
         text=translated,
         target_language=target,
         provider=result_provider,
         model=result_model,
-        backend=backend,
+        backend=result_backend,
         proofread=proofread,
         proofreader_model=proofreader_model,
+        proofreader_status=proofreader_status,
     )
 
 

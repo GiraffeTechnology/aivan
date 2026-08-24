@@ -46,6 +46,7 @@ def test_dedicated_translator_receives_authoritative_english(monkeypatch):
     result = translate_authoritative_english(
         "RFQ created, pending human approval.",
         "fr",
+        business_refs={"catalog_version": "digest", "message_id": "ui.example"},
         client=_client(handler),
     )
 
@@ -54,6 +55,8 @@ def test_dedicated_translator_receives_authoritative_english(monkeypatch):
     assert captured["canonical_text"] == "RFQ created, pending human approval."
     assert captured["target_language"] == "fr"
     assert captured["business_refs"]["source_authority"] == "canonical_english"
+    assert captured["business_refs"]["catalog_version"] == "digest"
+    assert captured["business_refs"]["message_id"] == "ui.example"
 
 
 def test_mock_provider_fails_closed(monkeypatch):

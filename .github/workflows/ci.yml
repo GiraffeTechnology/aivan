@@ -37,7 +37,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          protected_path='^(src/aivan/app/|src/aivan/api/(session_auth|session_routes|workbench_routes)\.py$|tests/test_myaivan_workbench\.py$|docs/MYAIVAN_BRANCH_POLICY\.md$)'
+          protected_path='^(src/aivan/app/|src/aivan/api/(session_auth|session_routes|workbench_routes|ui_catalog_routes)\.py$|src/aivan/integrations/outbound_translation\.py$|src/aivan/observability/readiness\.py$|scripts/generate_myaivan_ui_catalogs\.py$|tests/(test_myaivan_workbench|test_myaivan_ui_catalogs|myaivan-i18n-runtime\.test)\.(py|mjs)$|docs/MYAIVAN_BRANCH_POLICY\.md$)'
           if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E "$protected_path"; then
             echo "myAIVAN-owned files may never merge into main."
             exit 1
@@ -164,6 +164,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: myAIVAN catalog browser-runtime contract
+        run: node ../../tests/myaivan-i18n-runtime.test.mjs
+
       - name: Install dependencies
         run: npm ci
 
@@ -219,9 +222,13 @@ jobs:
           src/aivan/api/session_auth.py
           src/aivan/api/session_routes.py
           src/aivan/api/workbench_routes.py
+          src/aivan/api/ui_catalog_routes.py
+          src/aivan/app/ui_catalog.py
+          src/aivan/integrations/outbound_translation.py
           src/aivan/db/schema_validation.py
           src/aivan/observability/metrics.py
           src/aivan/observability/readiness.py
+          scripts/generate_myaivan_ui_catalogs.py
           scripts/run_stage7f_predeployment.py
 
       - name: Bandit high-severity security scan
