@@ -198,13 +198,34 @@ def catalog_directory() -> Path | None:
     if not value:
         return None
     path = Path(value)
-    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+    try:
+        return validate_catalog_directory(path)
+    except ValueError:
         return None
-    if os.name != "nt":
-        mode = path.stat().st_mode
-        if mode & 0o022:
-            return None
-    return path
+
+
+def _effective_uid() -> int | None:
+    getter = getattr(os, "geteuid", None)
+    return int(getter()) if getter is not None else None
+
+
+def _owned_by_service(file_stat: os.stat_result) -> bool:
+    expected = _effective_uid()
+    return expected is None or file_stat.st_uid == expected
+
+
+def _reject_symlink_components(path: Path) -> None:
+    """Reject a symlink in any existing component of an absolute path."""
+
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        try:
+            component_stat = os.lstat(current)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(component_stat.st_mode):
+            raise ValueError("catalog path contains a symlink component")
 
 
 def validate_catalog_directory(path: Path, *, create: bool = False) -> Path:
@@ -212,13 +233,41 @@ def validate_catalog_directory(path: Path, *, create: bool = False) -> Path:
 
     if not path.is_absolute():
         raise ValueError("catalog directory must be absolute")
+    _reject_symlink_components(path)
     if create:
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if path.is_symlink() or not path.is_dir():
+    _reject_symlink_components(path)
+    if not path.is_dir():
         raise ValueError("catalog directory is unavailable")
-    if os.name != "nt" and path.stat().st_mode & 0o022:
-        raise ValueError("catalog directory permissions are unsafe")
+    if os.name != "nt":
+        directory_stat = os.stat(path, follow_symlinks=False)
+        if not _owned_by_service(directory_stat):
+            raise ValueError("catalog directory owner is unsafe")
+        if stat.S_IMODE(directory_stat.st_mode) & 0o077:
+            raise ValueError("catalog directory permissions are unsafe")
     return path
+
+
+def _open_catalog_directory(path: Path) -> int:
+    """Open every POSIX component with O_NOFOLLOW and return the final fd."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path.anchor, flags)
+    try:
+        for component in path.parts[1:]:
+            next_descriptor = os.open(component, flags | nofollow, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        directory_stat = os.fstat(descriptor)
+        if not stat.S_ISDIR(directory_stat.st_mode) or not _owned_by_service(directory_stat):
+            raise ValueError("catalog directory identity is unsafe")
+        if stat.S_IMODE(directory_stat.st_mode) & 0o077:
+            raise ValueError("catalog directory permissions are unsafe")
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
 
 
 def _valid_text(value: Any) -> bool:
@@ -256,7 +305,12 @@ def validate_generated_catalog(
     backend = str(payload.get("backend") or "").strip()
     if provider in {"", "mock", "qwen", "ollama"} or "qwen" in provider:
         raise ValueError("catalog provider is not trusted")
-    if not model or not backend or "qwen" in model.lower():
+    if (
+        not model
+        or not backend
+        or "qwen" in model.lower()
+        or any(token in backend.lower() for token in ("mock", "qwen", "ollama"))
+    ):
         raise ValueError("catalog generator identity is incomplete")
 
     proofreader = payload.get("proofreader")
@@ -293,6 +347,7 @@ def validate_generated_catalog(
             or item_provider in {"mock", "qwen", "ollama"}
             or "qwen" in item_provider
             or "qwen" in item_model.lower()
+            or any(token in item_backend.lower() for token in ("mock", "qwen", "ollama"))
         ):
             raise ValueError("catalog message generator identity is invalid")
         item_proofreader = item.get("proofreader")
@@ -334,27 +389,32 @@ def load_generated_catalog(
         raise ValueError("catalog directory is not configured")
     root = validate_catalog_directory(root)
     path = root / f"{locale}.json"
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("catalog file is unavailable")
+    directory_descriptor: int | None = None
+    descriptor = -1
     try:
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
-        try:
-            file_stat = os.fstat(descriptor)
-            if not stat.S_ISREG(file_stat.st_mode) or (
-                os.name != "nt" and file_stat.st_mode & 0o022
-            ):
-                raise ValueError("catalog file permissions are unsafe")
-            if file_stat.st_size > 1_048_576:
-                raise ValueError("catalog file exceeds the size limit")
-            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-                descriptor = -1
-                payload = json.load(handle)
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
+        directory_descriptor = _open_catalog_directory(root) if os.name != "nt" else None
+        descriptor = os.open(path.name if directory_descriptor is not None else path, flags, dir_fd=directory_descriptor)
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise ValueError("catalog file permissions are unsafe")
+        if os.name != "nt" and (
+            not _owned_by_service(file_stat)
+            or stat.S_IMODE(file_stat.st_mode) not in {0o400, 0o600}
+        ):
+            raise ValueError("catalog file permissions are unsafe")
+        if file_stat.st_size > 1_048_576:
+            raise ValueError("catalog file exceeds the size limit")
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            descriptor = -1
+            payload = json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("catalog file is invalid") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
     return validate_generated_catalog(payload, locale=locale, candidate_sha=candidate)
 
 

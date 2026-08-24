@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ from aivan.app.ui_catalog import (
     MAX_CATALOG_LENGTH,
     POLICY_VERSION,
     SCHEMA_VERSION,
+    _open_catalog_directory,
     canonical_messages,
     catalog_version,
     validate_catalog_directory,
@@ -134,6 +136,35 @@ def write_atomic(directory: Path, locale: str, payload: dict) -> Path:
     directory = validate_catalog_directory(directory, create=True)
     target = directory / f"{locale}.json"
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if os.name != "nt":
+        directory_descriptor = _open_catalog_directory(directory)
+        temp_name = f".{locale}.{secrets.token_hex(8)}.tmp"
+        descriptor = -1
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+            descriptor = os.open(temp_name, flags, 0o600, dir_fd=directory_descriptor)
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                descriptor = -1
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(
+                temp_name,
+                target.name,
+                src_dir_fd=directory_descriptor,
+                dst_dir_fd=directory_descriptor,
+            )
+            os.chmod(target.name, 0o600, dir_fd=directory_descriptor, follow_symlinks=False)
+            os.fsync(directory_descriptor)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temp_name, dir_fd=directory_descriptor)
+            except FileNotFoundError:
+                pass
+            os.close(directory_descriptor)
+        return target
     descriptor, temp_name = tempfile.mkstemp(prefix=f".{locale}.", suffix=".tmp", dir=directory)
     temp = Path(temp_name)
     try:
@@ -142,8 +173,6 @@ def write_atomic(directory: Path, locale: str, payload: dict) -> Path:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, target)
-        if os.name != "nt":
-            target.chmod(0o600)
     finally:
         if temp.exists():
             temp.unlink()
@@ -154,13 +183,30 @@ def write_atomic(directory: Path, locale: str, payload: dict) -> Path:
 def generation_lock(directory: Path, locale: str):
     directory = validate_catalog_directory(directory, create=True)
     lock = directory / f".{locale}.lock"
-    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    directory_descriptor = _open_catalog_directory(directory) if os.name != "nt" else None
+    try:
+        descriptor = os.open(
+            lock.name if directory_descriptor is not None else lock,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_descriptor,
+        )
+    except Exception:
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
+        raise
     try:
         os.write(descriptor, str(os.getpid()).encode("ascii"))
         yield
     finally:
         os.close(descriptor)
-        lock.unlink(missing_ok=True)
+        if directory_descriptor is None:
+            lock.unlink(missing_ok=True)
+        else:
+            try:
+                os.unlink(lock.name, dir_fd=directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
 
 
 def main() -> int:
