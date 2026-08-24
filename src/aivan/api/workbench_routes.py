@@ -31,6 +31,7 @@ from aivan.domain.roles import (
     ROLE_CAPABILITIES,
     require_capability,
 )
+from aivan.app.ui_catalog import catalog_version, ready_locales
 
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"])
@@ -130,9 +131,12 @@ def _serialize_draft(record: InquiryDraftRecord) -> dict:
 @router.get("/bootstrap")
 def bootstrap(context: RequestContext = Depends(_context)):
     identity = _identity(context)
+    candidate = os.environ.get("AIVAN_CANDIDATE_SHA", "").strip() or None
     return {
         "api_version": "0.3.0",
-        "candidate_sha": os.environ.get("AIVAN_CANDIDATE_SHA", "").strip() or None,
+        "candidate_sha": candidate,
+        "ui_catalog_version": catalog_version(),
+        "ready_locales": ["en", "zh", "zht", *ready_locales(candidate)],
         "tenant_id": context.tenant_id,
         "actor": {
             "actor_id": identity.actor_id,

@@ -53,6 +53,12 @@ function toast(message, kind = 'info') {
   toast.timer = window.setTimeout(() => { node.hidden = true; }, 4200);
 }
 
+const ht = (source) => escapeHtml(t(source));
+
+async function loadUiCatalog(code) {
+  return window.myAivanI18n?.ensureGeneratedCatalog(code) ?? false;
+}
+
 async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
@@ -205,10 +211,11 @@ async function switchRole(event) {
 
 async function loadBootstrap() {
   state.bootstrap = await api('/api/workbench/bootstrap');
+  await window.myAivanI18n?.assertCandidate(state.bootstrap.candidate_sha);
   const sha = state.bootstrap.candidate_sha;
   $('#candidate-banner').innerHTML = sha
-    ? `<strong>${t('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(state.bootstrap.api_version)}</span>`
-    : `<strong>${t('候选未冻结')}</strong><span>${t('仅可作为非生产工作台使用。')}</span>`;
+    ? `<strong>${ht('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(state.bootstrap.api_version)}</span>`
+    : `<strong>${ht('候选未冻结')}</strong><span>${ht('仅可作为非生产工作台使用。')}</span>`;
 }
 
 function caseCard(item) {
@@ -246,7 +253,7 @@ async function loadCases(reset = false) {
     $('#next-page').disabled = !payload.page.has_more;
     renderMetrics(payload.items);
   } catch (error) {
-    $('#case-list').innerHTML = `<p class="error">${t('读取案例失败：')}${escapeHtml(error.message)}</p>`;
+    $('#case-list').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -261,7 +268,7 @@ function renderMetrics(items) {
 }
 
 function emptyHtml() {
-  return `<div class="empty"><strong>${t('暂无数据')}</strong><span>${t('当前筛选条件下没有可显示的记录。')}</span></div>`;
+  return `<div class="empty"><strong>${ht('暂无数据')}</strong><span>${ht('当前筛选条件下没有可显示的记录。')}</span></div>`;
 }
 
 function section(title, items, renderer) {
@@ -270,7 +277,7 @@ function section(title, items, renderer) {
 
 async function openCase(caseId) {
   setView('case-detail');
-  $('#case-detail').innerHTML = `<div class="loading-card">${t('正在读取共享 Core 数据…')}</div>`;
+  $('#case-detail').innerHTML = `<div class="loading-card">${ht('正在读取共享 Core 数据…')}</div>`;
   try {
     const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
     state.selectedCase = payload;
@@ -278,10 +285,10 @@ async function openCase(caseId) {
     const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
     $('#case-detail').innerHTML = `<section class="case-hero">
       <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
-      <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${t('导出审计')}</a>` : ''}</div>
+      <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${ht('导出审计')}</a>` : ''}</div>
     </section>
-    <div class="detail-grid"><section class="panel"><h2>${t('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
-    <section class="panel"><h2>${t('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
+    <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
+    <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
     ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
     ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
@@ -289,20 +296,20 @@ async function openCase(caseId) {
     ${section(t('事件时间线'), payload.events, eventRow)}
     ${section(t('审计记录'), payload.audit, (a) => `<article><strong>${escapeHtml(a.event_type)}</strong><span>${escapeHtml(a.actor_role)} · ${escapeHtml(a.actor_id)}</span><code>${escapeHtml(a.source_trace_id)}</code><time>${escapeHtml(formatTime(a.created_at))}</time></article>`)}`;
   } catch (error) {
-    $('#case-detail').innerHTML = `<p class="error">${t('读取案例失败：')}${escapeHtml(error.message)}</p>`;
+    $('#case-detail').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
 }
 
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
   const action = draft.status === 'pending_approval' && canApprove
-    ? `<button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${t('审批')}</button>` : '';
-  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${t('复制')}</button>${action}</div></article>`;
+    ? `<button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('审批')}</button>` : '';
+  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${ht('复制')}</button>${action}</div></article>`;
 }
 
 function eventRow(event) {
   const canReverse = state.bootstrap.actor.capabilities.includes('reverse_event');
-  return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${t('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${t('纠错')}</button></span>` : ''}</article>`;
+  return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
 async function submitInquiry(event) {
@@ -364,16 +371,16 @@ async function reverseEvent(eventId) {
 
 async function loadRelay() {
   const list = $('#relay-list');
-  list.innerHTML = `<div class="loading-card">${t('正在读取转发队列…')}</div>`;
+  list.innerHTML = `<div class="loading-card">${ht('正在读取转发队列…')}</div>`;
   try {
     const payload = await api('/api/relay/outbox');
     list.innerHTML = payload.outbox.length ? payload.outbox.map((item) => `<article class="relay-card">
       <div><span class="status-pill">${escapeHtml(item.channel)}</span><code>${escapeHtml(item.draft_id)}</code></div>
       <p>${escapeHtml(item.message_text)}</p>
-      <button class="secondary" data-action="copy" data-copy="${escapeHtml(item.message_text)}" type="button">${t('复制内容')}</button>
-      <form class="relay-confirm" data-draft-id="${escapeHtml(item.draft_id)}"><label>${t('发送后的回执编号')}<input name="receipt" required placeholder="${t('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${t('确认已人工转发')}</button></form>
+      <button class="secondary" data-action="copy" data-copy="${escapeHtml(item.message_text)}" type="button">${ht('复制内容')}</button>
+      <form class="relay-confirm" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
     </article>`).join('') : emptyHtml();
-  } catch (error) { list.innerHTML = `<p class="error">${t('读取转发队列失败：')}${escapeHtml(error.message)}</p>`; }
+  } catch (error) { list.innerHTML = `<p class="error">${ht('读取转发队列失败：')}${escapeHtml(error.message)}</p>`; }
 }
 
 async function confirmRelay(event) {
@@ -399,8 +406,8 @@ async function loadHealth() {
       [t('本地模型'), health.model.configured, t('只读配置检查')],
       [t('候选版本'), Boolean(health.candidate_sha), health.candidate_sha || t('未冻结')],
     ];
-    $('#health-grid').innerHTML = entries.map(([label, ok, note]) => `<article class="health-card ${ok ? 'ok' : 'pending'}"><span class="health-dot" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><p>${escapeHtml(note)}</p></div><span>${ok ? t('已配置') : t('待完成')}</span></article>`).join('');
-  } catch (error) { $('#health-grid').innerHTML = `<p class="error">${t('读取健康状态失败：')}${escapeHtml(error.message)}</p>`; }
+    $('#health-grid').innerHTML = entries.map(([label, ok, note]) => `<article class="health-card ${ok ? 'ok' : 'pending'}"><span class="health-dot" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><p>${escapeHtml(note)}</p></div><span>${ok ? ht('已配置') : ht('待完成')}</span></article>`).join('');
+  } catch (error) { $('#health-grid').innerHTML = `<p class="error">${ht('读取健康状态失败：')}${escapeHtml(error.message)}</p>`; }
 }
 
 document.addEventListener('click', async (event) => {
@@ -440,7 +447,9 @@ $('#prev-page').addEventListener('click', () => { state.offset = Math.max(0, sta
 $('#next-page').addEventListener('click', () => { state.offset += state.limit; loadCases(); });
 
 window.addEventListener('myaivan:locale', async () => {
-  if (!state.session) return;
+  const selectedLocale = window.myAivanI18n?.locale || 'zh';
+  await loadUiCatalog(selectedLocale);
+  if (!state.session || selectedLocale !== window.myAivanI18n?.locale) return;
   populateRoles(state.session.allowed_roles || [state.session.role], state.session.role);
   await Promise.all([loadBootstrap(), loadCases(), loadHealth()]);
   if (state.selectedCase && $('#view-case-detail').classList.contains('active')) {
