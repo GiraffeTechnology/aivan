@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import json
 import os
-import re
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,13 +100,12 @@ def test_english_manifest_is_fixed_and_forces_revalidation(catalog_client):
 def test_python_and_browser_authoritative_english_manifests_are_identical():
     root = Path(__file__).resolve().parents[1]
     javascript = (root / "src/aivan/app/static/i18n.js").read_text(encoding="utf-8")
-    block = re.search(r"const en = (\{.*?\n  \});\n  const zht", javascript, re.DOTALL)
-    assert block is not None
-    pairs = re.findall(r"'((?:\\.|[^'])*)':\s*'((?:\\.|[^'])*)'", block.group(1))
-    browser_manifest = {
-        ast.literal_eval(f"'{raw_key}'"): ast.literal_eval(f"'{raw_value}'")
-        for raw_key, raw_value in pairs
-    }
+    marker = "  const en = "
+    end_marker = "\n  const zht ="
+    start = javascript.index(marker) + len(marker)
+    end = javascript.index(end_marker, start)
+    browser_manifest = ast.literal_eval(javascript[start:end].strip().removesuffix(";"))
+    assert len(browser_manifest) == 128
     assert browser_manifest == {
         source: canonical_messages()[message_id]
         for source, message_id in source_map().items()
