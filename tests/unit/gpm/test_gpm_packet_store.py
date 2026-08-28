@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from aivan.gpm.packet_store import GPMPacketStore
 from aivan.gpm.giraffe_db_client import GiraffeDBClientError
+from aivan.gpm.persistence_contract import GPM_PERSISTENCE_CONTRACT_VERSION
 
 SAMPLE = {
     "packet_id": "gpm_pkt_test001",
@@ -21,7 +22,11 @@ SAMPLE = {
 @pytest.fixture
 def mock_db():
     db = MagicMock()
-    db.check_schema_version.return_value = {"schema_version": "0.1.0"}
+    db.contract_version = GPM_PERSISTENCE_CONTRACT_VERSION
+    db.check_schema_version.return_value = {
+        "schema_version": "0.1.0",
+        "gpm_contract_version": GPM_PERSISTENCE_CONTRACT_VERSION,
+    }
     return db
 
 

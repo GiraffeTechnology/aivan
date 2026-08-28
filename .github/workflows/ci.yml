@@ -194,8 +194,11 @@ jobs:
           src/aivan/integrations/language_skill_client.py
           src/aivan/openclaw/client.py
           src/aivan/openclaw/email_transport.py
+          src/aivan/gpm/auth.py
           src/aivan/gpm/giraffe_db_client.py
           src/aivan/gpm/llm_runtime.py
+          src/aivan/gpm/persistence_contract.py
+          src/aivan/gpm/router.py
           src/aivan/gpm/server.py
           src/aivan/execution/approval_state.py
           src/aivan/risk/search_providers.py

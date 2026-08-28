@@ -59,7 +59,7 @@ def test_production_gpm_route_rejects_forged_tenant_without_credentials(
         def check_schema_version(self):
             return None
 
-        def get_tenant(self, tenant_id: str):
+        def get_tenant(self, tenant_id: str, *, correlation_id: str = ""):
             return {"tenant_id": tenant_id, "status": "active"}
 
         def create_packet(self, packet: dict, tenant_id: str | None = None):

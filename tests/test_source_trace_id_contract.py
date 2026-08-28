@@ -9,6 +9,7 @@ import pytest
 from fastapi.responses import JSONResponse
 
 from aivan.gpm import router as gpm_router
+from aivan.gpm.auth import GPMPrincipal
 from aivan.gpm.router import QuoteGuidanceRequest, create_quote_guidance
 
 
@@ -21,7 +22,15 @@ def _mock_runtime(monkeypatch):
 
 def _call(supplier_id):
     body = QuoteGuidanceRequest(sku="SKU-1", supplier_id=supplier_id, supplier_quote=4.5)
-    return asyncio.run(create_quote_guidance(body, tenant_id="tenant-1"))
+    principal = GPMPrincipal(
+        tenant_id="tenant-1",
+        actor_id="",
+        role="",
+        authorization_basis="test",
+        idempotency_key="",
+        correlation_id="trace-test",
+    )
+    return asyncio.run(create_quote_guidance(body, principal=principal))
 
 
 @pytest.mark.parametrize("supplier_id", ["SUP" "_SYN_1", "RFQ" "_SYN_12", "SUP" "_SYN_000001"])  # legacy-id-ok
