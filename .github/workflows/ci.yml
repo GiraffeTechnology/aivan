@@ -189,6 +189,7 @@ jobs:
           src/aivan/db/schema_validation.py
           src/aivan/observability/metrics.py
           src/aivan/observability/readiness.py
+          src/aivan/observability/dependency_probe.py
           src/aivan/governance/runtime_policy.py
           src/aivan/integrations/gltg_client.py
           src/aivan/integrations/language_skill_client.py

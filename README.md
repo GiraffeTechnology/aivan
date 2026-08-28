@@ -340,6 +340,7 @@ OpenClaw:
 ```bash
 OPENCLAW_BASE_URL=http://localhost:3000
 OPENCLAW_MOCK_MODE=true
+AIVAN_OPENCLAW_EXPECTED_VERSION=<reviewed gateway version>
 ```
 
 GLTG:
@@ -348,6 +349,7 @@ GLTG:
 GLTG_API_BASE_URL=http://localhost:8090
 GLTG_API_TIMEOUT_SECONDS=30
 GLTG_API_VERSION=v1
+AIVAN_GLTG_EXPECTED_VERSION=<reviewed API version>
 ```
 
 Language boundary:
@@ -356,6 +358,7 @@ Language boundary:
 AIVAN_LANGUAGE_SKILL_ENABLED=true
 AIVAN_LANGUAGE_SKILL_BASE_URL=http://127.0.0.1:8788
 AIVAN_LANGUAGE_SKILL_FAIL_SOFT=true
+AIVAN_LANGUAGE_SKILL_EXPECTED_VERSION=<reviewed service contract version>
 ```
 
 See `.env.example` for the full annotated list.
@@ -366,6 +369,9 @@ Production is intentionally stricter:
 - bind `AIVAN_API_KEY` to `AIVAN_TENANT_ID`, or use a reviewed
   `AIVAN_TENANT_API_KEYS` mapping;
 - set `GIRAFFE_DB_BASE_URL` and `GIRAFFE_DB_SERVICE_AUTH_SECRET` for GPM;
+- declare reviewed expected versions for giraffe-db, GLTG, OpenClaw, and the
+  language skill; `/readyz` performs real HTTP health/version probes and stays
+  red for missing, stale, unavailable, or mismatched critical dependencies;
 - require the independently accepted `gpm.persistence.v1` giraffe-db adapter
   before treating GPM as durable (this repository does not claim that the
   external API/SDK/Postgres implementation is already available);
