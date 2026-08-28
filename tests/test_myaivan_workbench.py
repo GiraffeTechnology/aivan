@@ -224,7 +224,10 @@ def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
 
 
 def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatch):
-    from aivan.observability.readiness import readiness_checks
+    from aivan.observability import readiness
+    from aivan.observability.dependency_probe import DependencyProbeResult
+
+    readiness_checks = readiness.readiness_checks
 
     monkeypatch.setenv("AIVAN_ENV", "production")
     for name in (
@@ -290,7 +293,36 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setenv("AIVAN_ALIBABA_MODE", "official_api")
     monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "live")
     monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", "false")
-    assert all(readiness_checks().values())
+    config_only = readiness_checks()
+    assert config_only["critical_dependencies_ready"] is False
+    assert not all(config_only.values())
+
+    def ready_probes(*, correlation_id: str):
+        return [
+            DependencyProbeResult(
+                dependency_id=dependency_id,
+                contract_version="aivan.dependency-probe.v1",
+                criticality="critical",
+                owner=owner,
+                expected_version="v1",
+                observed_version="v1",
+                status="ready",
+                error_code=None,
+                correlation_id=correlation_id,
+                checked_at_epoch=__import__("time").time(),
+                duration_seconds=0.01,
+                stale_after_seconds=30.0,
+            )
+            for dependency_id, owner in (
+                ("giraffe-db", "DB"),
+                ("gltg", "GLTG"),
+                ("openclaw", "OpenClaw"),
+                ("giraffe-language-skill", "giraffe-language-skill"),
+            )
+        ]
+
+    monkeypatch.setattr(readiness, "run_dependency_probes", ready_probes)
+    assert all(readiness_checks(correlation_id="corr-ready").values())
 
 
 def test_session_cookie_writer_rejects_unvalidated_values():
