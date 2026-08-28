@@ -8,19 +8,26 @@ state belongs to the future giraffe-db-backed B1-B contract.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import os
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from aivan.governance.runtime_policy import is_production, reject_test_transport_in_production
+from aivan.gpm.persistence_contract import GPM_PERSISTENCE_CONTRACT_VERSION
 from aivan.observability.metrics import record_dependency_probe
+from aivan.observability.mutation_policy import (
+    mutation_classification,
+    mutation_policy_entries,
+)
 
 
 ProbeStatus = Literal[
@@ -33,22 +40,18 @@ ProbeStatus = Literal[
     "stale",
 ]
 Criticality = Literal["critical", "optional"]
+HeaderContract = Literal["generic", "giraffe-db"]
 
 _SAFE_CORRELATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$")
-_GUARDED_EXACT_PATHS = frozenset(
-    {
-        "/invoke",
-        "/api/openclaw/events",
-        "/api/skill/invoke",
-        "/api/rfq/create-from-event",
-        "/api/relay/inbound",
-    }
+_SAFE_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$")
+MAX_REQUIRED_DEPENDENCIES = 4
+MAX_HTTP_REQUESTS_PER_DEPENDENCY = 2
+MAX_CONCURRENT_PROBE_TASKS = 4
+_PROBE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=MAX_CONCURRENT_PROBE_TASKS,
+    thread_name_prefix="aivan-dependency-probe",
 )
-_GUARDED_PATTERNS = (
-    re.compile(r"^/api/(?:openclaw/)?drafts/[^/]+/(?:approve|reject|retry)$"),
-    re.compile(r"^/api/projects/[^/]+/(?:strategy|run-gltg|transition)$"),
-    re.compile(r"^/api/relay/[^/]+/confirm$"),
-)
+_PROBE_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_PROBE_TASKS)
 
 
 class _InvalidProbeResponse(ValueError):
@@ -69,6 +72,8 @@ class DependencyProbeSpec:
     criticality: Criticality
     auth_header_name: str | None = None
     auth_value_env: str | None = None
+    header_contract: HeaderContract = "generic"
+    response_tenant_env: str | None = None
     version_keys: tuple[str, ...] = (
         "contract_version",
         "api_version",
@@ -134,6 +139,12 @@ def _positive_float(name: str, default: float) -> float:
     return value if value > 0 else default
 
 
+def probe_total_timeout_seconds() -> float:
+    """Maximum wall-time budget for one four-provider probe fan-out."""
+
+    return _positive_float("AIVAN_DEPENDENCY_PROBE_TOTAL_TIMEOUT_SECONDS", 6.0)
+
+
 def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
     """Return the frozen B1-A probe declarations, never provider instances."""
 
@@ -151,6 +162,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
             "X-Service-Auth",
             "GIRAFFE_DB_SERVICE_AUTH_SECRET",
             ("gpm_contract_version", "contract_version", "schema_version"),
+            "giraffe-db",
+            "AIVAN_DEPENDENCY_PROBE_TENANT_ID",
         ),
         (
             "gltg",
@@ -165,6 +178,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
             None,
             None,
             ("api_version", "version", "contract_version"),
+            "generic",
+            None,
         ),
         (
             "openclaw",
@@ -179,6 +194,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
             "X-OpenClaw-Key",
             "OPENCLAW_API_KEY",
             ("contract_version", "api_version", "version"),
+            "generic",
+            None,
         ),
         (
             "giraffe-language-skill",
@@ -193,6 +210,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
             None,
             None,
             ("contract_version", "api_version", "version"),
+            "generic",
+            None,
         ),
     )
     specs: list[DependencyProbeSpec] = []
@@ -209,6 +228,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
         auth_header_name,
         auth_value_env,
         version_keys,
+        header_contract,
+        response_tenant_env,
     ) in definitions:
         timeout = _positive_float(timeout_env, 3.0)
         stale = max(_positive_float(stale_env, 30.0), timeout)
@@ -226,6 +247,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
                 criticality="critical",
                 auth_header_name=auth_header_name,
                 auth_value_env=auth_value_env,
+                header_contract=cast(HeaderContract, header_contract),
+                response_tenant_env=response_tenant_env,
                 version_keys=version_keys,
             )
         )
@@ -281,6 +304,36 @@ def _health_ready(payload: dict[str, object]) -> bool:
     }
 
 
+def _trusted_probe_tenant(spec: DependencyProbeSpec) -> str:
+    if spec.header_contract != "giraffe-db":
+        return ""
+    explicit = os.environ.get(spec.response_tenant_env or "", "").strip()
+    tenant = explicit or os.environ.get("AIVAN_TENANT_ID", "").strip()
+    return tenant if _SAFE_TENANT.fullmatch(tenant) else ""
+
+
+def _probe_headers(
+    spec: DependencyProbeSpec,
+    *,
+    correlation_id: str,
+    auth_value: str,
+    tenant_id: str,
+) -> dict[str, str]:
+    headers = {"X-AIVAN-Trace-ID": correlation_id}
+    if spec.header_contract == "giraffe-db":
+        headers.update(
+            {
+                "X-Service-Auth": auth_value,
+                "X-Service-Tenant-ID": tenant_id,
+                "X-GPM-Contract-Version": GPM_PERSISTENCE_CONTRACT_VERSION,
+                "X-AIVAN-Correlation-ID": correlation_id,
+            }
+        )
+    elif spec.auth_header_name:
+        headers[spec.auth_header_name] = auth_value
+    return headers
+
+
 def _result(
     spec: DependencyProbeSpec,
     *,
@@ -320,6 +373,7 @@ def _probe_one(
     *,
     correlation_id: str,
     transport: httpx.BaseTransport | None,
+    total_timeout_seconds: float,
 ) -> DependencyProbeResult:
     started = time.perf_counter()
     checked_at = time.time()
@@ -328,7 +382,13 @@ def _probe_one(
     auth_value = (
         os.environ.get(spec.auth_value_env, "").strip() if spec.auth_value_env else ""
     )
-    if not base_url or not expected or (spec.auth_value_env and not auth_value):
+    tenant_id = _trusted_probe_tenant(spec)
+    if (
+        not base_url
+        or not expected
+        or (spec.auth_value_env and not auth_value)
+        or (spec.header_contract == "giraffe-db" and not tenant_id)
+    ):
         return _result(
             spec,
             correlation_id=correlation_id,
@@ -351,26 +411,44 @@ def _probe_one(
             error_code="DEPENDENCY_PROBE_MISCONFIGURED",
             expected_version=expected,
         )
-    headers = {"X-AIVAN-Trace-ID": correlation_id}
-    if spec.auth_header_name:
-        headers[spec.auth_header_name] = auth_value
+    headers = _probe_headers(
+        spec,
+        correlation_id=correlation_id,
+        auth_value=auth_value,
+        tenant_id=tenant_id,
+    )
+    deadline = time.perf_counter() + min(spec.timeout_seconds, total_timeout_seconds)
+
+    def remaining_timeout() -> float:
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            raise httpx.ReadTimeout("dependency probe deadline elapsed")
+        return remaining
+
     try:
         with httpx.Client(
-            timeout=spec.timeout_seconds,
             transport=transport,
             follow_redirects=False,
         ) as client:
-            health_response = client.get(health_url, headers=headers)
+            health_response = client.get(
+                health_url,
+                headers=headers,
+                timeout=remaining_timeout(),
+            )
             health_response.raise_for_status()
             version_response = (
                 health_response
                 if health_url == version_url
-                else client.get(version_url, headers=headers)
+                else client.get(
+                    version_url,
+                    headers=headers,
+                    timeout=remaining_timeout(),
+                )
             )
             version_response.raise_for_status()
             health_payload = _response_object(health_response)
             version_payload = _response_object(version_response)
-        if health_url != version_url and not _health_ready(health_payload):
+        if not _health_ready(health_payload):
             return _result(
                 spec,
                 correlation_id=correlation_id,
@@ -378,6 +456,16 @@ def _probe_one(
                 checked_at=checked_at,
                 status="unavailable",
                 error_code="DEPENDENCY_NOT_READY",
+                expected_version=expected,
+            )
+        if spec.header_contract == "giraffe-db" and version_payload.get("tenant_id") != tenant_id:
+            return _result(
+                spec,
+                correlation_id=correlation_id,
+                started=started,
+                checked_at=checked_at,
+                status="unavailable",
+                error_code="DEPENDENCY_TENANT_MISMATCH",
                 expected_version=expected,
             )
         observed = _version(version_payload, spec.version_keys)
@@ -440,10 +528,46 @@ def run_dependency_probes(
 ) -> list[DependencyProbeResult]:
     reject_test_transport_in_production(transport, component="dependency-probe")
     safe_correlation = _correlation_id(correlation_id)
-    return [
-        _probe_one(spec, correlation_id=safe_correlation, transport=transport)
-        for spec in (specs if specs is not None else required_dependency_specs())
-    ]
+    selected = specs if specs is not None else required_dependency_specs()
+    if not selected:
+        return []
+    total_timeout = probe_total_timeout_seconds()
+    batch_started = time.perf_counter()
+    checked_at = time.time()
+    futures: list[Future[DependencyProbeResult] | None] = []
+    for spec in selected:
+        if not _PROBE_SLOTS.acquire(blocking=False):
+            futures.append(None)
+            continue
+        submitted = _PROBE_EXECUTOR.submit(
+            _probe_one,
+            spec,
+            correlation_id=safe_correlation,
+            transport=transport,
+            total_timeout_seconds=total_timeout,
+        )
+        submitted.add_done_callback(lambda _future: _PROBE_SLOTS.release())
+        futures.append(submitted)
+    wait([future for future in futures if future is not None], timeout=total_timeout)
+    results: list[DependencyProbeResult] = []
+    for spec, future in zip(selected, futures, strict=True):
+        if future is not None and future.done():
+            results.append(future.result())
+            continue
+        if future is not None:
+            future.cancel()
+        results.append(
+            _result(
+                spec,
+                correlation_id=safe_correlation,
+                started=batch_started,
+                checked_at=checked_at,
+                status="timeout",
+                error_code="DEPENDENCY_TIMEOUT",
+                expected_version=os.environ.get(spec.expected_version_env, "").strip() or None,
+            )
+        )
+    return results
 
 
 def critical_dependencies_ready(results: list[DependencyProbeResult]) -> bool:
@@ -455,7 +579,9 @@ def critical_dependencies_ready(results: list[DependencyProbeResult]) -> bool:
 def is_dependency_guarded_request(method: str, path: str) -> bool:
     if method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
         return False
-    return path in _GUARDED_EXACT_PATHS or any(pattern.fullmatch(path) for pattern in _GUARDED_PATTERNS)
+    # CI requires every application mutation to be listed. Runtime is stricter:
+    # an unknown mutation is guarded until a reviewed N/A rationale is added.
+    return mutation_classification(method, path) != "not_applicable"
 
 
 async def dependency_side_effect_gate(request: Request, call_next):
