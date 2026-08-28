@@ -49,6 +49,9 @@ def _safe_context_value(value: str, *, code: str, required: bool = False) -> str
 def authorize_gpm_decision(principal: GPMPrincipal):
     """Require an authenticated actor with the canonical approval capability."""
 
+    if principal.authorization_basis == "tenant_hmac":
+        raise GPMDecisionAuthorizationError("GPM_HMAC_DECISION_FORBIDDEN")
+
     from aivan.domain.roles import (
         Capability,
         RoleAuthorizationError,
@@ -256,14 +259,12 @@ async def require_principal(request: Request) -> GPMPrincipal:
         correlation_id = context.trace_id
         authorization_basis = context.authorization_basis
     else:
-        actor_id = request.headers.get("X-AIVAN-Actor-ID", "")
-        role = request.headers.get("X-AIVAN-Role-Context", "")
+        tenant_hmac = bool(os.environ.get("AIVAN_AUTH_SECRET", "").strip())
+        actor_id = "" if tenant_hmac else request.headers.get("X-AIVAN-Actor-ID", "")
+        role = "" if tenant_hmac else request.headers.get("X-AIVAN-Role-Context", "")
         idempotency_key = request.headers.get("Idempotency-Key", "")
         correlation_id = request.headers.get("X-AIVAN-Trace-ID", "")
-        authorization_basis = (
-            "hmac" if os.environ.get("AIVAN_AUTH_SECRET", "").strip()
-            else "local_compatibility"
-        )
+        authorization_basis = "tenant_hmac" if tenant_hmac else "local_compatibility"
     correlation_id = _safe_context_value(
         correlation_id or f"trace_{uuid.uuid4().hex}",
         code="GPM_INVALID_CORRELATION_ID",

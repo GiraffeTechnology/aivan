@@ -324,6 +324,7 @@ class GPMPacketStore:
                 try:
                     updated = self._db.apply_decision(command)
                     require_atomic_decision_proof(updated, command=command)
+                    self._remember(packet_id, dict(updated))
                 except Exception as exc:
                     raise _redact_adapter_error(
                         exc, correlation_id=principal.correlation_id

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
@@ -24,6 +24,13 @@ from aivan.gpm.persistence_contract import (
 from aivan.observability.safe_logging import log_exception_safely
 
 logger = logging.getLogger(__name__)
+
+_SAFE_OUTBOUND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$")
+_DECISION_PROVIDER_ERRORS = {
+    (404, "GPM_PACKET_NOT_FOUND"),
+    (409, "GPM_ALREADY_DECIDED"),
+    (409, "GPM_IDEMPOTENCY_CONFLICT"),
+}
 
 
 class GiraffeDBClientError(PersistenceContractError):
@@ -63,8 +70,20 @@ class GiraffeDBClient:
         return require_safe_correlation_id(value)
 
     @staticmethod
-    def _path_segment(value: str) -> str:
-        return quote(value, safe="")
+    def _outbound_id(value: str, *, correlation_id: str) -> str:
+        normalized = (value or "").strip()
+        if not _SAFE_OUTBOUND_ID.fullmatch(normalized):
+            raise PersistenceContractError(
+                "GPM_INVALID_OUTBOUND_ID", correlation_id=correlation_id
+            )
+        return normalized
+
+    def _url(self, *segments: str) -> httpx.URL:
+        base = httpx.URL(self.base_url)
+        path = "/".join(
+            part.strip("/") for part in (base.path, *segments) if part.strip("/")
+        )
+        return base.copy_with(path=f"/{path}")
 
     def _base_headers(self, *, correlation_id: str) -> dict[str, str]:
         if not self._service_auth:
@@ -86,6 +105,9 @@ class GiraffeDBClient:
             raise PersistenceContractError(
                 "GPM_TENANT_REQUIRED", correlation_id=correlation_id
             )
+        normalized_tenant = self._outbound_id(
+            normalized_tenant, correlation_id=correlation_id
+        )
         return {
             **self._base_headers(correlation_id=correlation_id),
             "X-Service-Tenant-ID": normalized_tenant,
@@ -123,6 +145,31 @@ class GiraffeDBClient:
             )
         return value
 
+    def _decision_provider_error(
+        self, response: httpx.Response, *, correlation_id: str
+    ) -> PersistenceContractError | None:
+        if response.status_code not in {404, 409}:
+            return None
+        try:
+            value = response.json()
+        except Exception:
+            return None
+        if not isinstance(value, dict):
+            return None
+        code = value.get("error")
+        version = value.get("contract_version")
+        if (
+            isinstance(code, str)
+            and version == self.contract_version
+            and (response.status_code, code) in _DECISION_PROVIDER_ERRORS
+        ):
+            return PersistenceContractError(
+                code,
+                correlation_id=correlation_id,
+                status_code=response.status_code,
+            )
+        return None
+
     def check_schema_version(self) -> dict[str, Any]:
         correlation_id = "gpm-schema-probe"
         headers = self._base_headers(correlation_id=correlation_id)
@@ -152,10 +199,10 @@ class GiraffeDBClient:
     ) -> dict[str, Any] | None:
         correlation_id = self._correlation(correlation_id)
         headers = self._service_headers(tenant_id, correlation_id=correlation_id)
-        tenant_path = self._path_segment(tenant_id)
+        tenant_path = self._outbound_id(tenant_id, correlation_id=correlation_id)
         try:
             response = self._session.get(
-                f"{self.base_url}/api/data/tenants/{tenant_path}",
+                self._url("api", "data", "tenants", tenant_path),
                 headers=headers,
                 timeout=self.timeout,
             )
@@ -188,7 +235,7 @@ class GiraffeDBClient:
             )
         try:
             response = self._session.post(
-                f"{self.base_url}/api/data/gpm/packets",
+                self._url("api", "data", "gpm", "packets"),
                 json=packet,
                 headers=headers,
                 timeout=self.timeout,
@@ -214,10 +261,10 @@ class GiraffeDBClient:
     ) -> dict[str, Any] | None:
         correlation_id = self._correlation(correlation_id)
         headers = self._service_headers(tenant_id, correlation_id=correlation_id)
-        packet_path = self._path_segment(packet_id)
+        packet_path = self._outbound_id(packet_id, correlation_id=correlation_id)
         try:
             response = self._session.get(
-                f"{self.base_url}/api/data/gpm/packets/{packet_path}",
+                self._url("api", "data", "gpm", "packets", packet_path),
                 headers=headers,
                 timeout=self.timeout,
             )
@@ -249,7 +296,7 @@ class GiraffeDBClient:
             params["status"] = status
         try:
             response = self._session.get(
-                f"{self.base_url}/api/data/gpm/packets",
+                self._url("api", "data", "gpm", "packets"),
                 params=params,
                 headers=headers,
                 timeout=self.timeout,
@@ -282,7 +329,9 @@ class GiraffeDBClient:
         headers = self._service_headers(
             command.tenant_id, correlation_id=command.correlation_id
         )
-        packet_path = self._path_segment(command.packet_id)
+        packet_path = self._outbound_id(
+            command.packet_id, correlation_id=command.correlation_id
+        )
         body = {
             "approval_status": command.decision,
             "expected_status": command.expected_status,
@@ -299,11 +348,16 @@ class GiraffeDBClient:
         }
         try:
             response = self._session.patch(
-                f"{self.base_url}/api/data/gpm/packets/{packet_path}",
+                self._url("api", "data", "gpm", "packets", packet_path),
                 json=body,
                 headers=headers,
                 timeout=self.timeout,
             )
+            provider_error = self._decision_provider_error(
+                response, correlation_id=command.correlation_id
+            )
+            if provider_error is not None:
+                raise provider_error
             response.raise_for_status()
             value = self._json(response, correlation_id=command.correlation_id)
             return require_atomic_decision_proof(value, command=command)

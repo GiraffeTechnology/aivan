@@ -134,41 +134,94 @@ def test_adapter_rejects_unsafe_correlation_id_before_transport(monkeypatch):
     client._session.get.assert_not_called()
 
 
-def test_tenant_and_packet_ids_are_encoded_as_single_path_segments(monkeypatch):
+@pytest.mark.parametrize(
+    ("method", "unsafe_id"),
+    [
+        ("tenant", "."),
+        ("tenant", ".."),
+        ("tenant", "tenant/a"),
+        ("tenant", "tenant\\a"),
+        ("tenant", "tenant%2Fa"),
+        ("packet", ".."),
+        ("packet", "gpm_pkt/a"),
+        ("packet", "gpm_pkt%5Ca"),
+        ("packet", "gpm_pkt?a"),
+        ("packet", "gpm_pkt#a"),
+        ("packet", "gpm_pkt\na"),
+        ("packet", "gpm_pkt／a"),
+    ],
+)
+def test_outbound_ids_reject_path_control_values_before_transport(
+    monkeypatch, method, unsafe_id
+):
     client = _client(monkeypatch)
     client._session = MagicMock()
-    client._session.get.return_value = _response(
-        {"tenant_id": "tenant/a", "status": "active"}
-    )
 
-    client.get_tenant("tenant/a", correlation_id="trace-path")
-    tenant_url = client._session.get.call_args.args[0]
-    assert tenant_url.endswith("/tenants/tenant%2Fa")
+    with pytest.raises(PersistenceContractError) as exc_info:
+        if method == "tenant":
+            client.get_tenant(unsafe_id, correlation_id="trace-path")
+        else:
+            client.get_packet(
+                unsafe_id, tenant_id="tenant-a", correlation_id="trace-path"
+            )
 
-    command = DecisionCommand.from_principal(
-        packet_id="gpm_pkt/a",
-        decision="approved",
-        principal=_principal(tenant_id="tenant/a"),
-    )
+    assert exc_info.value.code == "GPM_INVALID_OUTBOUND_ID"
+    assert exc_info.value.correlation_id == "trace-path"
+    client._session.get.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("status", "provider_error", "expected_code"),
+    [
+        (404, "GPM_PACKET_NOT_FOUND", "GPM_PACKET_NOT_FOUND"),
+        (409, "GPM_ALREADY_DECIDED", "GPM_ALREADY_DECIDED"),
+        (409, "GPM_IDEMPOTENCY_CONFLICT", "GPM_IDEMPOTENCY_CONFLICT"),
+    ],
+)
+def test_decision_adapter_maps_versioned_provider_errors(
+    monkeypatch, status, provider_error, expected_code
+):
+    client = _client(monkeypatch)
+    client._session = MagicMock()
     client._session.patch.return_value = _response(
         {
-            "packet_id": "gpm_pkt/a",
-            "tenant_id": "tenant/a",
-            "approval_status": "approved",
-            "operator_id": command.operator_id,
-            "operator_role": command.operator_role,
-            "authorization_basis": command.authorization_basis,
-            "idempotency_key": command.idempotency_key,
-            "transaction_status": "committed",
-            "audit_recorded": True,
-            "lineage_recorded": True,
+            "error": provider_error,
             "contract_version": GPM_PERSISTENCE_CONTRACT_VERSION,
-            "dispatched": False,
-        }
+        },
+        status,
     )
-    client.apply_decision(command)
-    packet_url = client._session.patch.call_args.args[0]
-    assert packet_url.endswith("/packets/gpm_pkt%2Fa")
+    command = DecisionCommand.from_principal(
+        packet_id="gpm_pkt_1", decision="approved", principal=_principal()
+    )
+
+    with pytest.raises(PersistenceContractError) as exc_info:
+        client.apply_decision(command)
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.correlation_id == "trace-001"
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (409, {"error": "unknown", "contract_version": GPM_PERSISTENCE_CONTRACT_VERSION}),
+        (404, {"error": "GPM_PACKET_NOT_FOUND"}),
+        (422, {"error": "GPM_PACKET_NOT_FOUND", "contract_version": GPM_PERSISTENCE_CONTRACT_VERSION}),
+    ],
+)
+def test_decision_adapter_fails_closed_for_unknown_provider_errors(monkeypatch, status, body):
+    client = _client(monkeypatch)
+    client._session = MagicMock()
+    client._session.patch.return_value = _response(body, status)
+    command = DecisionCommand.from_principal(
+        packet_id="gpm_pkt_1", decision="approved", principal=_principal()
+    )
+
+    with pytest.raises(PersistenceContractError) as exc_info:
+        client.apply_decision(command)
+
+    assert exc_info.value.code == "GPM_ADAPTER_UNAVAILABLE"
+    assert "unknown" not in str(exc_info.value)
 
 
 def test_approval_body_cannot_supply_operator_identity():
@@ -266,6 +319,23 @@ def test_store_decision_is_idempotent_and_concurrency_serialized(monkeypatch):
     assert all(item["audit_recorded"] is True for item in results)
     assert all(item["lineage_recorded"] is True for item in results)
     assert all(item["dispatched"] is False for item in results)
+
+
+def test_durable_decision_refreshes_nonproduction_cache(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    adapter = _AtomicAdapter()
+    store = GPMPacketStore(db_client=adapter)
+
+    assert store.get(
+        "gpm_pkt_1", tenant_id="tenant-a", correlation_id="trace-cache-read"
+    )["approval_status"] == "pending"
+    store.decide("gpm_pkt_1", "approved", principal=_principal())
+
+    cached = store.get(
+        "gpm_pkt_1", tenant_id="tenant-a", correlation_id="trace-cache-after"
+    )
+    assert cached["approval_status"] == "approved"
+    assert len(adapter.calls) == 1
 
 
 def test_idempotency_key_cannot_be_reused_by_another_operator(monkeypatch):
@@ -428,29 +498,91 @@ def _decision_headers(*, tenant_id="tenant-a", actor_id="operator-1", role="appr
     }
 
 
-def test_decision_route_uses_authenticated_operator_and_is_idempotent(decision_api):
-    first = decision_api.post(
+def test_tenant_only_hmac_cannot_self_assert_approver(decision_api):
+    response = decision_api.post(
         "/api/gpm/quote-guidance/gpm_pkt_route/approve",
         headers=_decision_headers(),
         json={"notes": "approved"},
     )
-    repeated = decision_api.post(
-        "/api/gpm/quote-guidance/gpm_pkt_route/approve",
-        headers=_decision_headers(),
-        json={"notes": "ignored on idempotent replay"},
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "GPM_HMAC_DECISION_FORBIDDEN"
+    packet = gpm_router._packet_store.get("gpm_pkt_route", tenant_id="tenant-a")
+    assert packet["approval_status"] == "pending"
+    assert gpm_router._packet_store._decision_receipts == {}
+
+
+def test_server_bound_approver_principal_can_decide(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    store = GPMPacketStore(db_client=None)
+    store.save(
+        {
+            "packet_id": "gpm_pkt_bound",
+            "tenant_id": "tenant-a",
+            "approval_status": "pending",
+            "dispatched": False,
+        }
     )
+    gpm_router._reset_store(store)
+    app = FastAPI()
+    app.dependency_overrides[gpm_router.require_gpm_principal] = _principal
+    app.include_router(gpm_router.router, prefix="/api/gpm")
 
-    assert first.status_code == 200
-    assert repeated.status_code == 200
-    assert first.json() == repeated.json()
-    assert first.json()["operator_id"] == "operator-1"
-    assert first.json()["operator_role"] == "approver"
-    assert first.json()["audit_recorded"] is True
-    assert first.json()["lineage_recorded"] is True
-    assert first.json()["dispatched"] is False
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/gpm/quote-guidance/gpm_pkt_bound/approve",
+            json={"notes": "server-bound"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["approval_status"] == "approved"
+    assert response.json()["operator_id"] == "operator-1"
+    assert response.json()["authorization_basis"] == "tenant_api_key"
 
 
-def test_decision_route_rejects_body_operator_missing_actor_and_cross_tenant(decision_api):
+@pytest.mark.parametrize(
+    ("provider_status", "provider_error", "api_status"),
+    [
+        (404, "GPM_PACKET_NOT_FOUND", 404),
+        (409, "GPM_ALREADY_DECIDED", 409),
+        (409, "GPM_IDEMPOTENCY_CONFLICT", 409),
+    ],
+)
+def test_versioned_httpx_decision_errors_reach_api_status(
+    monkeypatch, provider_status, provider_error, api_status
+):
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    adapter = _client(monkeypatch)
+    adapter._session = MagicMock()
+    adapter._session.get.return_value = _response(
+        {"contract_version": GPM_PERSISTENCE_CONTRACT_VERSION}
+    )
+    store = GPMPacketStore(db_client=adapter)
+    adapter._session.patch.return_value = _response(
+        {
+            "error": provider_error,
+            "contract_version": GPM_PERSISTENCE_CONTRACT_VERSION,
+        },
+        provider_status,
+    )
+    gpm_router._reset_store(store)
+    app = FastAPI()
+    app.dependency_overrides[gpm_router.require_gpm_principal] = _principal
+    app.include_router(gpm_router.router, prefix="/api/gpm")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/gpm/quote-guidance/gpm_pkt_1/approve", json={}
+        )
+
+    assert response.status_code == api_status
+    assert response.json()["detail"] == {
+        "error": provider_error,
+        "correlation_id": "trace-001",
+    }
+
+
+def test_decision_route_rejects_body_operator_and_all_tenant_hmac_decisions(decision_api):
     body_identity = decision_api.post(
         "/api/gpm/quote-guidance/gpm_pkt_route/approve",
         headers=_decision_headers(),
@@ -470,11 +602,11 @@ def test_decision_route_rejects_body_operator_missing_actor_and_cross_tenant(dec
     assert body_identity.status_code == 422
     assert missing_actor.status_code == 403
     assert missing_actor.json()["detail"] == {
-        "error": "GPM_OPERATOR_ID_REQUIRED",
+        "error": "GPM_HMAC_DECISION_FORBIDDEN",
         "correlation_id": "trace-route-1",
     }
-    assert cross_tenant.status_code == 404
+    assert cross_tenant.status_code == 403
     assert cross_tenant.json()["detail"] == {
-        "error": "GPM_PACKET_NOT_FOUND",
+        "error": "GPM_HMAC_DECISION_FORBIDDEN",
         "correlation_id": "trace-route-1",
     }
