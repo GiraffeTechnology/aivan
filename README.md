@@ -1,12 +1,12 @@
-# AIVAN — Private-Domain AI Trade Execution Worker
+# AIVAN — Trade Monitoring and Human-Takeover Control Plane
 
-`Python 3.11+` | `AIVAN v0.3.0` | `Standalone Product` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
+`Python 3.11+` | `AIVAN v0.3.0` | `Control Plane` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
 
-AIVAN is a private-domain AI trade execution worker for high-stakes RFQ and quote workflows.
+AIVAN is the monitoring and human-takeover control plane for high-stakes RFQ and quote workflows.
 
-It receives buyer inquiries from approved communication channels through OpenClaw, canonicalizes multilingual input through `giraffe-language-skill`, structures RFQ intake data, checks private-domain facts through AIVAN DB / giraffe-db, calls GLTG for lead-time feasibility, drafts supplier or buyer messages, and keeps all counterparty-facing actions behind a mandatory human approval gate.
+It receives buyer inquiries from approved communication channels through OpenClaw, canonicalizes multilingual input through `giraffe-language-skill`, consumes non-QC business facts through versioned `giraffe-db` contracts, calls GLTG for lead-time feasibility, prepares controlled drafts, and keeps all counterparty-facing actions behind a mandatory human approval gate.
 
-AIVAN is not a generic chatbot. It is an auditable trade-execution system for trading companies, merchandisers, sourcing teams, and cross-border procurement operators.
+AIVAN is not a generic chatbot or a second business system of record. Its durable local scope is limited to control state, audit evidence, and explicitly versioned short-lived cache/projection data. Existing local business tables are legacy implementation debt and must not be treated as authoritative in production; their consumer cutover is Stage D work.
 
 ---
 
@@ -112,9 +112,9 @@ Supplier-side events are never misclassified as new buyer inquiries;
 ## Current Status
 
 ```text
-Current product role: standalone private-domain trade execution worker
+Current product role: monitoring and human-takeover control plane
 Current package: AIVAN v0.3.0
-Primary runtime: FastAPI + local DB + OpenClaw bridge
+Primary runtime: FastAPI control plane + OpenClaw bridge
 Primary channel path: OpenClaw normalized events
 GLTG integration: v1 HTTP client, v2 contract target
 Language boundary: giraffe-language-skill P0 required for non-English input
@@ -237,7 +237,7 @@ Buyer inquiry / operator command
 -> giraffe-language-skill canonical packet if needed
 -> RFQ/project workspace detection
 -> requirement structuring
--> private-domain lookup in AIVAN DB / giraffe-db
+-> versioned private-domain lookup through giraffe-db
 -> supplier routing / GPM context
 -> GLTG lead-time feasibility
 -> quote / supplier-follow-up draft
@@ -277,7 +277,7 @@ AIVAN must not calculate lead time locally and must not silently replace GLTG wi
 
 ## giraffe-db / Private Data Contract
 
-AIVAN consumes private-domain facts from AIVAN DB and giraffe-db.
+AIVAN consumes all non-QC private-domain business facts through versioned giraffe-db APIs/SDKs. Local storage may contain only control state, audit evidence, or a declared cache/projection carrying source version, TTL, invalidation, and rebuild semantics.
 
 Expected data categories include:
 

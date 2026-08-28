@@ -103,7 +103,7 @@ def test_http_error_surfaces_structured_error():
     res = client.estimate_lead_time(order={"quantity": 1}, suppliers=[])
     assert res.ok is False
     assert res.status_code == 500
-    assert "HTTP 500" in (res.error or "")
+    assert res.error == "GLTG_HTTP_500"
 
 
 def test_connection_error_does_not_fall_back():

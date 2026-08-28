@@ -244,6 +244,12 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
         "AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL",
         "AIVAN_LANGUAGE_SKILL_EXPECTED_BACKEND",
         "AIVAN_TRANSLATION_PROOFREAD_ENABLED",
+        "AIVAN_PRODUCT_ROLE",
+        "AIVAN_BUSINESS_FACT_AUTHORITY",
+        "AIVAN_LOCAL_STATE_SCOPE",
+        "AIVAN_WEB_SEARCH_PROVIDER",
+        "AIVAN_ALIBABA_MODE",
+        "GPM_LLM_RUNTIME_MODE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AIVAN_TENANT_API_KEYS", "{}")
@@ -276,6 +282,14 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER", "ctranslate2")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL", "opus-mt")
     monkeypatch.setenv("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "true")
+    monkeypatch.setenv("AIVAN_PRODUCT_ROLE", "monitoring_takeover_control_plane")
+    monkeypatch.setenv("AIVAN_BUSINESS_FACT_AUTHORITY", "giraffe-db")
+    monkeypatch.setenv("AIVAN_LOCAL_STATE_SCOPE", "control_audit_cache_only")
+    monkeypatch.setenv("AIVAN_ALLOW_STUB_SUPPLIERS", "false")
+    monkeypatch.setenv("AIVAN_WEB_SEARCH_PROVIDER", "openclaw_search")
+    monkeypatch.setenv("AIVAN_ALIBABA_MODE", "official_api")
+    monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "live")
+    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", "false")
     assert all(readiness_checks().values())
 
 

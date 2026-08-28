@@ -65,6 +65,8 @@ class GiraffeDBClient:
         customer_id: str = "",
         user_id: str = "",
     ) -> GiraffeContext:
+        if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+            raise RuntimeError("GIRAFFE_DB_CANONICAL_CONTEXT_REQUIRED")
         suppliers = self.query_suppliers(requirement)
         return GiraffeContext(
             customers=self.query_customers(customer_id),

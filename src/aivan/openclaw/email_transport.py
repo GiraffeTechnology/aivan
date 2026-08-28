@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import poplib
 import smtplib
 from dataclasses import dataclass
@@ -11,9 +12,11 @@ from email.utils import getaddresses
 
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.openclaw.contracts import OpenClawSendResponse
+from aivan.observability.safe_logging import log_exception_safely
 from aivan.utils.time_utils import utcnow_iso
 from aivan.utils.env import env_bool
 
+logger = logging.getLogger(__name__)
 
 SECRET_KEYS = {
     "AIVAN_SMTP_PASSWORD",
@@ -122,11 +125,15 @@ def _message_body_excerpt(raw_message: bytes, *, max_chars: int = 2000) -> tuple
                 continue
             if part.get_content_type() not in {"text/plain", "text/html"}:
                 continue
-            payload = part.get_payload(decode=True) or b""
+            payload = part.get_payload(decode=True)
+            if not isinstance(payload, bytes):
+                payload = b""
             charset = part.get_content_charset() or "utf-8"
             parts.append(payload.decode(charset, errors="replace"))
     else:
-        payload = msg.get_payload(decode=True) or b""
+        payload = msg.get_payload(decode=True)
+        if not isinstance(payload, bytes):
+            payload = b""
         charset = msg.get_content_charset() or "utf-8"
         parts.append(payload.decode(charset, errors="replace"))
     return from_address, to_address, subject, date, "\n".join(parts).strip()[:max_chars]
@@ -179,12 +186,17 @@ def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessa
             except Exception:
                 pass
     except Exception as exc:
-        raise RuntimeError(redact_secret(str(exc))) from exc
+        error_id = log_exception_safely(logger, "POP3 test fetch failed", exc=exc)
+        raise RuntimeError(f"EMAIL_POP3_FETCH_FAILED:{error_id}") from exc
 
 
 def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     recipient = (draft.target_peer_id or "").strip()
-    sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
+    sender = (
+        os.environ.get("AIVAN_PRESET_MAILBOX")
+        or os.environ.get("AIVAN_SMTP_USERNAME")
+        or ""
+    )
     username = os.environ.get("AIVAN_SMTP_USERNAME", "")
     password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
     host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
@@ -220,12 +232,19 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
         if refused:
             return OpenClawSendResponse(
                 success=False,
-                error=redact_secret(f"SMTP refused recipients: {sorted(refused)}"),
+                error="EMAIL_RECIPIENT_REFUSED",
             )
         return OpenClawSendResponse(
             success=True,
             message_id=f"smtp_real_test_{utcnow_iso()}",
             sent_at=utcnow_iso(),
         )
+    except ValueError as exc:
+        # Fixed local configuration/allowlist messages remain actionable; SMTP
+        # response payloads never flow through this branch.
+        return OpenClawSendResponse(success=False, error=str(exc))
     except Exception as exc:
-        return OpenClawSendResponse(success=False, error=redact_secret(str(exc)))
+        error_id = log_exception_safely(logger, "SMTP test send failed", exc=exc)
+        return OpenClawSendResponse(
+            success=False, error=f"EMAIL_TRANSPORT_FAILED:{error_id}"
+        )

@@ -24,14 +24,18 @@ Configuration (environment):
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from aivan.utils.env import env_bool
+from aivan.governance.runtime_policy import reject_test_transport_in_production
+from aivan.observability.safe_logging import log_exception_safely
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8788"
 DEFAULT_TIMEOUT_SECONDS = 10.0
+logger = logging.getLogger(__name__)
 
 # Process-wide transport override. Tests install an httpx.MockTransport here so
 # the whole app talks to a faithful in-memory language-skill without a live
@@ -41,6 +45,7 @@ _DEFAULT_TRANSPORT: "httpx.BaseTransport | None" = None
 
 def set_default_transport(transport: "httpx.BaseTransport | None") -> None:
     """Install (or clear) a process-wide default transport for the client."""
+    reject_test_transport_in_production(transport, component="language-skill-client")
     global _DEFAULT_TRANSPORT
     _DEFAULT_TRANSPORT = transport
 
@@ -74,8 +79,14 @@ class LanguageSkillClient:
         timeout_seconds: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        effective_transport = transport if transport is not None else _DEFAULT_TRANSPORT
+        reject_test_transport_in_production(
+            effective_transport, component="language-skill-client"
+        )
         self.base_url = (
-            base_url or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL", DEFAULT_BASE_URL)
+            base_url
+            or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL")
+            or DEFAULT_BASE_URL
         ).rstrip("/")
         if timeout_seconds is not None:
             self.timeout = timeout_seconds
@@ -85,7 +96,7 @@ class LanguageSkillClient:
             )
         # Injectable transport keeps unit tests off the network
         # (httpx.MockTransport). Falls back to the process-wide default.
-        self._transport = transport if transport is not None else _DEFAULT_TRANSPORT
+        self._transport = effective_transport
 
     # ------------------------------------------------------------------ #
     # transport
@@ -96,22 +107,38 @@ class LanguageSkillClient:
             with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
                 resp = client.request(method, url, json=json)
         except httpx.TimeoutException as exc:
-            return LanguageSkillResult(False, None, f"language-skill request timed out: {exc}", None)
+            error_id = log_exception_safely(
+                logger, "Language-skill request timed out", exc=exc
+            )
+            return LanguageSkillResult(
+                False, None, f"LANGUAGE_SKILL_TIMEOUT:{error_id}", None
+            )
         except httpx.HTTPError as exc:
-            return LanguageSkillResult(False, None, f"language-skill connection error: {exc}", None)
+            error_id = log_exception_safely(
+                logger, "Language-skill connection failed", exc=exc
+            )
+            return LanguageSkillResult(
+                False, None, f"LANGUAGE_SKILL_CONNECTION_FAILED:{error_id}", None
+            )
 
         if resp.status_code >= 400:
             return LanguageSkillResult(
                 False,
                 None,
-                f"language-skill returned HTTP {resp.status_code}: {resp.text[:500]}",
+                f"LANGUAGE_SKILL_HTTP_{resp.status_code}",
                 resp.status_code,
             )
         try:
             return LanguageSkillResult(True, resp.json(), None, resp.status_code)
         except ValueError as exc:
+            error_id = log_exception_safely(
+                logger, "Language-skill returned invalid JSON", exc=exc
+            )
             return LanguageSkillResult(
-                False, None, f"language-skill returned invalid JSON: {exc}", resp.status_code
+                False,
+                None,
+                f"LANGUAGE_SKILL_INVALID_RESPONSE:{error_id}",
+                resp.status_code,
             )
 
     # ------------------------------------------------------------------ #

@@ -110,7 +110,7 @@ def classify_exception(exc: BaseException, *, step: str = "") -> DependencyRecov
     return DependencyRecovery(
         dependency="unknown_backend",
         action="pending_dependency_recovery",
-        blocked_reason=f"{exc.__class__.__name__}: {exc}",
+        blocked_reason=exc.__class__.__name__,
         operator_message_en=(
             "AIVAN hit an unexpected internal error while processing this RFQ and "
             "did not send any messages. The RFQ was preserved for retry/manual "

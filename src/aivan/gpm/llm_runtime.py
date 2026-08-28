@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from aivan.observability.safe_logging import log_exception_safely
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_OUTPUT_KEYS = {
@@ -148,11 +150,12 @@ def analyze_quote(
         except QwenOutputValidationError as exc:
             last_exc = exc
             if attempt < max_retries:
-                logger.warning(
-                    "GPM LLM output validation failed (attempt %d/%d): %s — retrying",
-                    attempt + 1,
-                    max_retries + 1,
-                    exc,
+                log_exception_safely(
+                    logger,
+                    "GPM LLM output validation failed; retrying",
+                    exc=exc,
+                    context={"attempt": str(attempt + 1)},
+                    level=logging.WARNING,
                 )
         except RuntimeError as exc:
             # Provider raised a RuntimeError (e.g. API key missing, HTTP error)
@@ -162,14 +165,21 @@ def analyze_quote(
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries:
-                logger.warning(
-                    "GPM LLM call failed (attempt %d/%d): %s — retrying",
-                    attempt + 1,
-                    max_retries + 1,
-                    exc,
+                log_exception_safely(
+                    logger,
+                    "GPM LLM call failed; retrying",
+                    exc=exc,
+                    context={"attempt": str(attempt + 1)},
+                    level=logging.WARNING,
                 )
 
-    logger.error("GPM LLM analysis failed after %d attempts: %s", max_retries + 1, last_exc)
+    if last_exc is not None:
+        log_exception_safely(
+            logger,
+            "GPM LLM analysis failed",
+            exc=last_exc,
+            context={"attempts": str(max_retries + 1)},
+        )
     return _make_unavailable_response(500)
 
 

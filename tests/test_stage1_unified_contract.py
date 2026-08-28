@@ -17,7 +17,7 @@ INVOKE_PATHS = (
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, production_runtime_policy):
     from aivan.api import main
     from aivan.db.models import Base
 

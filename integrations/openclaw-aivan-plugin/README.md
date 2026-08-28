@@ -1,22 +1,26 @@
 # @giraffetechnology/openclaw-aivan
 
-OpenClaw plugin bridge for **AIVAN** — a local-first AI trade salesperson assistant.
+OpenClaw plugin bridge for **AIVAN** — the trade monitoring and human-takeover control plane.
 
 ---
 
 ## What is AIVAN?
 
-AIVAN is a standalone, local-first AI assistant that helps trading-company salespeople manage the full sourcing cycle:
+AIVAN monitors high-stakes RFQ and quote workflows and provides an auditable
+human-takeover control surface. It is not a standalone business system of
+record. Through reviewed service contracts it:
 
 - Receive buyer inquiries → structure requirements
-- Find and screen suppliers (registry + marketplace search)
+- Reads non-QC business facts from `giraffe-db`
 - Draft outbound messages (inquiries, options, confirmations)
 - Screen supplier risk
-- Calculate lead-time estimates (P50/P80/P90)
+- Requests lead-time evidence from GLTG
 - Generate buyer option comparisons
 - Manage order execution milestones
 
-AIVAN runs entirely on your machine. No buyer data, supplier data, or conversation history leaves your network unless you explicitly approve a message to be sent via OpenClaw.
+AIVAN keeps counterparty-facing actions behind human approval. Local durable
+state is limited to control state, audit evidence, and declared short-lived
+cache/projection data; external-model calls require separate scoped approval.
 
 ---
 
@@ -29,7 +33,10 @@ This plugin is a **thin HTTP bridge** between OpenClaw and your local AIVAN serv
 - Exposes helper commands to check AIVAN health and open the local dashboard
 - Lets OpenClaw operators view, approve, or reject pending outbound drafts
 
-The plugin contains **no business logic**. All sourcing, risk-screening, lead-time calculation, and option generation happens inside AIVAN.
+The plugin contains **no business logic**. It cannot authorize an outbound
+message: AIVAN's shared authorization and channel-policy gates remain mandatory.
+Business facts stay authoritative in `giraffe-db`, and lead-time results stay
+authoritative in GLTG.
 
 ---
 

@@ -215,15 +215,19 @@ def cmd_accounts(args):
         print(f"Revoked: {account_id}")
 
 def cmd_test(args):
-    import subprocess
-    result = subprocess.run([sys.executable, "-m", "pytest", "tests/", "-v", "--tb=short"], cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-    sys.exit(result.returncode)
+    print("The packaged AIVAN runtime cannot execute developer tooling. Run tests from the repository with 'uv run pytest'.")
+    sys.exit(2)
 
 def main():
     from dotenv import load_dotenv
+    from aivan.governance.runtime_policy import enforce_runtime_policy, is_production
+
     load_dotenv()
 
-    parser = argparse.ArgumentParser(prog="aivan", description="AIVAN - AI Trade Salesperson CLI")
+    parser = argparse.ArgumentParser(
+        prog="aivan",
+        description="AIVAN monitoring and human-takeover control-plane CLI",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("init", help="Initialize AIVAN database and settings")
@@ -259,6 +263,18 @@ def main():
     rev_p.add_argument("account_id")
 
     args = parser.parse_args()
+    enforce_runtime_policy(component="aivan-cli")
+    if is_production() and args.command in {
+        "init",
+        "demo",
+        "demo-marketplace",
+        "demo-risk-check",
+        "test",
+        "import-suppliers",
+        "import-marketplace-results",
+        "risk-check",
+    }:
+        parser.error("AIVAN_PRODUCTION_CLI_COMMAND_FORBIDDEN")
 
     commands = {
         "init": cmd_init,

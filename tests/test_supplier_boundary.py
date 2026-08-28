@@ -1,6 +1,8 @@
 """Supplier stub gating boundary tests (PRD §10, §18.10)."""
 from __future__ import annotations
 
+import pytest
+
 from aivan.integrations import giraffe_db
 from aivan.integrations.giraffe_db import GiraffeDBClient, stub_suppliers_allowed
 from aivan.execution.safety import evaluate_supplier_readiness
@@ -16,8 +18,8 @@ def test_stub_suppliers_disabled_in_production(monkeypatch, db_session):
     monkeypatch.setenv("AIVAN_ENV", "production")
     clear_registry()
     assert stub_suppliers_allowed() is False
-    context = GiraffeDBClient(db_session).build_context(_requirement())
-    assert context.suppliers == []
+    with pytest.raises(RuntimeError, match="GIRAFFE_DB_CANONICAL_CONTEXT_REQUIRED"):
+        GiraffeDBClient(db_session).build_context(_requirement())
 
 
 def test_stub_suppliers_enabled_only_when_configured(monkeypatch, db_session):

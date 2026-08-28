@@ -68,7 +68,7 @@ def _tenant_key_map() -> dict[str, str]:
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=503,
-            detail={"error": "TENANT_AUTH_MISCONFIGURED", "message": str(exc)},
+            detail={"error": "TENANT_AUTH_MISCONFIGURED"},
         ) from exc
     if not isinstance(parsed, dict) or not all(
         isinstance(key, str) and isinstance(value, str) and key.strip() and value.strip()
