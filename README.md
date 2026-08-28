@@ -365,14 +365,21 @@ Production is intentionally stricter:
 - set `AIVAN_DB_URL` explicitly through the authorized configuration store;
 - bind `AIVAN_API_KEY` to `AIVAN_TENANT_ID`, or use a reviewed
   `AIVAN_TENANT_API_KEYS` mapping;
-- set `GIRAFFE_DB_BASE_URL` for GPM durable persistence and active-tenant checks;
+- set `GIRAFFE_DB_BASE_URL` and `GIRAFFE_DB_SERVICE_AUTH_SECRET` for GPM;
+- require the independently accepted `gpm.persistence.v1` giraffe-db adapter
+  before treating GPM as durable (this repository does not claim that the
+  external API/SDK/Postgres implementation is already available);
 - set `AIVAN_CORS_ORIGINS` to an exact comma-separated browser allowlist
   (production defaults to none and rejects `*`);
 - treat `deploy/aivan.production.env.example` as a schema, not as authorization
   to deploy or modify a host.
 
 In production, a caller-supplied `X-Tenant-ID` is never authentication. GPM
-fails closed when giraffe-db is missing, unavailable, or not durable.
+fails closed when giraffe-db is missing, unauthenticated, unavailable,
+unversioned, cross-tenant, or not durable. Approval and rejection identities
+come from authenticated request context, not from request bodies; the adapter
+must commit status, audit, lineage, and idempotency proof atomically while
+keeping `dispatched=false`.
 
 LLM providers are optional and must not bypass deterministic gates, GLTG, giraffe-db, or the language boundary.
 

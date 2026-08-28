@@ -103,15 +103,17 @@ def test_valid_token_tenant_inactive(monkeypatch):
     assert exc_info.value.status_code == 403
 
 
-def test_valid_token_giraffe_db_unavailable_degrades(monkeypatch):
+def test_valid_token_giraffe_db_unavailable_fails_closed(monkeypatch):
     monkeypatch.setenv("AIVAN_ENV", "local")
     monkeypatch.setenv("AIVAN_AUTH_SECRET", "test-secret")
     db = MagicMock()
     db.get_tenant.side_effect = GiraffeDBClientError("connection refused")
     auth = make_require_auth(db_client=db)
     token = generate_token("t3", "test-secret")
-    # Falls back to HMAC-only and returns tenant_id
-    assert _run(auth(_make_request({"Authorization": f"Bearer {token}"}))) == "t3"
+    with pytest.raises(HTTPException) as exc_info:
+        _run(auth(_make_request({"Authorization": f"Bearer {token}"})))
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "TENANT_VERIFICATION_UNAVAILABLE"
 
 
 def test_missing_auth_header_raises_401(monkeypatch):
@@ -137,7 +139,7 @@ def test_get_tenant_wraps_transport_errors():
     import httpx
     from aivan.gpm.giraffe_db_client import GiraffeDBClient
 
-    db_client = GiraffeDBClient("http://localhost:1")
+    db_client = GiraffeDBClient("http://localhost:1", service_auth="service-secret")
     db_client._session = MagicMock()
     db_client._session.get.side_effect = httpx.ConnectError("connection refused")
 
@@ -145,23 +147,23 @@ def test_get_tenant_wraps_transport_errors():
         db_client.get_tenant("any-tenant")
 
 
-def test_transport_error_in_get_tenant_triggers_auth_degradation(monkeypatch):
-    """When get_tenant raises GiraffeDBClientError (from transport error),
-    make_require_auth must fall back to HMAC-only — no 500."""
+def test_transport_error_in_get_tenant_fails_closed(monkeypatch):
+    """Configured tenant verification never degrades to HMAC-only."""
     import httpx
     from aivan.gpm.giraffe_db_client import GiraffeDBClient
 
     monkeypatch.setenv("AIVAN_ENV", "local")
     monkeypatch.setenv("AIVAN_AUTH_SECRET", "test-secret")
-    db_client = GiraffeDBClient("http://localhost:1")
+    db_client = GiraffeDBClient("http://localhost:1", service_auth="service-secret")
     db_client._session = MagicMock()
     db_client._session.get.side_effect = httpx.ConnectError("refused")
 
     auth = make_require_auth(db_client=db_client)
     token = generate_token("t-transport", "test-secret")
-    result = _run(auth(_make_request({"Authorization": f"Bearer {token}"}))
-    )
-    assert result == "t-transport"
+    with pytest.raises(HTTPException) as exc_info:
+        _run(auth(_make_request({"Authorization": f"Bearer {token}"})))
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "TENANT_VERIFICATION_UNAVAILABLE"
 
 
 def test_production_never_trusts_x_tenant_id_without_credentials(monkeypatch):
@@ -195,13 +197,16 @@ def test_production_api_key_uses_shared_request_context(monkeypatch):
                 {
                     "X-AIVAN-API-Key": "deployment-key",
                     "X-AIVAN-Tenant-ID": "tenant-prod",
+                    "X-AIVAN-Trace-ID": "trace-auth-test",
                 }
             )
         )
     )
 
     assert tenant_id == "tenant-prod"
-    db.get_tenant.assert_called_once_with("tenant-prod")
+    db.get_tenant.assert_called_once_with(
+        "tenant-prod", correlation_id="trace-auth-test"
+    )
 
 
 def test_production_requires_giraffe_db(monkeypatch):

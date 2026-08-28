@@ -1,196 +1,327 @@
-"""HTTP client for giraffe-db GPM packet persistence endpoints.
+"""Versioned, fail-closed HTTP adapter for GPM persistence.
 
-Connects to the giraffe-db service at GIRAFFE_DB_BASE_URL. All methods raise
-GiraffeDBClientError on non-2xx responses (except get_packet which returns None
-on 404). Transport errors (timeouts, connection failures) are also wrapped as
-GiraffeDBClientError so callers can treat all failure modes uniformly.
-
-Packet-scoped endpoints send X-Service-Tenant-ID + X-Service-Auth headers so
-giraffe-db can enforce tenant ownership and verify the service caller identity.
-Both headers carry facts already verified by AIVAN's HMAC auth layer.
+This is a consumer-side contract only. Real giraffe-db support for the atomic
+decision operation remains an external Stage dependency and is not claimed.
 """
+
 from __future__ import annotations
 
 import logging
 import os
+from typing import Any
+from urllib.parse import quote
 
 import httpx
 
+from aivan.gpm.persistence_contract import (
+    GPM_PERSISTENCE_CONTRACT_VERSION,
+    DecisionCommand,
+    PersistenceContractError,
+    require_atomic_decision_proof,
+    require_response_tenant,
+    require_safe_correlation_id,
+)
 from aivan.observability.safe_logging import log_exception_safely
 
 logger = logging.getLogger(__name__)
 
 
-class GiraffeDBClientError(Exception):
-    def __init__(self, message: str, status_code: int | None = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+class GiraffeDBClientError(PersistenceContractError):
+    """Compatibility name for callers catching the legacy adapter error."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        correlation_id: str = "gpm-adapter",
+    ) -> None:
+        super().__init__(message, correlation_id=correlation_id, status_code=status_code)
 
 
 class GiraffeDBClient:
-    def __init__(self, base_url: str, timeout: float = 10.0) -> None:
+    contract_version = GPM_PERSISTENCE_CONTRACT_VERSION
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 10.0,
+        *,
+        service_auth: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = httpx.Client()
-        self._service_auth = os.getenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "")
+        self._service_auth = (
+            service_auth
+            if service_auth is not None
+            else os.getenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "")
+        ).strip()
 
-    def _service_headers(self, tenant_id: str | None) -> dict[str, str]:
-        """Build X-Service-Tenant-ID + X-Service-Auth headers for protected requests."""
-        headers: dict[str, str] = {}
-        if tenant_id:
-            headers["X-Service-Tenant-ID"] = tenant_id
-        if self._service_auth:
-            headers["X-Service-Auth"] = self._service_auth
-        return headers
+    @staticmethod
+    def _correlation(value: str | None) -> str:
+        return require_safe_correlation_id(value)
 
-    def check_schema_version(self) -> dict:
-        """GET /api/data/schema-version — used as connectivity probe."""
-        url = f"{self.base_url}/api/data/schema-version"
-        try:
-            resp = self._session.get(url, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"check_schema_version failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
-            ) from exc
-        except Exception as exc:
-            error_id = log_exception_safely(
-                logger, "giraffe-db schema-version request failed", exc=exc
+    @staticmethod
+    def _path_segment(value: str) -> str:
+        return quote(value, safe="")
+
+    def _base_headers(self, *, correlation_id: str) -> dict[str, str]:
+        if not self._service_auth:
+            raise PersistenceContractError(
+                "GPM_SERVICE_AUTH_MISCONFIGURED", correlation_id=correlation_id
             )
-            raise GiraffeDBClientError(
-                f"GIRAFFE_DB_REQUEST_FAILED:{error_id}"
-            ) from exc
+        return {
+            "X-Service-Auth": self._service_auth,
+            "X-GPM-Contract-Version": self.contract_version,
+            "X-AIVAN-Correlation-ID": correlation_id,
+        }
 
-    def get_tenant(self, tenant_id: str) -> dict | None:
-        """GET /api/data/tenants/{tenant_id} — None if 404."""
-        url = f"{self.base_url}/api/data/tenants/{tenant_id}"
-        try:
-            resp = self._session.get(url, timeout=self.timeout)
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"get_tenant failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
-            ) from exc
-        except Exception as exc:
-            # Covers httpx.RequestError (ConnectError, TimeoutException, etc.)
-            # and any other transport failure; lets auth fall back to HMAC-only.
-            error_id = log_exception_safely(
-                logger, "giraffe-db tenant request failed", exc=exc
+    def _service_headers(
+        self, tenant_id: str | None, *, correlation_id: str = "gpm-adapter"
+    ) -> dict[str, str]:
+        correlation_id = self._correlation(correlation_id)
+        normalized_tenant = (tenant_id or "").strip()
+        if not normalized_tenant:
+            raise PersistenceContractError(
+                "GPM_TENANT_REQUIRED", correlation_id=correlation_id
             )
-            raise GiraffeDBClientError(
-                f"GIRAFFE_DB_REQUEST_FAILED:{error_id}"
-            ) from exc
+        return {
+            **self._base_headers(correlation_id=correlation_id),
+            "X-Service-Tenant-ID": normalized_tenant,
+        }
 
-    # ── Packet CRUD ────────────────────────────────────────────────────────
+    def _transport_error(
+        self, operation: str, exc: Exception, *, correlation_id: str
+    ) -> GiraffeDBClientError:
+        log_exception_safely(
+            logger,
+            "GPM persistence adapter request failed",
+            exc=exc,
+            context={"operation": operation, "correlation_id": correlation_id},
+        )
+        status_code = (
+            exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        )
+        return GiraffeDBClientError(
+            "GPM_ADAPTER_UNAVAILABLE",
+            status_code=status_code,
+            correlation_id=correlation_id,
+        )
 
-    def create_packet(self, packet: dict, tenant_id: str | None = None) -> dict:
-        """POST /api/data/gpm/packets
-
-        tenant_id is sent as X-Service-Tenant-ID; falls back to packet["tenant_id"]
-        so callers that don't pass it explicitly still get the header set.
-        """
-        url = f"{self.base_url}/api/data/gpm/packets"
-        tid = tenant_id or packet.get("tenant_id")
-        headers = self._service_headers(tid)
+    @staticmethod
+    def _json(response: httpx.Response, *, correlation_id: str) -> dict[str, Any]:
         try:
-            resp = self._session.post(url, json=packet, headers=headers, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"create_packet failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
+            value = response.json()
+        except Exception as exc:
+            raise PersistenceContractError(
+                "GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id
             ) from exc
+        if not isinstance(value, dict):
+            raise PersistenceContractError(
+                "GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id
+            )
+        return value
 
-    def get_packet(self, packet_id: str, tenant_id: str | None = None) -> dict | None:
-        """GET /api/data/gpm/packets/{packet_id} — None if 404.
-
-        Passes X-Service-Tenant-ID + X-Service-Auth headers so giraffe-db can
-        enforce ownership and verify the caller before returning data.
-        """
-        url = f"{self.base_url}/api/data/gpm/packets/{packet_id}"
-        headers = self._service_headers(tenant_id)
+    def check_schema_version(self) -> dict[str, Any]:
+        correlation_id = "gpm-schema-probe"
+        headers = self._base_headers(correlation_id=correlation_id)
         try:
-            resp = self._session.get(url, headers=headers, timeout=self.timeout)
-            if resp.status_code == 404:
+            response = self._session.get(
+                f"{self.base_url}/api/data/schema-version",
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            value = self._json(response, correlation_id=correlation_id)
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error(
+                "check_schema_version", exc, correlation_id=correlation_id
+            ) from exc
+        reported = value.get("gpm_contract_version") or value.get("contract_version")
+        if reported != self.contract_version:
+            raise PersistenceContractError(
+                "GPM_CONTRACT_VERSION_MISMATCH", correlation_id=correlation_id
+            )
+        return value
+
+    def get_tenant(
+        self, tenant_id: str, *, correlation_id: str = "gpm-tenant-check"
+    ) -> dict[str, Any] | None:
+        correlation_id = self._correlation(correlation_id)
+        headers = self._service_headers(tenant_id, correlation_id=correlation_id)
+        tenant_path = self._path_segment(tenant_id)
+        try:
+            response = self._session.get(
+                f"{self.base_url}/api/data/tenants/{tenant_path}",
+                headers=headers,
+                timeout=self.timeout,
+            )
+            if response.status_code == 404:
                 return None
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"get_packet failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
+            response.raise_for_status()
+            value = self._json(response, correlation_id=correlation_id)
+            return require_response_tenant(
+                value, expected_tenant=tenant_id, correlation_id=correlation_id
+            )
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error(
+                "get_tenant", exc, correlation_id=correlation_id
             ) from exc
 
-    def update_packet_status(
+    def create_packet(
+        self,
+        packet: dict[str, Any],
+        tenant_id: str | None = None,
+        *,
+        correlation_id: str = "gpm-create",
+    ) -> dict[str, Any]:
+        correlation_id = self._correlation(correlation_id)
+        headers = self._service_headers(tenant_id, correlation_id=correlation_id)
+        if packet.get("tenant_id") != tenant_id:
+            raise PersistenceContractError(
+                "GPM_REQUEST_TENANT_MISMATCH", correlation_id=correlation_id
+            )
+        try:
+            response = self._session.post(
+                f"{self.base_url}/api/data/gpm/packets",
+                json=packet,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            value = self._json(response, correlation_id=correlation_id)
+            return require_response_tenant(
+                value, expected_tenant=tenant_id or "", correlation_id=correlation_id
+            )
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error(
+                "create_packet", exc, correlation_id=correlation_id
+            ) from exc
+
+    def get_packet(
         self,
         packet_id: str,
-        approval_status: str,
-        operator_id: str,
-        notes: str | None = None,
         tenant_id: str | None = None,
-    ) -> dict:
-        """PATCH /api/data/gpm/packets/{packet_id}"""
-        url = f"{self.base_url}/api/data/gpm/packets/{packet_id}"
-        body = {"approval_status": approval_status, "operator_id": operator_id, "notes": notes}
-        headers = self._service_headers(tenant_id)
+        *,
+        correlation_id: str = "gpm-get",
+    ) -> dict[str, Any] | None:
+        correlation_id = self._correlation(correlation_id)
+        headers = self._service_headers(tenant_id, correlation_id=correlation_id)
+        packet_path = self._path_segment(packet_id)
         try:
-            resp = self._session.patch(url, json=body, headers=headers, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"update_packet_status failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
-            ) from exc
+            response = self._session.get(
+                f"{self.base_url}/api/data/gpm/packets/{packet_path}",
+                headers=headers,
+                timeout=self.timeout,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            value = self._json(response, correlation_id=correlation_id)
+            return require_response_tenant(
+                value, expected_tenant=tenant_id or "", correlation_id=correlation_id
+            )
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error("get_packet", exc, correlation_id=correlation_id) from exc
 
     def list_packets(
         self,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
-        """GET /api/data/gpm/packets"""
-        url = f"{self.base_url}/api/data/gpm/packets"
-        params: dict = {"limit": limit, "offset": offset}
+        *,
+        correlation_id: str = "gpm-list",
+    ) -> list[dict[str, Any]]:
+        correlation_id = self._correlation(correlation_id)
+        headers = self._service_headers(tenant_id, correlation_id=correlation_id)
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status:
             params["status"] = status
-        headers = self._service_headers(tenant_id)
         try:
-            resp = self._session.get(url, params=params, headers=headers, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json().get("packets", [])
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"list_packets failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
+            response = self._session.get(
+                f"{self.base_url}/api/data/gpm/packets",
+                params=params,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            envelope = self._json(response, correlation_id=correlation_id)
+            packets = envelope.get("packets")
+            if not isinstance(packets, list) or not all(
+                isinstance(item, dict) for item in packets
+            ):
+                raise PersistenceContractError(
+                    "GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id
+                )
+            return [
+                require_response_tenant(
+                    item,
+                    expected_tenant=tenant_id or "",
+                    correlation_id=correlation_id,
+                )
+                for item in packets
+            ]
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error(
+                "list_packets", exc, correlation_id=correlation_id
             ) from exc
 
-    def create_audit_record(
-        self,
-        packet_id: str,
-        operator_id: str,
-        action: str,
-        notes: str | None = None,
-        tenant_id: str | None = None,
-    ) -> dict:
-        """POST /api/data/gpm/packets/{packet_id}/audit"""
-        url = f"{self.base_url}/api/data/gpm/packets/{packet_id}/audit"
-        body = {"operator_id": operator_id, "action": action, "notes": notes}
-        headers = self._service_headers(tenant_id)
+    def apply_decision(self, command: DecisionCommand) -> dict[str, Any]:
+        headers = self._service_headers(
+            command.tenant_id, correlation_id=command.correlation_id
+        )
+        packet_path = self._path_segment(command.packet_id)
+        body = {
+            "approval_status": command.decision,
+            "expected_status": command.expected_status,
+            "operator_id": command.operator_id,
+            "operator_role": command.operator_role,
+            "authorization_basis": command.authorization_basis,
+            "notes": command.notes,
+            "idempotency_key": command.idempotency_key,
+            "correlation_id": command.correlation_id,
+            "contract_version": command.contract_version,
+            "audit_required": True,
+            "lineage_required": True,
+            "dispatched": False,
+        }
         try:
-            resp = self._session.post(url, json=body, headers=headers, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise GiraffeDBClientError(
-                f"create_audit_record failed: {exc.response.status_code}",
-                status_code=exc.response.status_code,
+            response = self._session.patch(
+                f"{self.base_url}/api/data/gpm/packets/{packet_path}",
+                json=body,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            value = self._json(response, correlation_id=command.correlation_id)
+            return require_atomic_decision_proof(value, command=command)
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error(
+                "apply_decision", exc, correlation_id=command.correlation_id
             ) from exc
+
+    def update_packet_status(self, *args, **kwargs) -> dict[str, Any]:
+        raise PersistenceContractError(
+            "GPM_LEGACY_NONATOMIC_MUTATION_DISABLED",
+            correlation_id="gpm-legacy-update",
+        )
+
+    def create_audit_record(self, *args, **kwargs) -> dict[str, Any]:
+        raise PersistenceContractError(
+            "GPM_LEGACY_NONATOMIC_AUDIT_DISABLED",
+            correlation_id="gpm-legacy-audit",
+        )
