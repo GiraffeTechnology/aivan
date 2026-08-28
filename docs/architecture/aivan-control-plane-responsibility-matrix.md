@@ -41,6 +41,10 @@ approval, repository mutation, or a state transition with external effect.
 
 - API, GPM, and CLI production entry points validate the frozen runtime policy
   before mutable initialization or command dispatch.
+- Standalone GPM resolves public binds across CLI/direct-ASGI startup and the
+  actual request socket. A non-loopback bind requires the HMAC secret that the
+  GPM request authenticator really verifies; API-key profiles are not treated as
+  equivalent authentication for that server.
 - Production rejects mocks/stubs/test transports, automatic external-model
   calls, and enabled code/repository capability flags.
 - The legacy local business-context constructor fails closed in production.

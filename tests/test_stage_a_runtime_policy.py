@@ -197,14 +197,18 @@ def test_production_cli_rejects_demo_and_import_commands(monkeypatch):
 
 
 def test_gpm_defaults_loopback_and_requires_auth_for_public_bind(monkeypatch):
-    from aivan.gpm.server import DEFAULT_HOST, validate_bind_host
+    from aivan.gpm.server import (
+        DEFAULT_HOST,
+        PUBLIC_BIND_AUTH_ERROR,
+        validate_bind_host,
+    )
 
     assert DEFAULT_HOST == "127.0.0.1"
     monkeypatch.delenv("AIVAN_AUTH_SECRET", raising=False)
-    monkeypatch.delenv("AIVAN_API_KEY", raising=False)
-    monkeypatch.setenv("AIVAN_TENANT_API_KEYS", "{}")
     validate_bind_host("127.0.0.1")
-    with pytest.raises(RuntimeError, match="GPM_NON_LOOPBACK_REQUIRES_AUTH"):
+    monkeypatch.setenv("AIVAN_API_KEY", "not-a-gpm-public-auth-profile")
+    monkeypatch.setenv("AIVAN_TENANT_API_KEYS", '{"tenant-a":"also-not-sufficient"}')
+    with pytest.raises(RuntimeError, match=PUBLIC_BIND_AUTH_ERROR):
         validate_bind_host("0.0.0.0")
     monkeypatch.setenv("AIVAN_AUTH_SECRET", "injected")
     validate_bind_host("0.0.0.0")

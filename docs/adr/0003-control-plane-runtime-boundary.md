@@ -29,7 +29,10 @@ state is initialized:
 
 The packaged CLI no longer launches developer test processes. Tests are run by
 the repository toolchain outside the product runtime. GPM binds to loopback by
-default and a non-loopback bind requires configured authentication.
+default. Every standalone GPM startup path and its ASGI request boundary require
+the HMAC profile backed by `AIVAN_AUTH_SECRET` for a non-loopback bind;
+`AIVAN_API_KEY` and `AIVAN_TENANT_API_KEYS` do not satisfy that gate because
+the non-production GPM request authenticator does not consume those profiles.
 
 Existing local business tables are not approved facts. Until Stage D replaces
 their reads/writes with an accepted giraffe-db API/SDK contract, production
