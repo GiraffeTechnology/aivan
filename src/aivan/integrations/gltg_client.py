@@ -16,13 +16,18 @@ Configuration (environment):
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+from aivan.governance.runtime_policy import reject_test_transport_in_production
+from aivan.observability.safe_logging import log_exception_safely
+
 DEFAULT_BASE_URL = "http://localhost:8090"
 DEFAULT_TIMEOUT_SECONDS = 30.0
+logger = logging.getLogger(__name__)
 
 # Process-wide transport override. Tests install an httpx.MockTransport here so
 # the whole app talks to a faithful in-memory GLTG without a live server.
@@ -31,6 +36,7 @@ _DEFAULT_TRANSPORT: "httpx.BaseTransport | None" = None
 
 def set_default_transport(transport: "httpx.BaseTransport | None") -> None:
     """Install (or clear) a process-wide default transport for the GLTG client."""
+    reject_test_transport_in_production(transport, component="gltg-client")
     global _DEFAULT_TRANSPORT
     _DEFAULT_TRANSPORT = transport
 
@@ -54,14 +60,18 @@ class GLTGClient:
         timeout_seconds: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("GLTG_API_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+        effective_transport = transport if transport is not None else _DEFAULT_TRANSPORT
+        reject_test_transport_in_production(effective_transport, component="gltg-client")
+        self.base_url = (
+            base_url or os.environ.get("GLTG_API_BASE_URL") or DEFAULT_BASE_URL
+        ).rstrip("/")
         if timeout_seconds is not None:
             self.timeout = timeout_seconds
         else:
             self.timeout = float(os.environ.get("GLTG_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
         # Injectable transport keeps unit tests off the network (httpx.MockTransport).
         # Falls back to the process-wide default installed via set_default_transport.
-        self._transport = transport if transport is not None else _DEFAULT_TRANSPORT
+        self._transport = effective_transport
 
     # ------------------------------------------------------------------ #
     # transport
@@ -72,18 +82,23 @@ class GLTGClient:
             with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
                 resp = client.request(method, url, json=json)
         except httpx.TimeoutException as exc:
-            return GLTGClientResult(False, None, f"GLTG request timed out: {exc}", None)
+            error_id = log_exception_safely(logger, "GLTG request timed out", exc=exc)
+            return GLTGClientResult(False, None, f"GLTG_TIMEOUT:{error_id}", None)
         except httpx.HTTPError as exc:
-            return GLTGClientResult(False, None, f"GLTG connection error: {exc}", None)
+            error_id = log_exception_safely(logger, "GLTG connection failed", exc=exc)
+            return GLTGClientResult(False, None, f"GLTG_CONNECTION_FAILED:{error_id}", None)
 
         if resp.status_code >= 400:
             return GLTGClientResult(
-                False, None, f"GLTG returned HTTP {resp.status_code}: {resp.text[:500]}", resp.status_code
+                False, None, f"GLTG_HTTP_{resp.status_code}", resp.status_code
             )
         try:
             return GLTGClientResult(True, resp.json(), None, resp.status_code)
         except ValueError as exc:
-            return GLTGClientResult(False, None, f"GLTG returned invalid JSON: {exc}", resp.status_code)
+            error_id = log_exception_safely(logger, "GLTG returned invalid JSON", exc=exc)
+            return GLTGClientResult(
+                False, None, f"GLTG_INVALID_RESPONSE:{error_id}", resp.status_code
+            )
 
     # ------------------------------------------------------------------ #
     # endpoints

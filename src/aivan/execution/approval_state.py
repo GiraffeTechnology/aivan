@@ -71,9 +71,11 @@ def approve_and_send(draft_id: str, db: Session, approved_by: str = "user") -> A
         from aivan.execution.channel_policy import validate_draft_send_policy
 
         validate_draft_send_policy(draft)
-    except ValueError as exc:
-        repo.mark_send_failed(draft_id, reason=f"channel_policy_blocked: {exc}")
-        return ApprovalResult(draft_id, SEND_FAILED, sent=False, error=str(exc))
+    except ValueError:
+        repo.mark_send_failed(draft_id, reason="channel_policy_blocked")
+        return ApprovalResult(
+            draft_id, SEND_FAILED, sent=False, error="CHANNEL_POLICY_BLOCKED"
+        )
 
     repo.mark_approved_pending_send(draft_id, approved_by=approved_by)
 
@@ -88,9 +90,11 @@ def approve_and_send(draft_id: str, db: Session, approved_by: str = "user") -> A
                 attachments=draft.attachments_json or [],
             )
         )
-    except Exception as exc:  # transport error -> recoverable send_failed
-        repo.mark_send_failed(draft_id, reason=f"transport_error: {exc}")
-        return ApprovalResult(draft_id, SEND_FAILED, sent=False, error=str(exc))
+    except Exception:  # transport error -> recoverable send_failed
+        repo.mark_send_failed(draft_id, reason="transport_error")
+        return ApprovalResult(
+            draft_id, SEND_FAILED, sent=False, error="OUTBOUND_TRANSPORT_FAILED"
+        )
 
     if response.success:
         repo.mark_sent(draft_id)

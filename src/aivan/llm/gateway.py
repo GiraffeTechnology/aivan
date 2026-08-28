@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from aivan.llm.base import LLMProvider
 from aivan.llm.config import get_llm_provider_name
 from aivan.llm.policy import (
@@ -15,8 +16,11 @@ from aivan.llm.errors import (
     LlmContextOverflowError,
     LlmTimeoutError,
 )
+from aivan.governance.runtime_policy import is_production
+from aivan.observability.safe_logging import log_exception_safely
 
 _provider_instance: LLMProvider | None = None
+logger = logging.getLogger(__name__)
 
 # Provider-call observers. The benchmark installs one to read what actually ran
 # (provider/model, mock fallback, external call) instead of guessing from env.
@@ -55,6 +59,8 @@ def _model_for(name: str) -> str:
 
 
 def _build_provider(name: str) -> LLMProvider:
+    if is_production() and name == "mock":
+        raise RuntimeError("MOCK_LLM_FORBIDDEN_IN_PRODUCTION")
     if name == "mock":
         from aivan.llm.providers.mock_provider import MockLLMProvider
         return MockLLMProvider()
@@ -77,6 +83,8 @@ def _build_provider(name: str) -> LLMProvider:
         from aivan.llm.providers.ollama_provider import OllamaProvider
         return OllamaProvider()
     else:
+        if is_production():
+            raise RuntimeError("UNKNOWN_LLM_PROVIDER_IN_PRODUCTION")
         from aivan.llm.providers.mock_provider import MockLLMProvider
         return MockLLMProvider()
 
@@ -106,7 +114,7 @@ def llm_complete_json(
     task: str,
     system_prompt: str,
     user_prompt: str,
-    schema_hint: dict = None,
+    schema_hint: dict | None = None,
     temperature: float = 0.0,
 ) -> dict:
     from aivan.telemetry.model_usage import ProviderCallEvent, estimate_tokens
@@ -161,9 +169,17 @@ def llm_complete_json(
                                     model=model, ok=True, fell_back_to_mock=False,
                                     latency_ms=latency_ms))
             return MockLLMProvider().complete_json(task, system_prompt, user_prompt, schema_hint or {}, temperature)
+        error_id = log_exception_safely(
+            logger,
+            "LLM provider call failed",
+            exc=exc,
+            context={"provider": name, "task": task},
+        )
         _emit(ProviderCallEvent(
             task=task, configured_provider=name, used_provider=name, model=model, ok=False,
             fell_back_to_mock=False, external_api_called=is_external_provider(name),
-            latency_ms=latency_ms, error=f"{exc.__class__.__name__}: {exc}",
+            latency_ms=latency_ms, error=f"LLM_PROVIDER_FAILED:{error_id}",
         ))
-        raise LocalModelUnavailableError(name, f"{name} provider call failed: {exc}") from exc
+        raise LocalModelUnavailableError(
+            name, f"LLM_PROVIDER_FAILED:{error_id}"
+        ) from exc

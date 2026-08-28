@@ -20,9 +20,9 @@ def send_if_approved(draft_id: str, db_session) -> OpenClawSendResponse:
     try:
         from aivan.execution.channel_policy import validate_draft_send_policy
         validate_draft_send_policy(draft)
-    except ValueError as exc:
+    except ValueError:
         repo.mark_send_failed(draft_id, reason="channel_policy_blocked")
-        return OpenClawSendResponse(success=False, error=str(exc))
+        return OpenClawSendResponse(success=False, error="CHANNEL_POLICY_BLOCKED")
 
     if (draft.channel or "").strip().lower() in {"email", "smtp"}:
         from aivan.openclaw.email_transport import is_real_test_email_mode, send_real_test_email

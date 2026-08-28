@@ -35,6 +35,7 @@ from aivan.api.request_context import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.observability.metrics import record_request_metrics, router as _metrics_router
 from aivan.observability.readiness import router as _readiness_router
+from aivan.governance.runtime_policy import enforce_runtime_policy
 
 logger = logging.getLogger("aivan.api")
 
@@ -54,6 +55,7 @@ def _load_supplier_registry_on_startup() -> int:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    enforce_runtime_policy(component="aivan-api")
     init_db()
     # Load persisted suppliers into the in-memory registry so RFQ supplier
     # routing has candidates on a fresh process. Fail-soft: a load error must
@@ -74,7 +76,7 @@ async def lifespan(app: FastAPI):
     app.state.giraffe_db_client = get_db_client()
     yield
 
-app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="AIVAN - Monitoring and Takeover Control Plane", version="0.3.0", lifespan=lifespan)
 
 
 def _cors_origins() -> list[str]:
@@ -350,7 +352,13 @@ async def _invoke_application_service(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("invoke payload normalization failed: %s", exc)
+        log_exception_safely(
+            logger,
+            "Invoke payload normalization failed",
+            exc=exc,
+            context={"trace_id": context.trace_id},
+            level=logging.WARNING,
+        )
         return _skill_error_response(
             "Unrecognized request format.",
             "Unable to recognize the request format. Check the message content.",
@@ -1308,11 +1316,11 @@ def reverse_execution_event(
             status_code=409,
             detail={"error": "AUTOMATIC_REVERSAL_UNSAFE", "impact": exc.impact},
         ) from exc
-    except ReversalConflict as exc:
+    except ReversalConflict:
         raise HTTPException(
             status_code=409,
-            detail={"error": "REVERSAL_CONFLICT", "reason": str(exc)},
-        ) from exc
+            detail={"error": "REVERSAL_CONFLICT"},
+        )
 
     if not result.idempotent_replay:
         CaseDomainRepository(db).record_audit(
@@ -1350,8 +1358,15 @@ def register_account(body: dict, db: Session = Depends(get_db), context: Request
         account = register_account(db, body, tenant_id=context.tenant_id)
         db.commit()
         return account.model_dump()
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as exc:
+        log_exception_safely(
+            logger,
+            "OpenClaw account registration rejected",
+            exc=exc,
+            context={"trace_id": context.trace_id},
+            level=logging.WARNING,
+        )
+        raise HTTPException(status_code=400, detail={"error": "INVALID_ACCOUNT_REGISTRATION"}) from exc
 
 @app.get("/api/openclaw/accounts")
 def list_accounts(db: Session = Depends(get_db), context: RequestContext = Depends(_require_api_key)):

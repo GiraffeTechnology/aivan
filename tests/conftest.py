@@ -18,6 +18,37 @@ from aivan.integrations import gltg_client as _gltg_client
 from tests.gltg_fake import mock_transport as _gltg_mock_transport
 
 
+@pytest.fixture
+def production_runtime_policy(monkeypatch):
+    """Install the explicit fail-closed Stage A production boundary for a test."""
+    # The suite-wide GLTG fake is safe for local tests but must never remain
+    # active once a test intentionally crosses into the production profile.
+    _gltg_client.set_default_transport(None)
+    values = {
+        "AIVAN_PRODUCT_ROLE": "monitoring_takeover_control_plane",
+        "AIVAN_BUSINESS_FACT_AUTHORITY": "giraffe-db",
+        "AIVAN_LOCAL_STATE_SCOPE": "control_audit_cache_only",
+        "AIVAN_REQUIRE_HUMAN_APPROVAL": "true",
+        "AIVAN_ALLOW_STUB_SUPPLIERS": "false",
+        "OPENCLAW_MOCK_MODE": "false",
+        "AIVAN_LLM_PROVIDER": "ollama",
+        "GPM_LLM_RUNTIME_MODE": "live",
+        "AIVAN_WEB_SEARCH_PROVIDER": "openclaw_search",
+        "AIVAN_ALIBABA_MODE": "official_api",
+        "AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER": "ctranslate2",
+        "AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED": "false",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    for name in (
+        "AIVAN_CODE_GENERATION_ENABLED",
+        "AIVAN_CODE_EXECUTION_ENABLED",
+        "AIVAN_REPOSITORY_WRITE_ENABLED",
+        "AIVAN_GIT_OPERATIONS_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _gltg_api_mock():
     """Route all GLTG HTTP calls to an in-memory fake (no live server in unit tests).

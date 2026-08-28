@@ -284,6 +284,6 @@ def test_real_test_pop3_receive_redacts_secret_on_error(monkeypatch):
         fetch_real_test_pop3_messages()
     except RuntimeError as exc:
         assert "super-secret-app-password" not in str(exc)
-        assert "<redacted>" in str(exc)
+        assert str(exc).startswith("EMAIL_POP3_FETCH_FAILED:")
     else:
         raise AssertionError("POP3 receive failure should redact configured secrets")

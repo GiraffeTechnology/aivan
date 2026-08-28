@@ -1,7 +1,7 @@
 [project]
 name = "aivan"
 version = "0.3.0"
-description = "AIVAN - local-first AI trade salesperson assistant powered by OpenClaw and multi-LLM orchestration"
+description = "AIVAN - trade monitoring and human-takeover control plane"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

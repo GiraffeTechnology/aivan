@@ -7,6 +7,8 @@ import re
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from aivan.governance.runtime_policy import production_policy_checks
+
 
 router = APIRouter(tags=["observability"])
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -89,6 +91,7 @@ def readiness_checks() -> dict[str, bool]:
         "non_china_policy_declared": os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
         == "abcdyi-sin",
     }
+    checks.update(production_policy_checks())
     return checks
 
 

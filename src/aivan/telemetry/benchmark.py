@@ -204,7 +204,7 @@ def run_case(case: BenchmarkCase, mode_key: str) -> dict:
             )
             gate = evaluate_requirement_readiness(req)
         except Exception as exc:  # a normal RFQ must never generic-error out
-            error = f"{exc.__class__.__name__}: {exc}"
+            error = exc.__class__.__name__
     finally:
         _gateway.remove_call_observer(events.append)
     elapsed_seconds = round(time.perf_counter() - started, 3)

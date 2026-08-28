@@ -1,14 +1,21 @@
 from __future__ import annotations
 import os
 import httpx
+import logging
 from aivan.openclaw.contracts import OpenClawSendRequest, OpenClawSendResponse
 from aivan.utils.time_utils import utcnow_iso
+from aivan.observability.safe_logging import log_exception_safely
+from aivan.governance.runtime_policy import is_production
+
+logger = logging.getLogger(__name__)
 
 class OpenClawClient:
     def __init__(self):
         self.base_url = os.environ.get("OPENCLAW_BASE_URL", "")
         self.api_key = os.environ.get("OPENCLAW_API_KEY", "")
         self.mock_mode = os.environ.get("OPENCLAW_MOCK_MODE", "true").lower() == "true"
+        if is_production() and self.mock_mode:
+            raise RuntimeError("OPENCLAW_MOCK_FORBIDDEN_IN_PRODUCTION")
         self.timeout = 30
 
     def _headers(self) -> dict:
@@ -41,8 +48,12 @@ class OpenClawClient:
                 message_id=data.get("message_id", ""),
                 sent_at=data.get("sent_at", utcnow_iso()),
             )
-        except Exception as e:
-            return OpenClawSendResponse(success=False, error=str(e))
+        except Exception as exc:
+            error_id = log_exception_safely(logger, "OpenClaw send failed", exc=exc)
+            return OpenClawSendResponse(
+                success=False,
+                error=f"OPENCLAW_REQUEST_FAILED:{error_id}",
+            )
 
     def check_account_status(self, account_connection_id: str) -> dict:
         if self.mock_mode:
@@ -53,8 +64,9 @@ class OpenClawClient:
             resp = httpx.get(f"{self.base_url}/accounts/{account_connection_id}", headers=self._headers(), timeout=self.timeout)
             resp.raise_for_status()
             return resp.json()
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        except Exception as exc:
+            error_id = log_exception_safely(logger, "OpenClaw account status failed", exc=exc)
+            return {"status": "error", "error": f"OPENCLAW_REQUEST_FAILED:{error_id}"}
 
 _client: OpenClawClient | None = None
 

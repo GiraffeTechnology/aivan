@@ -47,7 +47,9 @@ class TestMainAppGPMAuthWiring:
         assert main_app_client.app.state.giraffe_db_client is None
 
 
-def test_production_gpm_route_rejects_forged_tenant_without_credentials(monkeypatch):
+def test_production_gpm_route_rejects_forged_tenant_without_credentials(
+    monkeypatch, production_runtime_policy
+):
     """Regression for the audited unauthenticated cross-tenant write."""
 
     class FakeGiraffeDBClient:
@@ -70,7 +72,7 @@ def test_production_gpm_route_rejects_forged_tenant_without_credentials(monkeypa
     monkeypatch.setenv("AIVAN_API_KEY", "deployment-key")
     monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-prod")
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.invalid")
-    monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "mock")
+    monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "live")
     monkeypatch.delenv("AIVAN_AUTH_SECRET", raising=False)
     monkeypatch.setattr(
         "aivan.gpm.giraffe_db_client.GiraffeDBClient", FakeGiraffeDBClient

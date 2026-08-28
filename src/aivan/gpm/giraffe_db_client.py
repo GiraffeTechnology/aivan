@@ -16,6 +16,8 @@ import os
 
 import httpx
 
+from aivan.observability.safe_logging import log_exception_safely
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +56,12 @@ class GiraffeDBClient:
                 status_code=exc.response.status_code,
             ) from exc
         except Exception as exc:
-            raise GiraffeDBClientError(f"check_schema_version failed: {exc}") from exc
+            error_id = log_exception_safely(
+                logger, "giraffe-db schema-version request failed", exc=exc
+            )
+            raise GiraffeDBClientError(
+                f"GIRAFFE_DB_REQUEST_FAILED:{error_id}"
+            ) from exc
 
     def get_tenant(self, tenant_id: str) -> dict | None:
         """GET /api/data/tenants/{tenant_id} — None if 404."""
@@ -73,7 +80,12 @@ class GiraffeDBClient:
         except Exception as exc:
             # Covers httpx.RequestError (ConnectError, TimeoutException, etc.)
             # and any other transport failure; lets auth fall back to HMAC-only.
-            raise GiraffeDBClientError(f"get_tenant failed: {exc}") from exc
+            error_id = log_exception_safely(
+                logger, "giraffe-db tenant request failed", exc=exc
+            )
+            raise GiraffeDBClientError(
+                f"GIRAFFE_DB_REQUEST_FAILED:{error_id}"
+            ) from exc
 
     # ── Packet CRUD ────────────────────────────────────────────────────────
 

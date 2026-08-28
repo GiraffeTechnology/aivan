@@ -28,7 +28,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install uv
-        run: python -m pip install uv==0.7.22
+        run: python -m pip install uv==0.11.15
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -163,7 +163,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
-        run: python -m pip install uv==0.7.22
+        run: python -m pip install uv==0.11.15
 
       - name: Install frozen dependencies
         run: uv sync --frozen
@@ -189,6 +189,16 @@ jobs:
           src/aivan/db/schema_validation.py
           src/aivan/observability/metrics.py
           src/aivan/observability/readiness.py
+          src/aivan/governance/runtime_policy.py
+          src/aivan/integrations/gltg_client.py
+          src/aivan/integrations/language_skill_client.py
+          src/aivan/openclaw/client.py
+          src/aivan/openclaw/email_transport.py
+          src/aivan/gpm/giraffe_db_client.py
+          src/aivan/gpm/llm_runtime.py
+          src/aivan/execution/approval_state.py
+          src/aivan/risk/search_providers.py
+          src/aivan/llm/gateway.py
           scripts/run_stage7f_predeployment.py
 
       - name: Bandit high-severity security scan
@@ -225,7 +235,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
-        run: python -m pip install uv==0.7.22
+        run: python -m pip install uv==0.11.15
 
       - name: Install frozen dependencies
         run: uv sync --frozen

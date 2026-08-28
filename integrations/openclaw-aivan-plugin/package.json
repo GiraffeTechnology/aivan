@@ -2,7 +2,7 @@
   "name": "@giraffetechnology/openclaw-aivan",
   "version": "0.3.0",
   "type": "module",
-  "description": "OpenClaw plugin bridge for AIVAN, a local-first AI trade salesperson assistant",
+  "description": "OpenClaw bridge for the AIVAN monitoring and human-takeover control plane",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
