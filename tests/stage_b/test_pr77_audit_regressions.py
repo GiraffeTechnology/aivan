@@ -18,26 +18,30 @@ def _giraffe_db_spec(module):
     )
 
 
-def test_giraffe_db_probe_sends_reviewed_tenant_bound_headers(monkeypatch):
+def test_giraffe_db_probe_accepts_fixed_provider_response_shapes(monkeypatch):
     module = importlib.import_module("aivan.observability.dependency_probe")
     contract = importlib.import_module("aivan.gpm.persistence_contract")
     monkeypatch.setenv("AIVAN_ENV", "local")
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.test")
-    monkeypatch.setenv("AIVAN_GIRAFFE_DB_EXPECTED_VERSION", contract.GPM_PERSISTENCE_CONTRACT_VERSION)
+    monkeypatch.setenv("AIVAN_GIRAFFE_DB_EXPECTED_VERSION", "0.2.0")
     monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "service-secret")
     monkeypatch.setenv("AIVAN_DEPENDENCY_PROBE_TENANT_ID", "tenant-probe")
     captured: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(
-            200,
-            json={
-                "status": "ready",
-                "gpm_contract_version": contract.GPM_PERSISTENCE_CONTRACT_VERSION,
-                "tenant_id": "tenant-probe",
-            },
-        )
+        if request.url.path == "/healthz":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ok",
+                    "service": "giraffe-db",
+                    "schema_version": "0.2.0",
+                },
+            )
+        if request.url.path == "/api/data/schema-version":
+            return httpx.Response(200, json={"schema_version": "0.2.0"})
+        return httpx.Response(404)
 
     result = module.run_dependency_probes(
         correlation_id="corr-db-probe",
@@ -46,39 +50,105 @@ def test_giraffe_db_probe_sends_reviewed_tenant_bound_headers(monkeypatch):
     )[0]
 
     assert result.ready is True
-    assert len(captured) == 1
-    headers = captured[0].headers
-    assert headers["X-Service-Auth"] == "service-secret"
-    assert headers["X-Service-Tenant-ID"] == "tenant-probe"
-    assert headers["X-GPM-Contract-Version"] == contract.GPM_PERSISTENCE_CONTRACT_VERSION
-    assert headers["X-AIVAN-Correlation-ID"] == "corr-db-probe"
-    assert headers["X-AIVAN-Trace-ID"] == "corr-db-probe"
+    assert [request.url.path for request in captured] == [
+        "/healthz",
+        "/api/data/schema-version",
+    ]
+    for request in captured:
+        headers = request.headers
+        assert headers["X-Service-Auth"] == "service-secret"
+        assert headers["X-Service-Tenant-ID"] == "tenant-probe"
+        assert (
+            headers["X-GPM-Contract-Version"]
+            == contract.GPM_PERSISTENCE_CONTRACT_VERSION
+        )
+        assert headers["X-AIVAN-Correlation-ID"] == "corr-db-probe"
+        assert headers["X-AIVAN-Trace-ID"] == "corr-db-probe"
 
 
-@pytest.mark.parametrize("response_tenant", [None, "tenant-other"])
-def test_giraffe_db_probe_missing_or_mismatched_response_tenant_fails_closed(
-    monkeypatch, response_tenant
+@pytest.mark.parametrize(
+    ("health_status", "schema_version", "expected_status", "expected_error"),
+    [
+        ("down", "0.2.0", "unavailable", "DEPENDENCY_NOT_READY"),
+        ("ok", "0.1.0", "incompatible", "DEPENDENCY_VERSION_MISMATCH"),
+    ],
+)
+def test_giraffe_db_probe_fails_closed_for_health_or_version_mismatch(
+    monkeypatch,
+    health_status,
+    schema_version,
+    expected_status,
+    expected_error,
 ):
     module = importlib.import_module("aivan.observability.dependency_probe")
     monkeypatch.setenv("AIVAN_ENV", "local")
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.test")
-    monkeypatch.setenv("AIVAN_GIRAFFE_DB_EXPECTED_VERSION", "gpm.persistence.v1")
+    monkeypatch.setenv("AIVAN_GIRAFFE_DB_EXPECTED_VERSION", "0.2.0")
     monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "service-secret")
     monkeypatch.setenv("AIVAN_DEPENDENCY_PROBE_TENANT_ID", "tenant-probe")
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        payload = {"status": "ready", "gpm_contract_version": "gpm.persistence.v1"}
-        if response_tenant is not None:
-            payload["tenant_id"] = response_tenant
-        return httpx.Response(200, json=payload)
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/healthz":
+            return httpx.Response(200, json={"status": health_status})
+        if request.url.path == "/api/data/schema-version":
+            return httpx.Response(200, json={"schema_version": schema_version})
+        return httpx.Response(404)
 
     result = module.run_dependency_probes(
-        correlation_id="corr-db-tenant",
+        correlation_id="corr-db-failure",
         specs=(_giraffe_db_spec(module),),
         transport=httpx.MockTransport(handler),
     )[0]
     assert result.ready is False
-    assert result.error_code == "DEPENDENCY_TENANT_MISMATCH"
+    assert result.status == expected_status
+    assert result.error_code == expected_error
+
+
+def test_giraffe_db_probe_rejects_wrong_service_auth(monkeypatch):
+    module = importlib.import_module("aivan.observability.dependency_probe")
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.test")
+    monkeypatch.setenv("AIVAN_GIRAFFE_DB_EXPECTED_VERSION", "0.2.0")
+    monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "wrong-secret")
+    monkeypatch.setenv("AIVAN_DEPENDENCY_PROBE_TENANT_ID", "tenant-probe")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("X-Service-Auth") != "accepted-secret":
+            return httpx.Response(403, json={"detail": "forbidden"})
+        return httpx.Response(200, json={"status": "ok"})
+
+    result = module.run_dependency_probes(
+        correlation_id="corr-db-wrong-auth",
+        specs=(_giraffe_db_spec(module),),
+        transport=httpx.MockTransport(handler),
+    )[0]
+    assert result.ready is False
+    assert result.status == "unavailable"
+    assert result.error_code == "DEPENDENCY_UNAVAILABLE"
+
+
+def test_giraffe_db_probe_without_service_auth_makes_zero_requests(monkeypatch):
+    module = importlib.import_module("aivan.observability.dependency_probe")
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.test")
+    monkeypatch.setenv("AIVAN_GIRAFFE_DB_EXPECTED_VERSION", "0.2.0")
+    monkeypatch.delenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", raising=False)
+    monkeypatch.setenv("AIVAN_DEPENDENCY_PROBE_TENANT_ID", "tenant-probe")
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"status": "ok"})
+
+    result = module.run_dependency_probes(
+        correlation_id="corr-db-no-auth",
+        specs=(_giraffe_db_spec(module),),
+        transport=httpx.MockTransport(handler),
+    )[0]
+    assert calls == 0
+    assert result.status == "misconfigured"
+    assert result.error_code == "DEPENDENCY_PROBE_MISCONFIGURED"
 
 
 def test_giraffe_db_probe_without_trusted_tenant_makes_zero_requests(monkeypatch):

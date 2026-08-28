@@ -155,7 +155,7 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
             "tenant-data-contract",
             "GIRAFFE_DB_BASE_URL",
             "AIVAN_GIRAFFE_DB_EXPECTED_VERSION",
-            "/api/data/schema-version",
+            "/healthz",
             "/api/data/schema-version",
             "GIRAFFE_DB_PROBE_TIMEOUT_SECONDS",
             "GIRAFFE_DB_PROBE_STALE_SECONDS",
@@ -456,16 +456,6 @@ def _probe_one(
                 checked_at=checked_at,
                 status="unavailable",
                 error_code="DEPENDENCY_NOT_READY",
-                expected_version=expected,
-            )
-        if spec.header_contract == "giraffe-db" and version_payload.get("tenant_id") != tenant_id:
-            return _result(
-                spec,
-                correlation_id=correlation_id,
-                started=started,
-                checked_at=checked_at,
-                status="unavailable",
-                error_code="DEPENDENCY_TENANT_MISMATCH",
                 expected_version=expected,
             )
         observed = _version(version_payload, spec.version_keys)
