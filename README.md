@@ -375,7 +375,11 @@ Production is intentionally stricter:
 - set a trusted `AIVAN_DEPENDENCY_PROBE_TENANT_ID` for the giraffe-db readiness
   identity (single-tenant deployments may use `AIVAN_TENANT_ID`); the probe
   sends the reviewed service-auth, tenant, contract-version, and correlation
-  headers and rejects missing or mismatched response-tenant evidence;
+  headers and verifies `/healthz` readiness.
+  The authenticated `/api/data/schema-version` response must match the
+  deployment-owned expected version exactly; provider response tenant echo is
+  not required by the current accepted contract because that response does not
+  expose the field;
 - bound the four-provider parallel fan-out with
   `AIVAN_DEPENDENCY_PROBE_TOTAL_TIMEOUT_SECONDS`; each provider receives at
   most two HTTP requests, shared health/version endpoints receive one, and a

@@ -62,3 +62,20 @@ def test_readme_does_not_reference_removed_files():
         if candidate.suffix in {".db", ".log"}:
             continue  # created at runtime, gitignored
         assert candidate.exists(), f"README references missing path {match}"
+
+
+def test_readme_giraffe_db_probe_contract_matches_runtime_spec():
+    from aivan.observability.dependency_probe import required_dependency_specs
+
+    spec = next(
+        item for item in required_dependency_specs() if item.dependency_id == "giraffe-db"
+    )
+    production = README.split("Production is intentionally stricter:", 1)[1].split(
+        "In production,", 1
+    )[0]
+    normalized = " ".join(production.split())
+
+    assert f"verifies `{spec.health_path}` readiness" in normalized
+    assert f"authenticated `{spec.version_path}` response" in normalized
+    assert "response-tenant evidence" not in normalized
+    assert "provider response tenant echo is not required" in normalized
