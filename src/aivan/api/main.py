@@ -35,6 +35,7 @@ from aivan.api.request_context import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.observability.metrics import record_request_metrics, router as _metrics_router
 from aivan.observability.readiness import router as _readiness_router
+from aivan.observability.dependency_probe import dependency_side_effect_gate
 from aivan.governance.runtime_policy import enforce_runtime_policy
 
 logger = logging.getLogger("aivan.api")
@@ -42,8 +43,8 @@ logger = logging.getLogger("aivan.api")
 
 def _require_api_key(request: Request) -> RequestContext:
     """Authenticate and return the shared tenant/trace request context."""
-
     return resolve_request_context(request)
+
 
 def _load_supplier_registry_on_startup() -> int:
     from aivan.db.session import db_session
@@ -128,19 +129,18 @@ app.include_router(_readiness_router)
 
 
 app.middleware("http")(add_security_headers)
+app.middleware("http")(dependency_side_effect_gate)
 app.middleware("http")(record_request_metrics)
 
 
 # OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
-SKILL_INVOKE_PATHS = frozenset(
-    {
+SKILL_INVOKE_PATHS = frozenset({
         "/invoke",
         "/api/openclaw/events",
         "/api/skill/invoke",
         "/api/rfq/create-from-event",
         "/api/relay/inbound",
-    }
-)
+})
 
 # WeChat-visible degraded reply when the backend pipeline fails. Must be
 # human-readable and must never leak a traceback or raw exception text.

@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from aivan.gpm.giraffe_db_client import GiraffeDBClient
+from aivan.gpm.persistence_contract import PersistenceContractError
 
 
 def _mock_response(json_body: dict, status: int = 200) -> httpx.Response:
@@ -36,14 +37,13 @@ class TestServiceHeaders:
         assert headers["X-Service-Tenant-ID"] == "acme"
         assert headers["X-Service-Auth"] == "test-svc-secret"
 
-    def test_create_packet_infers_tenant_from_body_when_not_explicit(
+    def test_create_packet_never_infers_tenant_from_body(
         self, client_with_secret: GiraffeDBClient
     ) -> None:
         packet = {"packet_id": "p1", "tenant_id": "beta", "sku": "SKU1", "supplier_quote": 1.0, "currency": "USD"}
-        with patch.object(client_with_secret._session, "post", return_value=_mock_response(packet, 201)) as mock:
-            client_with_secret.create_packet(packet)  # no explicit tenant_id
-        headers = mock.call_args[1]["headers"]
-        assert headers["X-Service-Tenant-ID"] == "beta"
+        with pytest.raises(PersistenceContractError) as exc_info:
+            client_with_secret.create_packet(packet)
+        assert exc_info.value.code == "GPM_TENANT_REQUIRED"
 
     def test_get_packet_sends_both_headers(self, client_with_secret: GiraffeDBClient) -> None:
         resp_body = {"packet_id": "p1", "tenant_id": "acme"}
@@ -53,13 +53,10 @@ class TestServiceHeaders:
         assert headers["X-Service-Tenant-ID"] == "acme"
         assert headers["X-Service-Auth"] == "test-svc-secret"
 
-    def test_update_packet_status_sends_both_headers(self, client_with_secret: GiraffeDBClient) -> None:
-        resp_body = {"packet_id": "p1", "tenant_id": "acme", "approval_status": "approved"}
-        with patch.object(client_with_secret._session, "patch", return_value=_mock_response(resp_body)) as mock:
+    def test_legacy_nonatomic_status_update_is_disabled(self, client_with_secret: GiraffeDBClient) -> None:
+        with pytest.raises(PersistenceContractError) as exc_info:
             client_with_secret.update_packet_status("p1", "approved", "op1", tenant_id="acme")
-        headers = mock.call_args[1]["headers"]
-        assert headers["X-Service-Tenant-ID"] == "acme"
-        assert headers["X-Service-Auth"] == "test-svc-secret"
+        assert exc_info.value.code == "GPM_LEGACY_NONATOMIC_MUTATION_DISABLED"
 
     def test_list_packets_sends_both_headers(self, client_with_secret: GiraffeDBClient) -> None:
         with patch.object(
@@ -70,27 +67,17 @@ class TestServiceHeaders:
         assert headers["X-Service-Tenant-ID"] == "acme"
         assert headers["X-Service-Auth"] == "test-svc-secret"
 
-    def test_create_audit_record_sends_both_headers(self, client_with_secret: GiraffeDBClient) -> None:
-        resp_body = {"audit_id": "a1", "packet_id": "p1", "tenant_id": "acme"}
-        with patch.object(client_with_secret._session, "post", return_value=_mock_response(resp_body, 201)) as mock:
+    def test_legacy_separate_audit_write_is_disabled(self, client_with_secret: GiraffeDBClient) -> None:
+        with pytest.raises(PersistenceContractError) as exc_info:
             client_with_secret.create_audit_record("p1", "op1", "approved", tenant_id="acme")
-        headers = mock.call_args[1]["headers"]
-        assert headers["X-Service-Tenant-ID"] == "acme"
-        assert headers["X-Service-Auth"] == "test-svc-secret"
+        assert exc_info.value.code == "GPM_LEGACY_NONATOMIC_AUDIT_DISABLED"
 
-    def test_no_auth_header_when_secret_not_set(self, client_no_secret: GiraffeDBClient) -> None:
-        resp_body = {"packet_id": "p1", "tenant_id": "acme"}
-        with patch.object(client_no_secret._session, "get", return_value=_mock_response(resp_body)) as mock:
+    def test_missing_service_auth_fails_closed(self, client_no_secret: GiraffeDBClient) -> None:
+        with pytest.raises(PersistenceContractError) as exc_info:
             client_no_secret.get_packet("p1", tenant_id="acme")
-        headers = mock.call_args[1]["headers"]
-        assert headers["X-Service-Tenant-ID"] == "acme"
-        assert "X-Service-Auth" not in headers
+        assert exc_info.value.code == "GPM_SERVICE_AUTH_MISCONFIGURED"
 
-    def test_tenant_header_absent_when_no_tenant_id(self, client_with_secret: GiraffeDBClient) -> None:
-        resp_body = {"packet_id": "p1", "tenant_id": "acme"}
-        with patch.object(client_with_secret._session, "get", return_value=_mock_response(resp_body)) as mock:
+    def test_missing_tenant_fails_closed(self, client_with_secret: GiraffeDBClient) -> None:
+        with pytest.raises(PersistenceContractError) as exc_info:
             client_with_secret.get_packet("p1", tenant_id=None)
-        headers = mock.call_args[1]["headers"]
-        assert "X-Service-Tenant-ID" not in headers
-        # Auth still set (service identity even without tenant scope)
-        assert headers["X-Service-Auth"] == "test-svc-secret"
+        assert exc_info.value.code == "GPM_TENANT_REQUIRED"

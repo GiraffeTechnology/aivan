@@ -9,11 +9,19 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from aivan.gpm.auth import require_auth
+from aivan.gpm.auth import (
+    GPMDecisionAuthorizationError,
+    GPMPrincipal,
+    require_principal,
+)
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
+from aivan.gpm.persistence_contract import (
+    GPM_PERSISTENCE_CONTRACT_VERSION,
+    PersistenceContractError,
+)
 from aivan.gpm.record_id import validation_error as record_id_validation_error
 
 logger = logging.getLogger(__name__)
@@ -49,10 +57,13 @@ def get_db_client():
     return _db_client
 
 
-async def require_gpm_tenant(request: Request) -> str:
-    """Authenticate a tenant and prohibit production in-memory degradation."""
+async def require_gpm_principal(request: Request) -> GPMPrincipal:
+    """Authenticate tenant/operator context and reject production fallback."""
 
-    tenant_id = await require_auth(request)
+    try:
+        principal = await require_principal(request)
+    except GPMDecisionAuthorizationError as exc:
+        raise HTTPException(status_code=400, detail={"error": exc.code}) from exc
     if (
         os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
         and not _packet_store.is_durable
@@ -64,10 +75,18 @@ async def require_gpm_tenant(request: Request) -> str:
                 "message": "production GPM requires durable giraffe-db persistence",
             },
         )
-    return tenant_id
+    return principal
+
+
+async def require_gpm_tenant(request: Request) -> str:
+    """Compatibility dependency exposing only the authenticated tenant."""
+
+    return (await require_gpm_principal(request)).tenant_id
 
 
 class QuoteGuidanceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sku: str
     supplier_id: Optional[str] = None
     supplier_quote: float
@@ -78,14 +97,15 @@ class QuoteGuidanceRequest(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
-    operator_id: str
+    model_config = ConfigDict(extra="forbid")
+
     notes: Optional[str] = None
 
 
 @router.post("/quote-guidance", status_code=201, response_model=None)
 async def create_quote_guidance(
     body: QuoteGuidanceRequest,
-    tenant_id: str = Depends(require_gpm_tenant),
+    principal: GPMPrincipal = Depends(require_gpm_principal),
 ) -> dict | JSONResponse:
     """Analyse a supplier quote and persist the resulting decision packet."""
     # A supplier_id that is a retired giraffe-db legacy id is rejected, never
@@ -112,7 +132,7 @@ async def create_quote_guidance(
 
     packet: dict = {
         "packet_id": packet_id,
-        "tenant_id": tenant_id,
+        "tenant_id": principal.tenant_id,
         "sku": body.sku,
         "supplier_id": body.supplier_id,
         "supplier_quote": body.supplier_quote,
@@ -129,19 +149,27 @@ async def create_quote_guidance(
         "notes": body.notes,
     }
 
-    persisted = _packet_store.save(packet)
+    persisted = _packet_store.save(
+        packet,
+        tenant_id=principal.tenant_id,
+        correlation_id=principal.correlation_id,
+    )
     return persisted
 
 
 @router.get("/quote-guidance/{packet_id}")
 async def get_quote_guidance(
     packet_id: str,
-    tenant_id: str = Depends(require_gpm_tenant),
+    principal: GPMPrincipal = Depends(require_gpm_principal),
 ) -> dict:
-    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
+    packet = _packet_store.get(
+        packet_id,
+        tenant_id=principal.tenant_id,
+        correlation_id=principal.correlation_id,
+    )
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
-    if packet.get("tenant_id") != tenant_id:
+    if packet.get("tenant_id") != principal.tenant_id:
         raise HTTPException(
             status_code=403,
             detail={"error": "forbidden", "message": "packet does not belong to this tenant"},
@@ -153,75 +181,60 @@ async def get_quote_guidance(
 async def approve_packet(
     packet_id: str,
     body: ApprovalRequest,
-    tenant_id: str = Depends(require_gpm_tenant),
+    principal: GPMPrincipal = Depends(require_gpm_principal),
 ) -> dict:
-    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
-    if packet is None:
-        raise HTTPException(status_code=404, detail={"error": "not_found"})
-    if packet.get("tenant_id") != tenant_id:
-        raise HTTPException(
-            status_code=403,
-            detail={"error": "forbidden", "message": "packet does not belong to this tenant"},
-        )
-    if packet.get("approval_status") != "pending":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "already_decided",
-                "current_status": packet.get("approval_status"),
-            },
-        )
-
-    updated = _packet_store.update_status(
-        packet_id, "approved", body.operator_id, body.notes, tenant_id=tenant_id
-    )
-
-    assert updated is not None and updated.get("dispatched") is False, (
-        "dispatched must remain False after approval"
-    )
-    return updated
+    return _apply_decision(packet_id, "approved", body, principal)
 
 
 @router.post("/quote-guidance/{packet_id}/reject")
 async def reject_packet(
     packet_id: str,
     body: ApprovalRequest,
-    tenant_id: str = Depends(require_gpm_tenant),
+    principal: GPMPrincipal = Depends(require_gpm_principal),
 ) -> dict:
-    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
-    if packet is None:
-        raise HTTPException(status_code=404, detail={"error": "not_found"})
-    if packet.get("tenant_id") != tenant_id:
+    return _apply_decision(packet_id, "rejected", body, principal)
+
+
+def _apply_decision(
+    packet_id: str,
+    decision: str,
+    body: ApprovalRequest,
+    principal: GPMPrincipal,
+) -> dict:
+    try:
+        return _packet_store.decide(
+            packet_id,
+            decision,
+            principal=principal,
+            notes=body.notes,
+        )
+    except GPMDecisionAuthorizationError as exc:
         raise HTTPException(
             status_code=403,
-            detail={"error": "forbidden", "message": "packet does not belong to this tenant"},
-        )
-    if packet.get("approval_status") != "pending":
+            detail={"error": exc.code, "correlation_id": principal.correlation_id},
+        ) from exc
+    except PersistenceContractError as exc:
+        status_code = 409 if exc.code in {
+            "GPM_ALREADY_DECIDED",
+            "GPM_IDEMPOTENCY_CONFLICT",
+        } else 404 if exc.code == "GPM_PACKET_NOT_FOUND" else 503
         raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "already_decided",
-                "current_status": packet.get("approval_status"),
-            },
-        )
-
-    updated = _packet_store.update_status(
-        packet_id, "rejected", body.operator_id, body.notes, tenant_id=tenant_id
-    )
-
-    assert updated is not None and updated.get("dispatched") is False, (
-        "dispatched must remain False after rejection"
-    )
-    return updated
+            status_code=status_code,
+            detail={"error": exc.code, "correlation_id": exc.correlation_id},
+        ) from exc
 
 
 @router.get("/packets")
 async def list_gpm_packets(
     status: Optional[str] = None,
-    tenant_id: str = Depends(require_gpm_tenant),
+    principal: GPMPrincipal = Depends(require_gpm_principal),
 ) -> dict:
     """List current tenant's packets with optional status filter."""
-    packets = _packet_store.list_by_tenant(tenant_id=tenant_id, status=status)
+    packets = _packet_store.list_by_tenant(
+        tenant_id=principal.tenant_id,
+        status=status,
+        correlation_id=principal.correlation_id,
+    )
     return {
         "packets": packets,
         "total": len(packets),
@@ -264,6 +277,7 @@ async def capabilities() -> dict:
     return {
         "module": "gpm",
         "version": "0.3.0",
+        "persistence_contract_version": GPM_PERSISTENCE_CONTRACT_VERSION,
         "features": {
             "quote_guidance": True,
             "approval_workflow": True,

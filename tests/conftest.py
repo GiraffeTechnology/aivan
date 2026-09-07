@@ -1,4 +1,5 @@
 import os
+import time
 os.environ.setdefault("AIVAN_LLM_PROVIDER", "mock")
 os.environ.setdefault("OPENCLAW_MOCK_MODE", "true")
 os.environ.setdefault("AIVAN_DB_URL", "sqlite:///:memory:")
@@ -47,6 +48,40 @@ def production_runtime_policy(monkeypatch):
         "AIVAN_GIT_OPERATIONS_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def ready_dependency_probes(monkeypatch):
+    """Declare reviewed critical providers healthy for unrelated API tests."""
+
+    from aivan.observability import dependency_probe
+    from aivan.observability.dependency_probe import DependencyProbeResult
+
+    def ready(*, correlation_id: str):
+        return [
+            DependencyProbeResult(
+                dependency_id=dependency_id,
+                contract_version="aivan.dependency-probe.v1",
+                criticality="critical",
+                owner=owner,
+                expected_version="v1",
+                observed_version="v1",
+                status="ready",
+                error_code=None,
+                correlation_id=correlation_id,
+                checked_at_epoch=time.time(),
+                duration_seconds=0.001,
+                stale_after_seconds=30.0,
+            )
+            for dependency_id, owner in (
+                ("giraffe-db", "DB"),
+                ("gltg", "GLTG"),
+                ("openclaw", "OpenClaw"),
+                ("giraffe-language-skill", "giraffe-language-skill"),
+            )
+        ]
+
+    monkeypatch.setattr(dependency_probe, "run_dependency_probes", ready)
 
 
 @pytest.fixture(autouse=True)
