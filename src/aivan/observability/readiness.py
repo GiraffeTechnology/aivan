@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from aivan.governance.runtime_policy import production_policy_checks
+from aivan.observability.dependency_probe import (
+    DependencyProbeResult,
+    critical_dependencies_ready,
+    run_dependency_probes,
+)
 
 
 router = APIRouter(tags=["observability"])
@@ -36,10 +42,12 @@ def _tenant_keys_configured() -> bool:
     )
 
 
-def readiness_checks() -> dict[str, bool]:
+def _readiness_snapshot(
+    *, correlation_id: str
+) -> tuple[dict[str, bool], list[DependencyProbeResult]]:
     production = os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
     if not production:
-        return {"environment_non_production": True}
+        return {"environment_non_production": True}, []
     candidate = os.environ.get("AIVAN_CANDIDATE_SHA", "").strip()
     database_url = os.environ.get("AIVAN_DB_URL", "").strip()
     cors = {
@@ -92,14 +100,28 @@ def readiness_checks() -> dict[str, bool]:
         == "abcdyi-sin",
     }
     checks.update(production_policy_checks())
+    results = run_dependency_probes(correlation_id=correlation_id)
+    checks["critical_dependencies_ready"] = critical_dependencies_ready(results)
+    return checks, results
+
+
+def readiness_checks(*, correlation_id: str = "readiness-check") -> dict[str, bool]:
+    checks, _ = _readiness_snapshot(correlation_id=correlation_id)
     return checks
 
 
 @router.get("/readyz")
-def ready():
-    checks = readiness_checks()
+def ready(request: Request):
+    supplied = request.headers.get("X-AIVAN-Trace-ID", "").strip()
+    correlation_id = supplied if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}", supplied) else f"trace_{uuid.uuid4().hex}"
+    checks, results = _readiness_snapshot(correlation_id=correlation_id)
     ok = all(checks.values())
     return JSONResponse(
         status_code=200 if ok else 503,
-        content={"status": "ready" if ok else "not_ready", "checks": checks},
+        content={
+            "status": "ready" if ok else "not_ready",
+            "checks": checks,
+            "dependencies": [result.to_public_dict() for result in results],
+            "correlation_id": correlation_id,
+        },
     )

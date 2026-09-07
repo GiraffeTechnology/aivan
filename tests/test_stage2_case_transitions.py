@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
-def client_and_session(monkeypatch, production_runtime_policy):
+def client_and_session(monkeypatch, production_runtime_policy, ready_dependency_probes):
     from aivan.api import main
     from aivan.db.models import Base
 
