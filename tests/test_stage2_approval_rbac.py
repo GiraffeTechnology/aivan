@@ -81,6 +81,37 @@ def _seed_draft(Session, *, status="pending_approval") -> str:
         db.close()
 
 
+def _seed_customer_quote_case(Session) -> tuple[str, str]:
+    from aivan.db.repositories.draft_repo import DraftRepository
+    from aivan.db.repositories.project_repo import ProjectRepository
+
+    with Session() as db:
+        project = ProjectRepository(db).create(
+            conversation_id="customer-quote-rejection",
+            customer_id="buyer-1",
+            tenant_id="tenant-stage2",
+        )
+        project.case_state = "awaiting_approval"
+        project.requirement_json = {"supplier_replies": [{"supplier_id": "supplier-1"}]}
+        draft = DraftRepository(db).create(
+            project.project_id,
+            {
+                "tenant_id": "tenant-stage2",
+                "conversation_id": "customer-thread",
+                "channel": "email",
+                "target_peer_id": "buyer-1@example.com",
+                "target_role": "customer",
+                "message_text": "Customer quote requiring revision",
+                "status": "pending_approval",
+                "created_by_actor_id": "sales-1",
+                "created_by_actor_role": "sales",
+                "notes": "draft_type=customer_quote_email generated_from=supplier_reply",
+            },
+        )
+        db.commit()
+        return project.project_id, draft.draft_id
+
+
 def test_buyer_cannot_approve_and_rejection_is_audited(client_and_session):
     from aivan.db.models.domain import ApprovalRecord, AuditLogRecord
     from aivan.db.models.inquiry import InquiryDraftRecord
@@ -168,6 +199,65 @@ def test_buyer_cannot_retry_failed_outbound(client_and_session):
     assert response.status_code == 403
     with Session() as db:
         assert db.get(InquiryDraftRecord, draft_id).status == "send_failed"
+
+
+def test_rejecting_only_customer_quote_reopens_existing_supplier_reply_flow(
+    client_and_session, monkeypatch
+):
+    from aivan.db.models.domain import ApprovalRecord, AuditLogRecord
+    from aivan.db.models.inquiry import InquiryDraftRecord
+    from aivan.db.models.project import Project
+    from aivan.openclaw import outbound_approval
+
+    def unexpected_send(*_args, **_kwargs):
+        raise AssertionError("rejecting a draft must not invoke outbound delivery")
+
+    monkeypatch.setattr(outbound_approval, "send_if_approved", unexpected_send)
+    client, Session = client_and_session
+    project_id, draft_id = _seed_customer_quote_case(Session)
+    headers = _headers("approver", "approver-1", trace_id="trace-quote-rejected")
+
+    response = client.post(f"/api/drafts/{draft_id}/reject", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "draft_id": draft_id,
+        "status": "rejected",
+        "case_state": "supplier_replied",
+    }
+    detail = client.get(
+        f"/api/workbench/cases/{project_id}", headers=headers
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["case"]["case_state"] == "supplier_replied"
+    assert [item["status"] for item in detail.json()["drafts"]] == ["rejected"]
+
+    with Session() as db:
+        assert db.get(Project, project_id).case_state == "supplier_replied"
+        assert db.get(InquiryDraftRecord, draft_id).status == "rejected"
+        assert (
+            db.query(InquiryDraftRecord)
+            .filter_by(
+                tenant_id="tenant-stage2",
+                project_id=project_id,
+                status="pending_approval",
+            )
+            .count()
+            == 0
+        )
+        approval = db.query(ApprovalRecord).one()
+        assert approval.status == "rejected"
+        assert approval.approver_id == "approver-1"
+        assert approval.approver_role == "approver"
+        assert approval.source_trace_id == "trace-quote-rejected"
+        audits = db.query(AuditLogRecord).order_by(AuditLogRecord.created_at).all()
+        assert [row.event_type for row in audits] == [
+            "DRAFT_REJECTED",
+            "CASE_STATE_TRANSITION",
+        ]
+        assert audits[-1].before_json == {"case_state": "awaiting_approval"}
+        assert audits[-1].after_json == {"case_state": "supplier_replied"}
+        assert all(row.authorization_basis == "deployment_api_key" for row in audits)
 
 
 def test_production_approval_requires_actor_and_role_headers(client_and_session):

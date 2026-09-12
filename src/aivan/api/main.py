@@ -641,8 +641,44 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
         before={"draft_id": draft.draft_id, "status": "pending_approval"},
         after={"draft_id": draft.draft_id, "status": "rejected"},
     )
+    project = ProjectRepository(db).get(
+        draft.project_id, tenant_id=draft.tenant_id
+    )
+    is_customer_quote = (
+        draft.target_role == "customer"
+        and "draft_type=customer_quote_email" in (draft.notes or "")
+    )
+    pending_customer_quotes = [
+        pending
+        for pending in repo.list_pending(
+            draft.project_id, tenant_id=draft.tenant_id
+        )
+        if pending.target_role == "customer"
+        and "draft_type=customer_quote_email" in (pending.notes or "")
+    ]
+    if (
+        project is not None
+        and project.case_state == "awaiting_approval"
+        and is_customer_quote
+        and not pending_customer_quotes
+    ):
+        project.case_state = "supplier_replied"
+        project.source_trace_id = context.trace_id or project.source_trace_id
+        CaseDomainRepository(db).record_audit(
+            tenant_id=draft.tenant_id,
+            case_id=draft.project_id,
+            event_type="CASE_STATE_TRANSITION",
+            identity=identity,
+            source_trace_id=context.trace_id,
+            before={"case_state": "awaiting_approval"},
+            after={"case_state": "supplier_replied"},
+        )
+        db.flush()
     db.commit()
-    return {"draft_id": draft_id, "status": "rejected"}
+    result = {"draft_id": draft_id, "status": "rejected"}
+    if project is not None:
+        result["case_state"] = project.case_state
+    return result
 
 
 def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
