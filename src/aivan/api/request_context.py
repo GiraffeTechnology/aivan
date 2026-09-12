@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
 import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
+
+from aivan.api.secure_compare import secure_compare_str
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$")
@@ -145,11 +146,11 @@ def resolve_request_context(
                     detail={"error": "TENANT_REQUIRED", "field": "tenant_id"},
                 )
             expected = tenant_keys.get(tenant_id, "")
-            if not expected or not secrets.compare_digest(provided, expected):
+            if not expected or not secure_compare_str(provided, expected):
                 raise HTTPException(status_code=403, detail={"error": "INVALID_API_KEY"})
         elif not (
-            (api_key and secrets.compare_digest(provided, api_key))
-            or (auth_secret and secrets.compare_digest(provided, auth_secret))
+            (api_key and secure_compare_str(provided, api_key))
+            or (auth_secret and secure_compare_str(provided, auth_secret))
         ):
             raise HTTPException(status_code=403, detail={"error": "INVALID_API_KEY"})
 
