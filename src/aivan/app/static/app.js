@@ -254,12 +254,18 @@ async function openCase(caseId) {
     state.selectedCase = payload;
     const item = payload.case;
     const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
+    const leadTimeEstimates = item.requirement?.lead_time_estimates || [];
+    const buyerOptions = item.requirement?.buyer_options || [];
+    const selectedOption = item.selected_option || null;
     $('#case-detail').innerHTML = `<section class="case-hero">
       <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
       <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${t('导出审计')}</a>` : ''}</div>
     </section>
     <div class="detail-grid"><section class="panel"><h2>${t('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${t('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
+    <div class="detail-grid"><section class="panel"><h2>${t('交期估算')}</h2>${leadTimeEstimates.length ? `<pre class="json-view">${escapeHtml(JSON.stringify(leadTimeEstimates, null, 2))}</pre>` : emptyHtml()}</section>
+    <section class="panel"><h2>${t('报价选项')}</h2>${buyerOptions.length ? `<pre class="json-view">${escapeHtml(JSON.stringify(buyerOptions, null, 2))}</pre>` : emptyHtml()}</section></div>
+    <section class="panel"><h2>${t('执行建议')}</h2>${selectedOption ? `<pre class="json-view">${escapeHtml(JSON.stringify(selectedOption, null, 2))}</pre>` : emptyHtml()}</section>
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
     ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
     ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
@@ -274,7 +280,7 @@ async function openCase(caseId) {
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
   const action = draft.status === 'pending_approval' && canApprove
-    ? `<button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${t('审批')}</button>` : '';
+    ? `<button class="ghost compact" data-action="reject" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${t('拒绝')}</button><button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${t('审批')}</button>` : '';
   return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${t('复制')}</button>${action}</div></article>`;
 }
 
@@ -319,6 +325,14 @@ async function approveDraft(draftId) {
     toast(payload.relay_required ? t('已审批，等待人工转发') : (payload.sent ? t('已审批并产生发送回执') : t('审批完成')), 'success');
     if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
   } catch (error) { toast(`${t('审批失败：')}${error.message}`, 'error'); }
+}
+
+async function rejectDraft(draftId) {
+  try {
+    const payload = await api(`/api/drafts/${encodeURIComponent(draftId)}/reject`, { method: 'POST', body: '{}' });
+    toast(payload.status === 'rejected' ? t('草稿已拒绝') : t('拒绝完成'), 'success');
+    if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
+  } catch (error) { toast(`${t('拒绝失败：')}${error.message}`, 'error'); }
 }
 
 async function showImpact(eventId) {
@@ -395,6 +409,7 @@ document.addEventListener('click', async (event) => {
     toast(t('已复制到剪贴板'), 'success');
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
+  if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
   if (action.dataset.action === 'impact') await showImpact(action.dataset.eventId);
   if (action.dataset.action === 'reverse') await reverseEvent(action.dataset.eventId);
 });

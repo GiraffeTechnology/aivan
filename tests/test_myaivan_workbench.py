@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from aivan.api.main import app
 from aivan.db.models import Base
+from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.domain_repo import CaseDomainRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.session import get_db
@@ -196,6 +197,89 @@ def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workb
     assert "X-AIVAN-API-Key" in script
     assert "keyInput.value = ''" in script
     assert "state.selectedCase = null" in script
+
+
+def test_myaivan_ui_rejects_pending_draft_through_audited_server_action(workbench):
+    client, db = workbench
+    project = _seed_case(db, "operator-1", "reject-thread")
+    draft = DraftRepository(db).create(
+        project.project_id,
+        {
+            "tenant_id": "test_tenant",
+            "conversation_id": "supplier-reject-thread",
+            "channel": "wechat",
+            "target_peer_id": "supplier-1",
+            "target_role": "supplier",
+            "message_text": "Please quote 100 widgets",
+            "status": "pending_approval",
+            "created_by_actor_id": "operator-1",
+            "created_by_actor_role": "admin",
+        },
+    )
+    db.commit()
+    login = _login(client)
+
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "src/aivan/app/static/app.js").read_text(encoding="utf-8")
+    assert 'data-action="reject"' in script
+    assert "async function rejectDraft(draftId)" in script
+    assert "/api/drafts/${encodeURIComponent(draftId)}/reject" in script
+
+    response = client.post(
+        f"/api/drafts/{draft.draft_id}/reject",
+        headers={"X-AIVAN-CSRF": login["csrf_token"]},
+        json={},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"draft_id": draft.draft_id, "status": "rejected"}
+    db.refresh(draft)
+    assert draft.status == "rejected"
+
+    detail = client.get(f"/api/workbench/cases/{project.project_id}")
+    assert detail.status_code == 200
+    assert detail.json()["drafts"][0]["status"] == "rejected"
+    assert detail.json()["approvals"][0]["status"] == "rejected"
+    assert detail.json()["audit"][0]["event_type"] == "DRAFT_REJECTED"
+
+
+def test_myaivan_case_detail_projects_lead_time_quote_and_execution_recommendation(workbench):
+    client, db = workbench
+    project = _seed_case(db, "operator-1", "recommendation-thread")
+    project.requirement_json = {
+        "product_name": "Test garment",
+        "lead_time_estimates": [
+            {"supplier_id": "supplier-test", "p50_days": 24, "p80_days": 30, "p90_days": 36}
+        ],
+        "buyer_options": [
+            {
+                "option_id": "option-test",
+                "supplier_id": "supplier-test",
+                "quote": {"buyer_unit_price": 8.75, "currency": "USD"},
+            }
+        ],
+    }
+    project.selected_option_json = {
+        "option_id": "option-test",
+        "supplier_id": "supplier-test",
+        "quote": {"buyer_unit_price": 8.75, "currency": "USD"},
+        "lead_time_estimate": {"p50_days": 24, "p80_days": 30, "p90_days": 36},
+    }
+    db.commit()
+    _login(client)
+
+    detail = client.get(f"/api/workbench/cases/{project.project_id}")
+    assert detail.status_code == 200
+    case = detail.json()["case"]
+    assert case["requirement"]["lead_time_estimates"][0]["p80_days"] == 30
+    assert case["requirement"]["buyer_options"][0]["quote"]["buyer_unit_price"] == 8.75
+    assert case["selected_option"]["option_id"] == "option-test"
+
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "src/aivan/app/static/app.js").read_text(encoding="utf-8")
+    assert "item.requirement?.lead_time_estimates" in script
+    assert "item.requirement?.buyer_options" in script
+    assert "item.selected_option" in script
+    assert "escapeHtml(JSON.stringify(selectedOption, null, 2))" in script
 
 
 def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
