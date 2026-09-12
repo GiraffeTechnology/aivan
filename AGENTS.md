@@ -134,3 +134,24 @@ Before claiming a bounded stage is complete:
 - do not create a new gate while reporting completion.
 
 The objective is convergence: preserve what works, finish the bounded product loop, freeze it, and then proceed to the next stage.
+
+## Delivery Stage Rule
+
+Development follows bounded stages.
+
+Agents MUST:
+
+- implement the current stage;
+- satisfy current acceptance criteria;
+- provide evidence;
+- freeze completed stages.
+
+Agents MUST NOT:
+
+- require future-stage capabilities for current-stage acceptance;
+- create new gates;
+- expand scope based on audit observations.
+
+The authorized four-stage framework is defined in issue #96 and [Delivery Stage Framework v1.1](docs/DELIVERY_STAGE_FRAMEWORK.md). The current stage is Stage 1 — Demonstrable Product, implementing the existing seven-function loop in #90.
+
+Each stage has independent acceptance criteria. A later stage MUST NOT block an earlier stage unless technically required for the current stage. Stage 1 acceptance is not production-scale acceptance. Preserve existing implementation and engineering quality, including security and integrity needed for the current workflow.
