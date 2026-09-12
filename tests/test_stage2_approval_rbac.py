@@ -260,6 +260,23 @@ def test_rejecting_only_customer_quote_reopens_existing_supplier_reply_flow(
         assert all(row.authorization_basis == "deployment_api_key" for row in audits)
 
 
+def test_rejecting_other_draft_preserves_response_and_case_contract(
+    client_and_session
+):
+    from aivan.db.models.inquiry import InquiryDraftRecord
+
+    client, Session = client_and_session
+    draft_id = _seed_draft(Session)
+    headers = _headers("approver", "approver-1", trace_id="trace-supplier-rejected")
+
+    response = client.post(f"/api/drafts/{draft_id}/reject", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"draft_id": draft_id, "status": "rejected"}
+    with Session() as db:
+        assert db.get(InquiryDraftRecord, draft_id).status == "rejected"
+
+
 def test_production_approval_requires_actor_and_role_headers(client_and_session):
     client, Session = client_and_session
     draft_id = _seed_draft(Session)

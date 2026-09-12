@@ -23,6 +23,7 @@ from aivan.api.session_routes import router as _session_router
 from aivan.api.security_headers import add_security_headers
 from aivan.api.workbench_routes import router as _workbench_router
 from aivan.api.serializers import (
+    draft_type_from_notes as _draft_type_from_notes,
     serialize_draft as _serialize_draft,
     serialize_preference as _serialize_preference,
 )
@@ -646,7 +647,7 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
     )
     is_customer_quote = (
         draft.target_role == "customer"
-        and "draft_type=customer_quote_email" in (draft.notes or "")
+        and _draft_type_from_notes(draft) == "customer_quote_email"
     )
     pending_customer_quotes = [
         pending
@@ -654,8 +655,9 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
             draft.project_id, tenant_id=draft.tenant_id
         )
         if pending.target_role == "customer"
-        and "draft_type=customer_quote_email" in (pending.notes or "")
+        and _draft_type_from_notes(pending) == "customer_quote_email"
     ]
+    reopened_quote_flow = False
     if (
         project is not None
         and project.case_state == "awaiting_approval"
@@ -674,9 +676,10 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
             after={"case_state": "supplier_replied"},
         )
         db.flush()
+        reopened_quote_flow = True
     db.commit()
     result = {"draft_id": draft_id, "status": "rejected"}
-    if project is not None:
+    if reopened_quote_flow:
         result["case_state"] = project.case_state
     return result
 
