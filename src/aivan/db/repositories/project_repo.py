@@ -36,7 +36,12 @@ class ProjectRepository:
         query = self.db.query(Project).filter(Project.project_id == project_id)
         if tenant_id is not None:
             query = query.filter(Project.tenant_id == tenant_id)
-        return query.with_for_update().first()
+        with self.db.no_autoflush:
+            if self.db.get_bind().dialect.name == "sqlite":
+                # SQLite ignores FOR UPDATE. A no-op write acquires its writer
+                # reservation until commit/rollback, before reading current state.
+                query.update({Project.project_id: Project.project_id}, synchronize_session=False)
+            return query.populate_existing().with_for_update().first()
 
     def get_by_conversation(self, conversation_id: str, tenant_id: str | None = None) -> Project | None:
         query = self.db.query(Project).filter(Project.conversation_id == conversation_id)

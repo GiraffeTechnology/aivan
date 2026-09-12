@@ -17,7 +17,6 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
-from aivan.api.draft_state import recover_case_after_quote_rejection
 from aivan.api.authorization import authorize_draft_action as _authorize_draft_action
 from aivan.api.relay_routes import router as _relay_router
 from aivan.api.session_routes import router as _session_router
@@ -596,8 +595,9 @@ def _do_approve_draft(
 
 
 def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
-    from aivan.db.repositories.domain_repo import CaseDomainRepository
     from aivan.domain.roles import Capability
+    from aivan.execution.approval_state import DraftStateError
+    from aivan.execution.draft_rejection import reject_draft_atomically
 
     repo = DraftRepository(db)
     draft = repo.get(draft_id, tenant_id=context.tenant_id)
@@ -619,31 +619,18 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
             status_code=409,
             detail=f"Draft {draft_id} cannot be rejected: current status is '{draft.status}'",
         )
-    repo.reject(draft_id)
-    CaseDomainRepository(db).record_approval(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        draft_id=draft.draft_id,
-        identity=identity,
-        source_trace_id=context.trace_id,
-        status="rejected",
-        requested_by_actor_id=draft.created_by_actor_id,
-        requested_by_actor_role=draft.created_by_actor_role,
-    )
-    CaseDomainRepository(db).record_audit(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        event_type="DRAFT_REJECTED",
-        identity=identity,
-        source_trace_id=context.trace_id,
-        before={"draft_id": draft.draft_id, "status": "pending_approval"},
-        after={"draft_id": draft.draft_id, "status": "rejected"},
-    )
-    recover_case_after_quote_rejection(db=db, draft=draft, identity=identity,
-        source_trace_id=context.trace_id,
-    )
+    try:
+        outcome = reject_draft_atomically(
+            db=db, draft=draft, identity=identity, source_trace_id=context.trace_id,
+        )
+    except DraftStateError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Draft is no longer pending approval") from exc
     db.commit()
-    return {"draft_id": draft_id, "status": "rejected"}
+    result = {"draft_id": draft_id, "status": outcome.status}
+    if outcome.reopened_case_state is not None:
+        result["case_state"] = outcome.reopened_case_state
+    return result
 
 
 def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
