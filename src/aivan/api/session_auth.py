@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
 
+from aivan.api.secure_compare import secure_compare_str
+
 
 SESSION_COOKIE = "aivan_session"
 CSRF_COOKIE = "aivan_csrf"
@@ -85,7 +87,7 @@ def configured_ui_identity(requested_role: str = "") -> tuple[str, tuple[str, ..
             (
                 configured_role
                 for configured_role in roles
-                if hmac.compare_digest(requested, configured_role)
+                if secure_compare_str(requested, configured_role)
             ),
             "",
         )
