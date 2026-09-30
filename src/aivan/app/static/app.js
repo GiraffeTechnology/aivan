@@ -317,9 +317,14 @@ function inquirySubmissionOutcome(payload) {
   if (payload.status !== 'ok' || typeof payload.project_id !== 'string') return null;
   const projectId = payload.project_id.trim();
   if (!projectId) return null;
+  const draftsCreated = payload.drafts_created;
+  const enteredApprovalFlow = payload.action === 'pending_email_approval'
+    && Array.isArray(draftsCreated)
+    && draftsCreated.length > 0
+    && draftsCreated.every((draftId) => typeof draftId === 'string' && draftId.trim());
   return {
     projectId,
-    enteredApprovalFlow: payload.action === 'pending_email_approval',
+    enteredApprovalFlow,
   };
 }
 
@@ -348,7 +353,10 @@ async function submitInquiry(event) {
     const outcome = inquirySubmissionOutcome(payload);
     if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
     result.hidden = false;
-    result.textContent = `${t('案例')} ${outcome.projectId}\n${payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。')}`;
+    const responseMessage = payload.action === 'pending_email_approval' && !outcome.enteredApprovalFlow
+      ? t('请求已受理，请按案例提示继续。')
+      : (payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。'));
+    result.textContent = `${t('案例')} ${outcome.projectId}\n${responseMessage}`;
     await loadCases(true);
     if (outcome.enteredApprovalFlow) {
       event.target.reset();
