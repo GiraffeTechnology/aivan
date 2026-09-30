@@ -144,4 +144,66 @@ assert.equal(resetCalls, 1, 'missing project identity must preserve the form');
 assert.equal(loadCasesCalls, 6);
 assert.equal(toasts.at(-1).kind, 'error');
 
+// Exercise the real loadCases helper: ordinary case-list request failures are
+// rendered locally and must not escape into submitInquiry's creation error path.
+const loadCasesStart = source.indexOf('async function loadCases');
+const renderMetricsStart = source.indexOf('function renderMetrics');
+assert.ok(loadCasesStart >= 0 && renderMetricsStart > loadCasesStart);
+const realFields = {
+  '#buyer-id': { value: 'buyer-real-helper' },
+  '#buyer-name': { value: 'Buyer Real Helper' },
+  '#inquiry-text': { value: 'Please quote 100 shirts.' },
+  '#inquiry-result': { hidden: false, textContent: 'stale result' },
+  '#case-state-filter': { value: '' },
+  '#case-list': { innerHTML: '' },
+};
+const realToasts = [];
+let realResetCalls = 0;
+let realCaseRefreshCalls = 0;
+const realContext = vm.createContext({
+  console,
+  JSON,
+  URLSearchParams,
+  state: { offset: 0, limit: 25 },
+  $: (selector) => realFields[selector],
+  requestId: (prefix) => `${prefix}-real-helper`,
+  t: (value) => value,
+  ht: (value) => value,
+  escapeHtml: (value) => String(value),
+  toast: (message, kind) => realToasts.push({ message, kind }),
+  api: async (path) => {
+    if (path === '/invoke') {
+      return {
+        status: 'ok',
+        action: 'pending_email_approval',
+        project_id: 'project-real-helper',
+        user_control_message: 'Drafts are pending human approval.',
+        drafts_created: ['draft-real-helper'],
+      };
+    }
+    if (path.startsWith('/api/workbench/cases?')) {
+      realCaseRefreshCalls += 1;
+      throw new Error('case list unavailable');
+    }
+    throw new Error(`unexpected API path: ${path}`);
+  },
+});
+vm.runInContext(
+  `${source.slice(loadCasesStart, renderMetricsStart)}\n${source.slice(validatorStart, submitEnd)}`,
+  realContext,
+  { filename: sourcePath },
+);
+const realSubmitInquiry = vm.runInContext('submitInquiry', realContext);
+await realSubmitInquiry({
+  preventDefault() {},
+  target: { reset() { realResetCalls += 1; } },
+});
+assert.equal(realResetCalls, 1);
+assert.equal(realCaseRefreshCalls, 1);
+assert.equal(realFields['#inquiry-result'].hidden, false);
+assert.match(realFields['#inquiry-result'].textContent, /project-real-helper/);
+assert.match(realFields['#case-list'].innerHTML, /读取案例失败/);
+assert.equal(realToasts.some(({ message }) => message.includes('创建失败')), false);
+assert.equal(realToasts.at(-1).kind, 'success');
+
 console.log('myAIVAN inquiry runtime: response classification regression passed');
