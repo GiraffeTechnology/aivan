@@ -42,6 +42,7 @@ class GLTGClient:
         requirement: BuyerRequirement,
         strategy: RFQStrategy,
         supplier_count: int,
+        supplier_id: str | None = None,
     ) -> GLTGSimulation:
         data = self._estimate(
             quantity=requirement.quantity or 1000,
@@ -50,6 +51,7 @@ class GLTGClient:
             deadline_days=requirement.delivery_days,
             capacity_per_day=None,
             lead_time_confidence=strategy.lead_time_confidence,
+            supplier_id=supplier_id,
         )
 
         p50 = int(data["p50_days"])
@@ -110,6 +112,7 @@ class GLTGClient:
             deadline_days=deadline_days,
             capacity_per_day=capacity,
             lead_time_confidence="P80",
+            supplier_id=supplier_id,
         )
 
         p50 = int(data["p50_days"])
@@ -177,6 +180,7 @@ class GLTGClient:
         deadline_days: int | None,
         capacity_per_day: int | None,
         lead_time_confidence: str = "P80",
+        supplier_id: str | None = None,
     ) -> dict:
         order = {
             "product_type": "apparel",
@@ -187,8 +191,13 @@ class GLTGClient:
         }
         # A single requirement-level supplier (no stage data) -> GLTG applies its
         # own baseline stage estimates. AIVAN never computes stages locally.
-        supplier = {"supplier_id": "requirement", "capacity_per_day": capacity_per_day, "confidence": 0.7}
+        supplier = {
+            "supplier_id": supplier_id or "requirement",
+            "capacity_per_day": capacity_per_day,
+            "confidence": 0.7,
+        }
         if os.environ.get("GLTG_API_VERSION", "v1").lower() == "v2":
+            evidence = {"use_giraffe_db": True} if supplier_id else None
             result = self._http.simulate_lead_time_v2(
                 {
                     "request_id": new_estimate_id(),
@@ -205,11 +214,20 @@ class GLTGClient:
                         "deadline_days": deadline_days,
                     },
                     "supplier": supplier,
+                    **({"evidence": evidence} if evidence is not None else {}),
                     "constraints": {"lead_time_confidence": lead_time_confidence},
                 }
             )
             if not result.ok or result.data is None:
                 raise GLTGUnavailableError(result.error or "GLTG v2 returned no data")
+            if supplier_id:
+                warning_codes = {
+                    str(item.get("code") or "")
+                    for item in (result.data.get("warnings") or [])
+                    if isinstance(item, dict)
+                }
+                if "EVIDENCE_NOT_FOUND" in warning_codes:
+                    raise GLTGUnavailableError("GLTG_EVIDENCE_NOT_FOUND")
             return self._normalize_v2_result(result.data)
 
         result = self._http.estimate_lead_time(order=order, suppliers=[supplier], constraints={})

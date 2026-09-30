@@ -54,7 +54,7 @@ class ProjectRepository:
             self.db.flush()
         return p
 
-    def update_selected_option(self, project_id: str, option_json: dict) -> Project | None:
+    def update_selected_option(self, project_id: str, option_json: dict | None) -> Project | None:
         p = self.get(project_id)
         if p:
             p.selected_option_json = option_json
