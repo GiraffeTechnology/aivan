@@ -312,11 +312,25 @@ function eventRow(event) {
   return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
+function inquirySubmissionOutcome(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (payload.status !== 'ok' || typeof payload.project_id !== 'string') return null;
+  const projectId = payload.project_id.trim();
+  if (!projectId) return null;
+  return {
+    projectId,
+    enteredApprovalFlow: payload.action === 'pending_email_approval',
+  };
+}
+
 async function submitInquiry(event) {
   event.preventDefault();
   const buyerId = $('#buyer-id').value.trim();
   const text = $('#inquiry-text').value.trim();
   const conversation = requestId('manual-conversation');
+  const result = $('#inquiry-result');
+  result.hidden = true;
+  result.textContent = '';
   const headers = {
     'X-AIVAN-Participant-ID': buyerId,
     'X-AIVAN-Participant-Role': 'buyer',
@@ -331,12 +345,17 @@ async function submitInquiry(event) {
         sender_display_name: $('#buyer-name').value.trim(), message_text: text,
       }),
     });
-    const result = $('#inquiry-result');
+    const outcome = inquirySubmissionOutcome(payload);
+    if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
     result.hidden = false;
-    result.textContent = `${t('案例')} ${payload.project_id || t('已创建')}\n${payload.user_control_message || payload.message || payload.reply_text || t('已进入 Core 工作流')}`;
-    event.target.reset();
+    result.textContent = `${t('案例')} ${outcome.projectId}\n${payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。')}`;
     await loadCases(true);
-    toast(t('询盘已写入共享 Core'), 'success');
+    if (outcome.enteredApprovalFlow) {
+      event.target.reset();
+      toast(t('询盘草稿已生成，等待人工审批'), 'success');
+    } else {
+      toast(t('请求已受理，请按案例提示继续。'), 'info');
+    }
   } catch (error) {
     toast(`${t('创建失败：')}${error.message}`, 'error');
   }
