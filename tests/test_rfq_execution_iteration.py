@@ -425,6 +425,130 @@ def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_c
     assert any(event["event_type"] == "BUYER_OPTIONS_GENERATED" for event in events)
 
 
+def test_gpm_unavailable_is_visible_and_creates_no_customer_approval_draft(
+    api_client, monkeypatch
+):
+    from aivan.integrations.gpm_guidance_client import (
+        GPMGuidanceClient,
+        GPMGuidanceUnavailableError,
+    )
+
+    def unavailable(*args, **kwargs):
+        raise GPMGuidanceUnavailableError("GPM_HTTP_503")
+
+    monkeypatch.setattr(GPMGuidanceClient, "create_guidance", unavailable)
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_gpm_down",
+            "message_id": "supplier_reply_gpm_down_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": (
+                "We can quote USD 4.50/pc, MOQ 5000 pcs, daily capacity "
+                "500 pcs, lead time 35 days, FOB Guangzhou."
+            ),
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "gpm_guidance_unavailable"
+    assert payload["drafts_created"] == []
+    assert payload["requirement"]["gpm_guidance"] == {
+        "status": "unavailable",
+        "error": "GPM_HTTP_503",
+    }
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["selected_option"] is None
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+    events = api_client.get(f"/api/projects/{created['project_id']}/events").json()["events"]
+    assert any(event["event_type"] == "GPM_GUIDANCE_UNAVAILABLE" for event in events)
+
+
+def test_supplier_reply_gltg_estimate_failure_is_structured_and_creates_no_draft(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+    from aivan.integrations.gltg import GLTGUnavailableError
+
+    def unavailable(*args, **kwargs):
+        raise GLTGUnavailableError("GLTG_EVIDENCE_NOT_FOUND")
+
+    monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", unavailable)
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_gltg_evidence_down",
+            "message_id": "supplier_reply_gltg_evidence_down_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "pending_dependency_recovery"
+    assert payload["drafts_created"] == []
+    assert "GLTG" in payload["user_control_message"]
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+
+
+def test_supplier_reply_gltg_summary_failure_is_structured_and_creates_no_draft(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+    from aivan.integrations.gltg import GLTGUnavailableError
+
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+
+    def unavailable(*args, **kwargs):
+        raise GLTGUnavailableError("GLTG_TIMEOUT")
+
+    monkeypatch.setattr(rfq_execution.GLTGClient, "simulate", unavailable)
+
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_gltg_summary_down",
+            "message_id": "supplier_reply_gltg_summary_down_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "pending_dependency_recovery"
+    assert payload["drafts_created"] == []
+    assert "GLTG" in payload["user_control_message"]
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+
+
 def test_customer_personal_im_without_actor_requires_owner_resolution(api_client):
     event = _customer_personal_im_event_missing_actor()
 

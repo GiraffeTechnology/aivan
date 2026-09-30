@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
 
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,10 @@ from aivan.db.repositories.domain_repo import CaseDomainRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
 from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
+from aivan.integrations.gpm_guidance_client import (
+    GPMGuidanceClient,
+    GPMGuidanceUnavailableError,
+)
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.policy import ExternalModelApiRequiresApprovalError, LocalModelUnavailableError
@@ -59,6 +64,71 @@ from aivan.domain.roles import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _create_stage1_gpm_guidance(
+    *,
+    project,
+    event: OpenClawEvent,
+    requirement: BuyerRequirement,
+    selected_option,
+    replies: list[SupplierReply],
+) -> dict:
+    """Create one advisory GPM packet for the selected Stage 1 option.
+
+    This does not approve, reject, or dispatch anything. The existing Aivan
+    human-approval step remains the sole outbound authorization boundary.
+    """
+
+    selected_reply = next(
+        (
+            item
+            for item in replies
+            if (selected_option.supplier_id and item.supplier_id == selected_option.supplier_id)
+            or (
+                selected_option.candidate_id
+                and item.candidate_id == selected_option.candidate_id
+            )
+        ),
+        None,
+    )
+    if selected_reply is None and len(replies) == 1:
+        # A single authenticated supplier reply is unambiguous even when an
+        # older BuyerOption record predates supplier/candidate identity fields.
+        selected_reply = replies[0]
+    if selected_reply is None or selected_reply.unit_price is None:
+        raise GPMGuidanceUnavailableError("GPM_SOURCE_QUOTE_MISSING")
+    tenant_id = project.tenant_id or event.tenant_id or "legacy"
+    trace_seed = event.source_trace_id or event.message_id or project.project_id
+    trace_id = event.source_trace_id or (
+        "trace_" + hashlib.sha256(trace_seed.encode("utf-8")).hexdigest()[:24]
+    )
+    idempotency_material = (
+        f"{tenant_id}:{project.project_id}:{event.message_id}:"
+        f"{selected_option.option_id}:gpm-guidance"
+    )
+    idempotency_key = (
+        "gpm_" + hashlib.sha256(idempotency_material.encode("utf-8")).hexdigest()[:32]
+    )
+    packet = GPMGuidanceClient().create_guidance(
+        tenant_id=tenant_id,
+        trace_id=trace_id,
+        idempotency_key=idempotency_key,
+        sku=(requirement.product_type or requirement.category or "apparel"),
+        supplier_id=selected_reply.supplier_id or None,
+        supplier_quote=float(selected_reply.unit_price),
+        currency=selected_reply.currency or "USD",
+        quantity=requirement.quantity,
+        notes=f"case={project.project_id};option={selected_option.option_id}",
+    )
+    return {
+        "packet_id": packet["packet_id"],
+        "recommendation": packet["recommendation"],
+        "confidence": packet["confidence"],
+        "human_approval_required": True,
+        "approval_status": "pending",
+        "dispatched": False,
+    }
 
 
 CLASSIFICATION_SYSTEM = """
@@ -860,9 +930,14 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         strategy = RFQStrategy()
 
     # P2: carry supplier_id so generate_buyer_options can match lead time to this reply
-    lead_time = calculate_leadtime_for_requirement(
-        requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None
-    )
+    try:
+        lead_time = calculate_leadtime_for_requirement(
+            requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None
+        )
+    except GLTGUnavailableError as exc:
+        return _dependency_recovery_result(
+            project, event, classification, requirement, exc, db
+        )
     event_repo.append(
         project.project_id,
         "LEADTIME_RECALCULATED",
@@ -900,12 +975,85 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         actor="buyer_option_agent",
     )
 
+    try:
+        gltg = GLTGClient().simulate(
+            requirement,
+            strategy,
+            supplier_count=len(all_replies),
+            supplier_id=reply.supplier_id or None,
+        )
+    except GLTGUnavailableError as exc:
+        return _dependency_recovery_result(
+            project, event, classification, requirement, exc, db
+        )
+    gpm_guidance = None
+    if buyer_options:
+        try:
+            gpm_guidance = _create_stage1_gpm_guidance(
+                project=project,
+                event=event,
+                requirement=requirement,
+                selected_option=buyer_options[0],
+                replies=all_replies,
+            )
+        except GPMGuidanceUnavailableError as exc:
+            error_code = str(exc) or "GPM_GUIDANCE_UNAVAILABLE"
+            requirement_payload["buyer_options"] = option_payloads
+            requirement_payload["gpm_guidance"] = {
+                "status": "unavailable",
+                "error": error_code,
+            }
+            project_repo.update_requirement(project.project_id, requirement_payload)
+            project_repo.update_selected_option(project.project_id, None)
+            DraftRepository(db).supersede_customer_quote_drafts(project.project_id)
+            event_repo.append(
+                project.project_id,
+                "GPM_GUIDANCE_UNAVAILABLE",
+                "GPM execution recommendation is unavailable; approval draft was not created",
+                payload={"error": error_code},
+                actor="gpm_guidance_client",
+            )
+            db.commit()
+            return RFQExecutionResult(
+                project_id=project.project_id,
+                event_type="supplier_reply",
+                action="gpm_guidance_unavailable",
+                message="Supplier reply parsed, but the execution recommendation is unavailable. No approval draft was created.",
+                strategy=strategy,
+                requirement=requirement_payload,
+                giraffe_context=GiraffeContext(),
+                gltg_simulation=gltg,
+                supplier_routing=SupplierRoutingDecision(
+                    selected_supplier_ids=[reply.supplier_id] if reply.supplier_id else []
+                ),
+                drafts_created=[],
+            )
+        option_payloads[0]["gpm_guidance"] = gpm_guidance
+        requirement_payload["gpm_guidance"] = gpm_guidance
+        event_repo.append(
+            project.project_id,
+            "GPM_GUIDANCE_CREATED",
+            "GPM advisory execution recommendation created; human approval remains required",
+            payload=gpm_guidance,
+            actor="gpm_guidance_client",
+        )
+
     requirement_payload["buyer_options"] = option_payloads
     project_repo.update_requirement(project.project_id, requirement_payload)
     if option_payloads:
         project_repo.update_selected_option(project.project_id, option_payloads[0])
 
-    drafts_created = _create_customer_quote_email_draft(project, event, buyer_options, db) if buyer_options else []
+    drafts_created = (
+        _create_customer_quote_email_draft(
+            project,
+            event,
+            buyer_options,
+            db,
+            gpm_guidance=gpm_guidance,
+        )
+        if buyer_options
+        else []
+    )
     if drafts_created and project.case_state == CaseState.SUPPLIER_REPLIED.value:
         CaseDomainRepository(db).transition_case(
             project=project,
@@ -913,7 +1061,6 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             identity=_automation_identity(),
             source_trace_id=event.source_trace_id,
         )
-    gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(all_replies))
     db.commit()
     return RFQExecutionResult(
         project_id=project.project_id,
@@ -929,7 +1076,14 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     )
 
 
-def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_options: list, db: Session) -> list[str]:
+def _create_customer_quote_email_draft(
+    project,
+    event: OpenClawEvent,
+    buyer_options: list,
+    db: Session,
+    *,
+    gpm_guidance: dict | None = None,
+) -> list[str]:
     # Supersede any pending approval drafts from earlier supplier replies so they
     # cannot be approved or sent after buyer options have been regenerated.
     DraftRepository(db).supersede_customer_quote_drafts(project.project_id)
@@ -940,6 +1094,14 @@ def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_opti
         f"Price: {opt.quote.buyer_unit_price if opt.quote else 'N/A'} {opt.quote.currency if opt.quote else ''}"
         for opt in buyer_options
     )
+    guidance_summary = ""
+    if gpm_guidance:
+        guidance_summary = (
+            "\n\nGPM advisory: "
+            f"{gpm_guidance['recommendation']} "
+            f"(confidence: {gpm_guidance['confidence']}). "
+            "Human approval is still required."
+        )
     draft = DraftRepository(db).create(
         project.project_id,
         {
@@ -950,7 +1112,8 @@ def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_opti
             "target_role": "customer",
             "message_text": (
                 "We have received supplier quotes. Here are the current options:\n\n"
-                f"{option_summary}\n\nPlease let us know which option you prefer."
+                f"{option_summary}"
+                f"{guidance_summary}\n\nPlease let us know which option you prefer."
             ),
             "message_type": "text",
             "attachments_json": [],

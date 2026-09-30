@@ -5,6 +5,8 @@ These use an httpx MockTransport so no live GLTG server is required.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -16,6 +18,7 @@ def _handler(captured: dict):
         captured["method"] = request.method
         captured["url"] = str(request.url)
         captured["content"] = request.content.decode() if request.content else ""
+        captured["headers"] = dict(request.headers)
         if request.url.path == "/health":
             return httpx.Response(200, json={"status": "ok", "service": "gltg"})
         if request.url.path == "/v1/lead-time/estimate":
@@ -106,6 +109,29 @@ def test_http_error_surfaces_structured_error():
     assert "HTTP 500" in (res.error or "")
 
 
+def test_redirect_is_not_accepted_as_gltg_success(monkeypatch):
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "service-test-secret")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, json={"quantiles": {}})
+
+    client = GLTGClient(
+        base_url="http://gltg.test",
+        transport=httpx.MockTransport(handle),
+    )
+    res = client.simulate_lead_time_v2(
+        {
+            "request_id": "REQ_test",
+            "tenant_id": "tenant-alpha",
+            "order": {"quantity": 1},
+        }
+    )
+
+    assert res.ok is False
+    assert res.status_code == 302
+    assert res.error == "GLTG_UNEXPECTED_STATUS_302"
+
+
 def test_connection_error_does_not_fall_back():
     def handle(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
@@ -117,11 +143,13 @@ def test_connection_error_does_not_fall_back():
     assert res.data is None  # never a locally computed value
 
 
-def test_simulate_lead_time_v2_posts_payload():
+def test_simulate_lead_time_v2_posts_trusted_service_headers(monkeypatch):
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "service-test-secret")
     cap: dict = {}
     res = _client(cap).simulate_lead_time_v2(
         {
             "request_id": "REQ_test",
+            "tenant_id": "tenant-alpha",
             "source_system": "aivan",
             "order": {"quantity": 10000, "product_type": "apparel"},
             "supplier": {"supplier_id": "M1"},
@@ -131,6 +159,49 @@ def test_simulate_lead_time_v2_posts_payload():
     assert res.data["gltg_run_id"] == "GLTG_test_001"
     assert cap["method"] == "POST"
     assert cap["url"].endswith("/v2/lead-time/simulate")
+    assert cap["headers"]["x-service-tenant-id"] == "tenant-alpha"
+    assert cap["headers"]["x-service-auth"] == "service-test-secret"
+
+
+def test_simulate_lead_time_v2_rejects_missing_service_auth_without_network(monkeypatch):
+    monkeypatch.delenv("GLTG_SERVICE_AUTH_SECRET", raising=False)
+    cap: dict = {}
+
+    res = _client(cap).simulate_lead_time_v2(
+        {
+            "request_id": "REQ_test",
+            "tenant_id": "tenant-alpha",
+            "source_system": "aivan",
+            "order": {"quantity": 10000, "product_type": "apparel"},
+            "supplier": {"supplier_id": "M1"},
+        }
+    )
+
+    assert res.ok is False
+    assert res.error == "GLTG_TRUSTED_PROFILE_MISSING"
+    assert cap == {}
+
+
+@pytest.mark.parametrize("tenant_id", ["", "租户-alpha"])
+def test_simulate_lead_time_v2_rejects_invalid_tenant_without_network(
+    monkeypatch, tenant_id
+):
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "service-test-secret")
+    cap: dict = {}
+
+    res = _client(cap).simulate_lead_time_v2(
+        {
+            "request_id": "REQ_test",
+            "tenant_id": tenant_id,
+            "source_system": "aivan",
+            "order": {"quantity": 10000, "product_type": "apparel"},
+            "supplier": {"supplier_id": "M1"},
+        }
+    )
+
+    assert res.ok is False
+    assert res.error == "GLTG_TRUSTED_PROFILE_MISSING"
+    assert cap == {}
 
 
 def test_facade_uses_v2_when_configured(monkeypatch):
@@ -139,6 +210,8 @@ def test_facade_uses_v2_when_configured(monkeypatch):
     from aivan.schemas.rfq import RFQStrategy
 
     monkeypatch.setenv("GLTG_API_VERSION", "v2")
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "service-test-secret")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-alpha")
     cap: dict = {}
     facade = GLTGFacade(http=_client(cap))
 
@@ -155,6 +228,73 @@ def test_facade_uses_v2_when_configured(monkeypatch):
     assert result.assessment_packet["follow_up_questions"]
     assert result.p50_days == 32
     assert result.selected_confidence_days == 45
+
+
+def test_facade_binds_supplier_anchor_to_private_db_evidence(monkeypatch):
+    from aivan.integrations.gltg import GLTGClient as GLTGFacade
+    from aivan.schemas.requirement import BuyerRequirement
+    from aivan.schemas.rfq import RFQStrategy
+
+    monkeypatch.setenv("GLTG_API_VERSION", "v2")
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "service-test-secret")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-alpha")
+    cap: dict = {}
+
+    GLTGFacade(http=_client(cap)).simulate(
+        BuyerRequirement(
+            category="apparel",
+            product_type="shirt",
+            quantity=10_000,
+            destination="Vancouver",
+        ),
+        RFQStrategy(lead_time_confidence="P80"),
+        supplier_count=1,
+        supplier_id="GDB_SYN_V1_SUP_000001",
+    )
+
+    payload = json.loads(cap["content"])
+    assert payload["supplier"]["supplier_id"] == "GDB_SYN_V1_SUP_000001"
+    assert payload["evidence"] == {"use_giraffe_db": True}
+
+
+def test_facade_rejects_missing_private_db_evidence(monkeypatch):
+    from aivan.integrations.gltg import GLTGClient as GLTGFacade
+    from aivan.integrations.gltg import GLTGUnavailableError
+    from aivan.schemas.requirement import BuyerRequirement
+    from aivan.schemas.rfq import RFQStrategy
+
+    monkeypatch.setenv("GLTG_API_VERSION", "v2")
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "service-test-secret")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-alpha")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "quantiles": {"p50_days": 30, "p80_days": 36, "p90_days": 40},
+                "warnings": [
+                    {"code": "EVIDENCE_NOT_FOUND", "message": "not found"}
+                ],
+            },
+        )
+
+    with pytest.raises(GLTGUnavailableError, match="GLTG_EVIDENCE_NOT_FOUND"):
+        GLTGFacade(
+            http=GLTGClient(
+                base_url="http://gltg.test",
+                transport=httpx.MockTransport(handle),
+            )
+        ).simulate(
+            BuyerRequirement(
+                category="apparel",
+                product_type="shirt",
+                quantity=10_000,
+                destination="Vancouver",
+            ),
+            RFQStrategy(lead_time_confidence="P80"),
+            supplier_count=1,
+            supplier_id="GDB_SYN_V1_SUP_000001",
+        )
 
 
 def test_giraffe_db_headers_include_service_auth_secret(monkeypatch):
