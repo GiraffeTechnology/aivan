@@ -85,19 +85,63 @@ apiPayload = {
   action: 'pending_email_approval',
   project_id: '  project-123  ',
   user_control_message: 'Drafts are pending human approval.',
+  drafts_created: [],
 };
 await submitInquiry(event);
-assert.equal(resetCalls, 1);
+assert.equal(resetCalls, 0, 'empty drafts must not clear the inquiry form');
 assert.equal(loadCasesCalls, 3);
 assert.equal(fields['#inquiry-result'].hidden, false);
 assert.match(fields['#inquiry-result'].textContent, /project-123/);
+assert.equal(toasts.at(-1).kind, 'info');
+assert.equal(toasts.at(-1).message.includes('询盘草稿已生成'), false);
+assert.equal(fields['#inquiry-result'].textContent.includes('pending human approval'), false);
+
+apiPayload = {
+  status: 'ok',
+  action: 'pending_email_approval',
+  project_id: 'project-without-drafts-field',
+  user_control_message: 'Drafts are pending human approval.',
+};
+await submitInquiry(event);
+assert.equal(resetCalls, 0, 'missing drafts field must not clear the inquiry form');
+assert.equal(loadCasesCalls, 4);
+assert.equal(toasts.at(-1).kind, 'info');
+assert.equal(toasts.at(-1).message.includes('询盘草稿已生成'), false);
+assert.equal(fields['#inquiry-result'].textContent.includes('pending human approval'), false);
+
+apiPayload = {
+  status: 'ok',
+  action: 'pending_email_approval',
+  project_id: 'project-with-invalid-draft-type',
+  user_control_message: 'Drafts are pending human approval.',
+  drafts_created: 'draft-123',
+};
+await submitInquiry(event);
+assert.equal(resetCalls, 0, 'non-array drafts field must not clear the inquiry form');
+assert.equal(loadCasesCalls, 5);
+assert.equal(toasts.at(-1).kind, 'info');
+assert.equal(toasts.at(-1).message.includes('询盘草稿已生成'), false);
+assert.equal(fields['#inquiry-result'].textContent.includes('pending human approval'), false);
+
+apiPayload = {
+  status: 'ok',
+  action: 'pending_email_approval',
+  project_id: 'project-with-real-draft',
+  user_control_message: 'Drafts are pending human approval.',
+  drafts_created: ['draft-123'],
+};
+await submitInquiry(event);
+assert.equal(resetCalls, 1);
+assert.equal(loadCasesCalls, 6);
+assert.equal(fields['#inquiry-result'].hidden, false);
+assert.match(fields['#inquiry-result'].textContent, /project-with-real-draft/);
 assert.equal(toasts.at(-1).kind, 'success');
 assert.match(toasts.at(-1).message, /人工审批/);
 
 apiPayload = { status: 'ok', action: 'pending_email_approval', reply_text: 'Missing project identity.' };
 await submitInquiry(event);
 assert.equal(resetCalls, 1, 'missing project identity must preserve the form');
-assert.equal(loadCasesCalls, 3);
+assert.equal(loadCasesCalls, 6);
 assert.equal(toasts.at(-1).kind, 'error');
 
 console.log('myAIVAN inquiry runtime: response classification regression passed');
