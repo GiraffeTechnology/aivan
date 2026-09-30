@@ -131,6 +131,13 @@ def _create_stage1_gpm_guidance(
     }
 
 
+def _invalidate_stale_customer_quote_state(project_id: str, db: Session) -> None:
+    """Invalidate an older recommendation without deleting its audit history."""
+
+    ProjectRepository(db).update_selected_option(project_id, None)
+    DraftRepository(db).supersede_customer_quote_drafts(project_id)
+
+
 CLASSIFICATION_SYSTEM = """
 You classify AIVAN private-domain trade events. Return JSON only.
 Allowed event_type values: user_command, customer_new_inquiry, customer_followup,
@@ -337,7 +344,12 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
                 supplier_feasibility, giraffe.suppliers, db,
             )
 
-        gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+        gltg = GLTGClient().simulate(
+            requirement,
+            strategy,
+            supplier_count=len(giraffe.suppliers),
+            tenant_id=project.tenant_id or event.tenant_id,
+        )
     except (GLTGUnavailableError, ExternalModelApiRequiresApprovalError, LocalModelUnavailableError) as exc:
         return _dependency_recovery_result(project, event, classification, requirement, exc, db)
 
@@ -910,7 +922,12 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     if not requirement:
         db.commit()
         empty_strategy = RFQStrategy()
-        gltg = GLTGClient().simulate(BuyerRequirement(project_id=project.project_id, quantity=1), empty_strategy, 0)
+        gltg = GLTGClient().simulate(
+            BuyerRequirement(project_id=project.project_id, quantity=1),
+            empty_strategy,
+            0,
+            tenant_id=project.tenant_id or event.tenant_id,
+        )
         return RFQExecutionResult(
             project_id=project.project_id,
             event_type="supplier_reply",
@@ -932,9 +949,13 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     # P2: carry supplier_id so generate_buyer_options can match lead time to this reply
     try:
         lead_time = calculate_leadtime_for_requirement(
-            requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None
+            requirement,
+            supplier_reply=reply,
+            supplier_id=reply.supplier_id or None,
+            tenant_id=project.tenant_id or event.tenant_id,
         )
     except GLTGUnavailableError as exc:
+        _invalidate_stale_customer_quote_state(project.project_id, db)
         return _dependency_recovery_result(
             project, event, classification, requirement, exc, db
         )
@@ -981,8 +1002,10 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             strategy,
             supplier_count=len(all_replies),
             supplier_id=reply.supplier_id or None,
+            tenant_id=project.tenant_id or event.tenant_id,
         )
     except GLTGUnavailableError as exc:
+        _invalidate_stale_customer_quote_state(project.project_id, db)
         return _dependency_recovery_result(
             project, event, classification, requirement, exc, db
         )
@@ -1004,8 +1027,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
                 "error": error_code,
             }
             project_repo.update_requirement(project.project_id, requirement_payload)
-            project_repo.update_selected_option(project.project_id, None)
-            DraftRepository(db).supersede_customer_quote_drafts(project.project_id)
+            _invalidate_stale_customer_quote_state(project.project_id, db)
             event_repo.append(
                 project.project_id,
                 "GPM_GUIDANCE_UNAVAILABLE",
@@ -1144,7 +1166,12 @@ def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassificat
     db.commit()
     empty_strategy = RFQStrategy()
     empty_context = GiraffeContext()
-    gltg = GLTGClient().simulate(BuyerRequirement(project_id=project.project_id, quantity=1), empty_strategy, 0)
+    gltg = GLTGClient().simulate(
+        BuyerRequirement(project_id=project.project_id, quantity=1),
+        empty_strategy,
+        0,
+        tenant_id=project.tenant_id or event.tenant_id,
+    )
     return RFQExecutionResult(
         project_id=project.project_id,
         event_type=classification.event_type,

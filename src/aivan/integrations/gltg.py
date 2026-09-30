@@ -43,6 +43,7 @@ class GLTGClient:
         strategy: RFQStrategy,
         supplier_count: int,
         supplier_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> GLTGSimulation:
         data = self._estimate(
             quantity=requirement.quantity or 1000,
@@ -52,6 +53,7 @@ class GLTGClient:
             capacity_per_day=None,
             lead_time_confidence=strategy.lead_time_confidence,
             supplier_id=supplier_id,
+            tenant_id=tenant_id,
         )
 
         p50 = int(data["p50_days"])
@@ -98,6 +100,7 @@ class GLTGClient:
         supplier_reply=None,
         supplier_id: str | None = None,
         candidate_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> LeadTimeEstimate:
         capacity = getattr(supplier_reply, "capacity_per_day", None) if supplier_reply else None
         declared = getattr(supplier_reply, "lead_time_days", None) if supplier_reply else None
@@ -113,6 +116,7 @@ class GLTGClient:
             capacity_per_day=capacity,
             lead_time_confidence="P80",
             supplier_id=supplier_id,
+            tenant_id=tenant_id,
         )
 
         p50 = int(data["p50_days"])
@@ -181,6 +185,7 @@ class GLTGClient:
         capacity_per_day: int | None,
         lead_time_confidence: str = "P80",
         supplier_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict:
         order = {
             "product_type": "apparel",
@@ -201,7 +206,8 @@ class GLTGClient:
             result = self._http.simulate_lead_time_v2(
                 {
                     "request_id": new_estimate_id(),
-                    "tenant_id": resolve_service_tenant(context="gltg_v2_simulation"),
+                    "tenant_id": tenant_id
+                    or resolve_service_tenant(context="gltg_v2_simulation"),
                     "source_system": "aivan",
                     "source_trace_id": new_estimate_id(),
                     "case_context": {"supplier_id": supplier["supplier_id"]},
@@ -278,8 +284,13 @@ def calculate_leadtime_for_requirement(
     supplier_reply=None,
     supplier_id: str | None = None,
     candidate_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> LeadTimeEstimate:
     """Module-level helper kept for caller compatibility; routes through GLTG API."""
     return GLTGClient().estimate_for_requirement(
-        requirement, supplier_reply=supplier_reply, supplier_id=supplier_id, candidate_id=candidate_id
+        requirement,
+        supplier_reply=supplier_reply,
+        supplier_id=supplier_id,
+        candidate_id=candidate_id,
+        tenant_id=tenant_id,
     )
