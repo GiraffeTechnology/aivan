@@ -1044,7 +1044,12 @@ def run_project_gltg(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
     giraffe = GiraffeDBClient(db, tenant_id=context.tenant_id).build_context(requirement, customer_id=project.customer_id)
-    simulation = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    simulation = GLTGClient().simulate(
+        requirement,
+        strategy,
+        supplier_count=len(giraffe.suppliers),
+        tenant_id=context.tenant_id,
+    )
     payload["strategy"] = strategy.model_dump()
     payload["gltg_simulation"] = simulation.model_dump()
     project_repo.update_requirement(project_id, payload)

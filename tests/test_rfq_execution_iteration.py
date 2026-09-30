@@ -425,6 +425,50 @@ def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_c
     assert any(event["event_type"] == "BUYER_OPTIONS_GENERATED" for event in events)
 
 
+def test_supplier_reply_propagates_project_tenant_to_both_gltg_calls(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    expected_tenant = os.environ["AIVAN_TEST_TENANT_ID"]
+    captured = {}
+    real_estimate = rfq_execution.calculate_leadtime_for_requirement
+    real_simulate = rfq_execution.GLTGClient.simulate
+
+    def estimate(*args, **kwargs):
+        captured["estimate_tenant"] = kwargs.get("tenant_id")
+        return real_estimate(*args, **kwargs)
+
+    def simulate(self, *args, **kwargs):
+        captured["simulate_tenant"] = kwargs.get("tenant_id")
+        return real_simulate(self, *args, **kwargs)
+
+    monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", estimate)
+    monkeypatch.setattr(rfq_execution.GLTGClient, "simulate", simulate)
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_tenant_propagation",
+            "message_id": "supplier_reply_tenant_propagation_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured == {
+        "estimate_tenant": expected_tenant,
+        "simulate_tenant": expected_tenant,
+    }
+
+
 def test_gpm_unavailable_is_visible_and_creates_no_customer_approval_draft(
     api_client, monkeypatch
 ):
@@ -547,6 +591,75 @@ def test_supplier_reply_gltg_summary_failure_is_structured_and_creates_no_draft(
     assert "GLTG" in payload["user_control_message"]
     drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
     assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+
+
+def test_supplier_reply_gltg_failure_supersedes_stale_quote_and_selection(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+    from aivan.integrations.gltg import GLTGUnavailableError
+
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    first_reply = {
+        "source": "openclaw",
+        "channel": "wechat",
+        "conversation_id": "supplier_reply_before_gltg_failure",
+        "message_id": "supplier_reply_before_gltg_failure_001",
+        "sender_id": "supplier_001",
+        "sender_display_name": "Guangzhou Trendy Garment",
+        "project_id": created["project_id"],
+        "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }
+    first = api_client.post("/api/openclaw/events", json=first_reply)
+    assert first.status_code == 200, first.text
+    assert first.json()["action"] == "buyer_options_ready"
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["selected_option"] is not None
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    old_quote = next(
+        draft
+        for draft in drafts
+        if draft["draft_type"] == "customer_quote_email"
+        and draft["status"] == "pending_approval"
+    )
+    assert old_quote
+    assert any(
+        draft["draft_type"] == "customer_quote_email"
+        and draft["status"] == "pending_approval"
+        for draft in drafts
+    )
+
+    def unavailable(*args, **kwargs):
+        raise GLTGUnavailableError("GLTG_EVIDENCE_NOT_FOUND")
+
+    monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", unavailable)
+    second_reply = dict(first_reply)
+    second_reply["message_id"] = "supplier_reply_before_gltg_failure_002"
+    second_reply["message_text"] = "Updated quote USD 4.20/pc, lead time 34 days."
+    failed = api_client.post("/api/openclaw/events", json=second_reply)
+
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["action"] == "pending_dependency_recovery"
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["selected_option"] is None
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    old_quote = next(
+        draft for draft in drafts if draft["draft_id"] == old_quote["draft_id"]
+    )
+    assert old_quote["status"] == "superseded"
+    assert not [
+        draft
+        for draft in drafts
+        if draft["draft_type"] == "customer_quote_email"
+        and draft["status"] == "pending_approval"
+    ]
+    approval = api_client.post(
+        f"/api/projects/{created['project_id']}/drafts/{old_quote['draft_id']}/approve"
+    )
+    if approval.status_code == 200:
+        assert approval.json().get("status") != "approved"
 
 
 def test_customer_personal_im_without_actor_requires_owner_resolution(api_client):
