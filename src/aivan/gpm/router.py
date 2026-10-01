@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
+import re
 import uuid
 from typing import Optional
 
@@ -12,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from aivan.gpm.auth import require_auth
+from aivan.gpm.giraffe_db_client import GPM_PACKET_API_VERSION
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
 from aivan.gpm.record_id import validation_error as record_id_validation_error
@@ -23,6 +26,7 @@ router = APIRouter()
 # Module-level singletons; replaced in tests via _reset_store().
 _packet_store: GPMPacketStore = GPMPacketStore(db_client=None)
 _db_client = None
+_SAFE_REQUEST_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$")
 
 
 def _reset_store(store: GPMPacketStore) -> None:
@@ -53,17 +57,11 @@ async def require_gpm_tenant(request: Request) -> str:
     """Authenticate a tenant and prohibit production in-memory degradation."""
 
     tenant_id = await require_auth(request)
-    if (
-        os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
-        and not _packet_store.is_durable
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "GPM_PERSISTENCE_UNAVAILABLE",
-                "message": "production GPM requires durable giraffe-db persistence",
-            },
-        )
+    correlation_id = request.headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    _packet_store.ensure_tenant_ready(
+        tenant_id,
+        correlation_id=correlation_id,
+    )
     return tenant_id
 
 
@@ -85,6 +83,7 @@ class ApprovalRequest(BaseModel):
 @router.post("/quote-guidance", status_code=201, response_model=None)
 async def create_quote_guidance(
     body: QuoteGuidanceRequest,
+    request: Request = None,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict | JSONResponse:
     """Analyse a supplier quote and persist the resulting decision packet."""
@@ -108,7 +107,33 @@ async def create_quote_guidance(
             quantity=body.quantity,
         )
 
-    packet_id = f"gpm_pkt_{uuid.uuid4().hex[:16]}"
+    headers = request.headers if request is not None else {}
+    idempotency_key = headers.get("Idempotency-Key", "").strip()
+    correlation_id = headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        if not idempotency_key:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "GPM_IDEMPOTENCY_KEY_REQUIRED"},
+            )
+        if not _SAFE_REQUEST_TOKEN.fullmatch(idempotency_key):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "GPM_IDEMPOTENCY_KEY_INVALID"},
+            )
+    if correlation_id and not _SAFE_REQUEST_TOKEN.fullmatch(correlation_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "GPM_CORRELATION_ID_INVALID"},
+        )
+
+    if idempotency_key:
+        packet_identity = hashlib.sha256(
+            f"{tenant_id}:{idempotency_key}".encode("utf-8")
+        ).hexdigest()[:16]
+        packet_id = f"gpm_pkt_{packet_identity}"
+    else:
+        packet_id = f"gpm_pkt_{uuid.uuid4().hex[:16]}"
 
     packet: dict = {
         "packet_id": packet_id,
@@ -129,7 +154,11 @@ async def create_quote_guidance(
         "notes": body.notes,
     }
 
-    persisted = _packet_store.save(packet)
+    persisted = _packet_store.save(
+        packet,
+        idempotency_key=idempotency_key or None,
+        correlation_id=correlation_id,
+    )
     return persisted
 
 
@@ -155,6 +184,11 @@ async def approve_packet(
     body: ApprovalRequest,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "GPM_DECISION_PATH_DISABLED"},
+        )
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
@@ -188,6 +222,11 @@ async def reject_packet(
     body: ApprovalRequest,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "GPM_DECISION_PATH_DISABLED"},
+        )
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
@@ -266,14 +305,16 @@ async def capabilities() -> dict:
         "version": "0.3.0",
         "features": {
             "quote_guidance": True,
-            "approval_workflow": True,
-            "rejection_workflow": True,
+            "approval_workflow": False,
+            "rejection_workflow": False,
+            "stage1_advisory_only": True,
             "durable_packet_persistence": _packet_store.is_durable,
-            "approval_audit_trail": _packet_store.is_durable,
+            "approval_audit_trail": False,
         },
         "persistence": {
             "mode": "giraffe_db" if _packet_store.is_durable else "in_memory_only",
             "restart_safe": _packet_store.is_durable,
+            "expected_api_version": GPM_PACKET_API_VERSION,
         },
         "auth": {
             "mode": auth_mode,

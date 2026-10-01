@@ -1,23 +1,14 @@
-"""GPMPacketStore — local cache/fallback backed by giraffe-db.
+"""Tenant-scoped GPM packet persistence with provider readback proof."""
 
-Behaviour:
-- save(): write giraffe-db first; cache only outside production
-- get(): local memory hit or durable lookup; cache only outside production
-- update_status(): write giraffe-db; sync memory only outside production
-- write_audit(): giraffe-db only (no cache); failure -> False, no raise
-- list_by_tenant(): giraffe-db preferred; on failure memory fallback (tenant-filtered)
-
-Tenant isolation applies in all paths: in-memory fallback never leaks
-another tenant's packets.
-"""
 from __future__ import annotations
 
 import logging
 import os
 from typing import Optional
 
-from aivan.gpm.giraffe_db_client import GiraffeDBClient, GiraffeDBClientError
 from fastapi import HTTPException
+
+from aivan.gpm.giraffe_db_client import GiraffeDBClient, GiraffeDBClientError
 
 logger = logging.getLogger(__name__)
 
@@ -37,69 +28,192 @@ def _raise_production_unavailable(exc: Exception | None = None) -> None:
         ) from exc
 
 
+def _raise_outcome_unknown(packet_id: str, exc: Exception | None = None) -> None:
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "error": "GPM_PERSISTENCE_OUTCOME_UNKNOWN",
+            "packet_id": packet_id,
+        },
+    ) from exc
+
+
+def _packet_matches(expected: dict, actual: dict | None) -> bool:
+    if actual is None:
+        return False
+    return all(actual.get(key) == value for key, value in expected.items())
+
+
 class GPMPacketStore:
     def __init__(self, db_client: Optional[GiraffeDBClient] = None) -> None:
         self._mem: dict[str, dict] = {}
         self._db = db_client
-        self._durable = False
+        self._verified_tenants: set[str] = set()
 
-        if self._db is not None:
-            try:
-                self._db.check_schema_version()
-                self._durable = True
-                logger.info("GPMPacketStore: giraffe-db available — durable mode")
-            except Exception as exc:
-                logger.warning(
-                    "GPMPacketStore: giraffe-db unavailable exception_type=%s — "
-                    "local in-memory fallback; packets will not survive restart",
-                    type(exc).__name__,
-                )
-        else:
+        if self._db is None:
             logger.warning(
                 "GPMPacketStore: no db_client — in-memory only. "
                 "Set GIRAFFE_DB_BASE_URL to enable persistence."
             )
 
-    # ── public API ─────────────────────────────────────────────────────────
+    def ensure_tenant_ready(
+        self,
+        tenant_id: str,
+        *,
+        correlation_id: str | None = None,
+    ) -> bool:
+        if tenant_id in self._verified_tenants:
+            return True
+        if self._db is None:
+            _raise_production_unavailable()
+            return False
+        try:
+            self._db.check_schema_version(
+                tenant_id=tenant_id,
+                correlation_id=correlation_id,
+            )
+            self._db.check_packet_capabilities(
+                tenant_id,
+                correlation_id=correlation_id,
+            )
+        except GiraffeDBClientError as exc:
+            _raise_production_unavailable(exc)
+            logger.warning(
+                "GPMPacketStore: provider probe failed error_code=%s",
+                exc.error_code,
+            )
+            return False
+        self._verified_tenants.add(tenant_id)
+        return True
 
     def _remember(self, packet_id: str, packet: dict) -> None:
-        """Cache only outside production to avoid a redundant unbounded copy."""
-
         if not _is_production():
             self._mem[packet_id] = packet
 
-    def save(self, packet: dict) -> dict:
-        pid = packet["packet_id"]
-        if self._durable:
+    def _readback(
+        self,
+        packet: dict,
+        *,
+        correlation_id: str | None,
+    ) -> dict | None:
+        assert self._db is not None
+        return self._db.get_packet(
+            packet["packet_id"],
+            tenant_id=packet["tenant_id"],
+            correlation_id=correlation_id,
+        )
+
+    def save(
+        self,
+        packet: dict,
+        *,
+        idempotency_key: str | None = None,
+        correlation_id: str | None = None,
+    ) -> dict:
+        packet_id = packet["packet_id"]
+        tenant_id = packet.get("tenant_id")
+        if not isinstance(tenant_id, str) or not tenant_id:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "GPM_PACKET_TENANT_REQUIRED"},
+            )
+
+        if self.ensure_tenant_ready(
+            tenant_id,
+            correlation_id=correlation_id,
+        ):
             assert self._db is not None
+            create_error: GiraffeDBClientError | None = None
+            created: dict | None = None
             try:
-                saved = self._db.create_packet(packet, tenant_id=packet.get("tenant_id"))
-                self._remember(pid, saved)
-                return saved
+                created = self._db.create_packet(
+                    packet,
+                    tenant_id=tenant_id,
+                    idempotency_key=idempotency_key,
+                    correlation_id=correlation_id,
+                )
             except GiraffeDBClientError as exc:
-                _raise_production_unavailable(exc)
-                logger.warning("GPMPacketStore.save: giraffe-db write failed — memory only")
+                create_error = exc
+
+            try:
+                readback = self._readback(
+                    packet,
+                    correlation_id=correlation_id,
+                )
+            except GiraffeDBClientError as exc:
+                if _is_production():
+                    _raise_outcome_unknown(packet_id, exc)
+                logger.warning(
+                    "GPMPacketStore.save: provider readback failed error_code=%s",
+                    exc.error_code,
+                )
+                readback = None
+
+            if _packet_matches(packet, readback):
+                assert readback is not None
+                self._remember(packet_id, readback)
+                return readback
+
+            if create_error is not None and create_error.status_code == 409:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "GPM_IDEMPOTENCY_CONFLICT",
+                        "packet_id": packet_id,
+                    },
+                ) from create_error
+
+            if _is_production() and (created is not None or create_error is not None):
+                if create_error is None or create_error.status_code is None:
+                    _raise_outcome_unknown(packet_id, create_error)
+                _raise_production_unavailable(create_error)
+
+            if create_error is not None:
+                logger.warning(
+                    "GPMPacketStore.save: provider write failed error_code=%s; "
+                    "using development memory fallback",
+                    create_error.error_code,
+                )
+
         _raise_production_unavailable()
-        self._mem[pid] = packet
+        self._mem[packet_id] = packet
         return packet
 
-    def get(self, packet_id: str, tenant_id: str | None = None) -> Optional[dict]:
+    def get(
+        self,
+        packet_id: str,
+        tenant_id: str | None = None,
+        *,
+        correlation_id: str | None = None,
+    ) -> Optional[dict]:
         cached = None if _is_production() else self._mem.get(packet_id)
         if cached is not None:
-            # Enforce tenant isolation in memory — never return another tenant's packet.
             if tenant_id is not None and cached.get("tenant_id") != tenant_id:
                 return None
             return cached
-        if self._durable:
+        effective_tenant = tenant_id
+        if effective_tenant is None and not _is_production():
+            effective_tenant = os.environ.get("AIVAN_TENANT_ID", "").strip() or "default"
+        if effective_tenant and self.ensure_tenant_ready(
+            effective_tenant,
+            correlation_id=correlation_id,
+        ):
             assert self._db is not None
             try:
-                row = self._db.get_packet(packet_id, tenant_id=tenant_id)
+                row = self._db.get_packet(
+                    packet_id,
+                    tenant_id=effective_tenant,
+                    correlation_id=correlation_id,
+                )
                 if row:
                     self._remember(packet_id, row)
                 return row
             except GiraffeDBClientError as exc:
                 _raise_production_unavailable(exc)
-                logger.warning("GPMPacketStore.get: giraffe-db read failed")
+                logger.warning(
+                    "GPMPacketStore.get: provider read failed error_code=%s",
+                    exc.error_code,
+                )
         _raise_production_unavailable()
         return None
 
@@ -110,30 +224,48 @@ class GPMPacketStore:
         operator_id: str,
         notes: Optional[str] = None,
         tenant_id: str | None = None,
+        *,
+        correlation_id: str | None = None,
     ) -> Optional[dict]:
-        if self._durable:
+        effective_tenant = tenant_id
+        if effective_tenant is None and not _is_production():
+            effective_tenant = os.environ.get("AIVAN_TENANT_ID", "").strip() or "default"
+        if effective_tenant and self.ensure_tenant_ready(
+            effective_tenant,
+            correlation_id=correlation_id,
+        ):
             assert self._db is not None
             try:
                 updated = self._db.update_packet_status(
-                    packet_id, approval_status, operator_id, notes, tenant_id=tenant_id
+                    packet_id,
+                    approval_status,
+                    operator_id,
+                    notes,
+                    tenant_id=effective_tenant,
+                    correlation_id=correlation_id,
                 )
                 self._remember(packet_id, updated)
                 return updated
             except GiraffeDBClientError as exc:
                 _raise_production_unavailable(exc)
-                logger.warning("GPMPacketStore.update_status: giraffe-db failed — memory only")
+                logger.warning(
+                    "GPMPacketStore.update_status: provider failed error_code=%s",
+                    exc.error_code,
+                )
 
         _raise_production_unavailable()
         if packet_id in self._mem:
             packet = self._mem[packet_id]
             if tenant_id is not None and packet.get("tenant_id") != tenant_id:
                 return None
-            self._mem[packet_id].update({
-                "approval_status": approval_status,
-                "operator_id": operator_id,
-                **(({"notes": notes}) if notes else {}),
-            })
-            return self._mem[packet_id]
+            packet.update(
+                {
+                    "approval_status": approval_status,
+                    "operator_id": operator_id,
+                    **({"notes": notes} if notes else {}),
+                }
+            )
+            return packet
         return None
 
     def write_audit(
@@ -143,16 +275,30 @@ class GPMPacketStore:
         action: str,
         notes: Optional[str] = None,
         tenant_id: str = "default",
+        *,
+        correlation_id: str | None = None,
     ) -> bool:
-        """Write audit record to giraffe-db only. Returns False on failure without raising."""
-        if self._durable:
+        if self.ensure_tenant_ready(
+            tenant_id,
+            correlation_id=correlation_id,
+        ):
             assert self._db is not None
             try:
-                self._db.create_audit_record(packet_id, operator_id, action, notes, tenant_id)
+                self._db.create_audit_record(
+                    packet_id,
+                    operator_id,
+                    action,
+                    notes,
+                    tenant_id,
+                    correlation_id=correlation_id,
+                )
                 return True
             except GiraffeDBClientError as exc:
                 _raise_production_unavailable(exc)
-                logger.warning("GPMPacketStore.write_audit: failed")
+                logger.warning(
+                    "GPMPacketStore.write_audit: provider failed error_code=%s",
+                    exc.error_code,
+                )
         _raise_production_unavailable()
         return False
 
@@ -160,21 +306,34 @@ class GPMPacketStore:
         self,
         tenant_id: str = "default",
         status: Optional[str] = None,
+        *,
+        correlation_id: str | None = None,
     ) -> list[dict]:
-        if self._durable:
+        if self.ensure_tenant_ready(
+            tenant_id,
+            correlation_id=correlation_id,
+        ):
             assert self._db is not None
             try:
-                return self._db.list_packets(tenant_id=tenant_id, status=status)
+                return self._db.list_packets(
+                    tenant_id=tenant_id,
+                    status=status,
+                    correlation_id=correlation_id,
+                )
             except GiraffeDBClientError as exc:
                 _raise_production_unavailable(exc)
-                logger.warning("GPMPacketStore.list_by_tenant: giraffe-db failed — memory fallback")
+                logger.warning(
+                    "GPMPacketStore.list_by_tenant: provider failed error_code=%s",
+                    exc.error_code,
+                )
         _raise_production_unavailable()
         return [
-            p for p in self._mem.values()
-            if p.get("tenant_id") == tenant_id
-            and (status is None or p.get("approval_status") == status)
+            packet
+            for packet in self._mem.values()
+            if packet.get("tenant_id") == tenant_id
+            and (status is None or packet.get("approval_status") == status)
         ]
 
     @property
     def is_durable(self) -> bool:
-        return self._durable
+        return bool(self._verified_tenants)

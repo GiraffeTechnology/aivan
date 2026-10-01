@@ -6,7 +6,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from aivan.gpm.giraffe_db_client import GiraffeDBClient
+from aivan.gpm.giraffe_db_client import GiraffeDBClient, GiraffeDBClientError
 
 
 def _mock_response(json_body: dict, status: int = 200) -> httpx.Response:
@@ -86,11 +86,10 @@ class TestServiceHeaders:
         assert headers["X-Service-Tenant-ID"] == "acme"
         assert "X-Service-Auth" not in headers
 
-    def test_tenant_header_absent_when_no_tenant_id(self, client_with_secret: GiraffeDBClient) -> None:
-        resp_body = {"packet_id": "p1", "tenant_id": "acme"}
-        with patch.object(client_with_secret._session, "get", return_value=_mock_response(resp_body)) as mock:
+    def test_packet_read_rejects_missing_tenant_context(
+        self, client_with_secret: GiraffeDBClient
+    ) -> None:
+        with pytest.raises(GiraffeDBClientError) as exc_info:
             client_with_secret.get_packet("p1", tenant_id=None)
-        headers = mock.call_args[1]["headers"]
-        assert "X-Service-Tenant-ID" not in headers
-        # Auth still set (service identity even without tenant scope)
-        assert headers["X-Service-Auth"] == "test-svc-secret"
+
+        assert exc_info.value.error_code == "GPM_DB_TENANT_REQUIRED"

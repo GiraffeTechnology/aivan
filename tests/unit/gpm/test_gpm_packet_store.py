@@ -22,6 +22,15 @@ SAMPLE = {
 def mock_db():
     db = MagicMock()
     db.check_schema_version.return_value = {"schema_version": "0.1.0"}
+    db.check_packet_capabilities.return_value = {
+        "api_version": "gpm.packet-persistence.v1",
+        "capabilities": {
+            "create_packet": True,
+            "read_packet": True,
+            "idempotent_create": True,
+        },
+    }
+    db.get_packet.return_value = SAMPLE
     return db
 
 
@@ -47,6 +56,7 @@ def test_save_persists_to_db_and_memory(store, mock_db):
 # 2. save() → giraffe-db failure → memory fallback, no crash
 def test_save_degrades_to_memory_on_db_failure(store, mock_db):
     mock_db.create_packet.side_effect = GiraffeDBClientError("conn refused", 503)
+    mock_db.get_packet.return_value = None
     result = store.save(SAMPLE)
     assert result["packet_id"] == "gpm_pkt_test001"
     assert "gpm_pkt_test001" in store._mem
@@ -139,6 +149,7 @@ def test_production_db_failure_never_degrades_to_memory(monkeypatch, mock_db, op
 
     if operation == "save":
         mock_db.create_packet.side_effect = GiraffeDBClientError("err", 503)
+        mock_db.get_packet.return_value = None
         call = lambda: store.save(SAMPLE)
     elif operation == "get":
         mock_db.get_packet.side_effect = GiraffeDBClientError("err", 503)
