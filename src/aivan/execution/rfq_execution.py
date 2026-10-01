@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import hashlib
 
 from sqlalchemy.orm import Session
 
@@ -17,10 +16,7 @@ from aivan.db.repositories.domain_repo import CaseDomainRepository
 from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
 from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
-from aivan.integrations.gpm_guidance_client import (
-    GPMGuidanceClient,
-    GPMGuidanceUnavailableError,
-)
+from aivan.integrations.gpm_guidance_client import GPMGuidanceUnavailableError
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.policy import ExternalModelApiRequiresApprovalError, LocalModelUnavailableError
@@ -33,7 +29,6 @@ from aivan.rfq.dependency_policy import classify_exception
 from aivan.rfq.operator_reply import render_operator_reply
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.contracts import OpenClawEvent
-from aivan.openclaw.event_adapter import is_supplier_reply
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
 from aivan.schemas.rfq import (
@@ -45,13 +40,23 @@ from aivan.schemas.rfq import (
     RFQStrategy,
     SupplierRoutingDecision,
 )
-from aivan.utils.env import env_bool
+from aivan.execution.event_interpretation import (
+    classify_event as _classify_event,
+    interpret_strategy as _interpret_strategy,
+)
+from aivan.execution.gpm_guidance import (
+    create_stage1_gpm_guidance as _create_stage1_gpm_guidance,
+)
 from aivan.execution.rfq_user_control import (
     _should_use_chinese_user_message,
     build_user_control_message as _build_user_control_message,
     draft_supplier_email as _draft_supplier_email,
     owner_user_id_for_event as _owner_user_id_for_event,
     send_user_control_notification as _send_user_control_notification,
+)
+from aivan.execution.supplier_routing import (
+    create_supplier_email_drafts as _create_supplier_email_drafts,
+    select_suppliers as _select_suppliers,
 )
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.domain.roles import (
@@ -66,71 +71,6 @@ from aivan.domain.roles import (
 logger = logging.getLogger(__name__)
 
 
-def _create_stage1_gpm_guidance(
-    *,
-    project,
-    event: OpenClawEvent,
-    requirement: BuyerRequirement,
-    selected_option,
-    replies: list[SupplierReply],
-) -> dict:
-    """Create one advisory GPM packet for the selected Stage 1 option.
-
-    This does not approve, reject, or dispatch anything. The existing Aivan
-    human-approval step remains the sole outbound authorization boundary.
-    """
-
-    selected_reply = next(
-        (
-            item
-            for item in replies
-            if (selected_option.supplier_id and item.supplier_id == selected_option.supplier_id)
-            or (
-                selected_option.candidate_id
-                and item.candidate_id == selected_option.candidate_id
-            )
-        ),
-        None,
-    )
-    if selected_reply is None and len(replies) == 1:
-        # A single authenticated supplier reply is unambiguous even when an
-        # older BuyerOption record predates supplier/candidate identity fields.
-        selected_reply = replies[0]
-    if selected_reply is None or selected_reply.unit_price is None:
-        raise GPMGuidanceUnavailableError("GPM_SOURCE_QUOTE_MISSING")
-    tenant_id = project.tenant_id or event.tenant_id or "legacy"
-    trace_seed = event.source_trace_id or event.message_id or project.project_id
-    trace_id = event.source_trace_id or (
-        "trace_" + hashlib.sha256(trace_seed.encode("utf-8")).hexdigest()[:24]
-    )
-    idempotency_material = (
-        f"{tenant_id}:{project.project_id}:{event.message_id}:"
-        f"{selected_option.option_id}:gpm-guidance"
-    )
-    idempotency_key = (
-        "gpm_" + hashlib.sha256(idempotency_material.encode("utf-8")).hexdigest()[:32]
-    )
-    packet = GPMGuidanceClient().create_guidance(
-        tenant_id=tenant_id,
-        trace_id=trace_id,
-        idempotency_key=idempotency_key,
-        sku=(requirement.product_type or requirement.category or "apparel"),
-        supplier_id=selected_reply.supplier_id or None,
-        supplier_quote=float(selected_reply.unit_price),
-        currency=selected_reply.currency or "USD",
-        quantity=requirement.quantity,
-        notes=f"case={project.project_id};option={selected_option.option_id}",
-    )
-    return {
-        "packet_id": packet["packet_id"],
-        "recommendation": packet["recommendation"],
-        "confidence": packet["confidence"],
-        "human_approval_required": True,
-        "approval_status": "pending",
-        "dispatched": False,
-    }
-
-
 def _invalidate_stale_customer_quote_state(project_id: str, db: Session) -> None:
     """Invalidate an older recommendation without deleting its audit history."""
 
@@ -138,103 +78,12 @@ def _invalidate_stale_customer_quote_state(project_id: str, db: Session) -> None
     DraftRepository(db).supersede_customer_quote_drafts(project_id)
 
 
-CLASSIFICATION_SYSTEM = """
-You classify AIVAN private-domain trade events. Return JSON only.
-Allowed event_type values: user_command, customer_new_inquiry, customer_followup,
-customer_reply, supplier_reply, internal_status_request, approval_response, unknown.
-Do not attach an event to a project unless AIVAN-provided state validates it.
-"""
-
-STRATEGY_SYSTEM = """
-You translate user trade strategy into structured JSON. Use only the user's
-instruction and AIVAN-provided context. Do not invent suppliers, history, prices,
-lead times, risk facts, or compliance decisions.
-"""
-
 def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
-    project_repo = ProjectRepository(db)
-    validated_project_id = (
-        event.project_id
-        if event.project_id and project_repo.get(event.project_id, tenant_id=event.tenant_id)
-        else None
-    )
-    if not validated_project_id and event.conversation_id:
-        project = project_repo.get_by_conversation(
-            event.conversation_id, tenant_id=event.tenant_id
-        )
-        if project:
-            validated_project_id = project.project_id
-    if not validated_project_id and event.conversation_id:
-        bound_case_id = CaseDomainRepository(db).resolve_case_id_for_conversation(
-            tenant_id=event.tenant_id or "legacy",
-            external_conversation_id=event.conversation_id,
-            channel=event.channel,
-            channel_account_id=event.channel_account_id,
-        )
-        if bound_case_id and project_repo.get(
-            bound_case_id, tenant_id=event.tenant_id or "legacy"
-        ):
-            validated_project_id = bound_case_id
-
-    # Deterministic-by-default: do not send raw (possibly non-English) event text
-    # to the classification LLM unless explicitly enabled. The deterministic
-    # fallback classifies by role/keyword only — it never canonicalizes business
-    # facts — so this is safe under the P0 language boundary.
-    fallback = _fallback_event_type(event, bool(validated_project_id))
-    if fallback != "unknown" and not env_bool("AIVAN_EVENT_CLASSIFICATION_LLM_ENABLED"):
-        return EventClassification(
-            event_type=fallback,
-            confidence=0.7,
-            reason="deterministic fallback classification",
-            project_id=validated_project_id,
-            validated_project_attachment=bool(validated_project_id),
-        )
-
-    schema_hint = {
-        "event_type": "user_command | customer_new_inquiry | customer_followup | customer_reply | supplier_reply | internal_status_request | approval_response | unknown",
-        "confidence": 0.0,
-        "reason": "",
-    }
-    user_prompt = (
-        f"channel={event.channel}\nrole_context={event.role_context}\n"
-        f"mode={event.mode}\nmessage={event.message_text}\n"
-        f"validated_project_id={validated_project_id or ''}"
-    )
-    try:
-        raw = llm_complete_json("aivan_event_classification", CLASSIFICATION_SYSTEM, user_prompt, schema_hint)
-    except Exception:
-        raw = {}
-    event_type = raw.get("event_type") if raw.get("event_type") in EventClassification.model_fields["event_type"].annotation.__args__ else fallback
-    return EventClassification(
-        event_type=event_type or fallback,
-        confidence=float(raw.get("confidence") or (0.7 if fallback != "unknown" else 0.3)),
-        reason=raw.get("reason") or "deterministic fallback classification",
-        project_id=validated_project_id,
-        validated_project_attachment=bool(validated_project_id),
-    )
+    return _classify_event(event, db, complete_json=llm_complete_json)
 
 
 def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> RFQStrategy:
-    # Deterministic-by-default: do not send raw instruction text to the strategy
-    # LLM unless explicitly enabled. The keyword-based fallback is deterministic.
-    if not env_bool("AIVAN_STRATEGY_LLM_ENABLED"):
-        return _fallback_strategy(raw_text)
-
-    schema_hint = RFQStrategy().model_dump()
-    user_prompt = f"User instruction:\n{raw_text}\n\nAIVAN context keys: {list((context or GiraffeContext()).model_dump().keys())}"
-    try:
-        raw = llm_complete_json("aivan_strategy_interpretation", STRATEGY_SYSTEM, user_prompt, schema_hint)
-    except Exception:
-        raw = {}
-    if not isinstance(raw, dict):
-        raw = {}
-    strategy_keys = set(RFQStrategy.model_fields)
-    if not (set(raw) & strategy_keys):
-        return _fallback_strategy(raw_text)
-    try:
-        return RFQStrategy(**raw)
-    except Exception:
-        return _fallback_strategy(raw_text)
+    return _interpret_strategy(raw_text, context, complete_json=llm_complete_json)
 
 
 def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
@@ -688,45 +537,6 @@ def _dependency_recovery_result(project, event, classification, requirement, exc
     )
 
 
-def _fallback_event_type(event: OpenClawEvent, has_project: bool) -> str:
-    text = (event.message_text or "").lower()
-    role = (event.business_role or event.role_context or "").lower()
-    if is_supplier_reply(event):
-        return "supplier_reply"
-    if any(word in text for word in ["approve", "approved", "同意", "批准", "发送", "send it"]):
-        return "approval_response"
-    if any(word in text for word in ["status", "进度", "状态"]):
-        return "internal_status_request"
-    if role in {"user", "owner", "operator", "sales", "salesperson", "procurement", "follow_up", "qc", "logistics", "admin", "approver"} or event.mode in {"user", "command"}:
-        return "user_command"
-    if role in {"buyer", "customer", "b_side"}:
-        return "customer_followup" if has_project else "customer_new_inquiry"
-    if event.channel in {"wechat", "line", "whatsapp", "im", "openclaw-im"}:
-        return "user_command"
-    return "customer_followup" if has_project else "customer_new_inquiry"
-
-
-def _fallback_strategy(raw_text: str) -> RFQStrategy:
-    text = (raw_text or "").lower()
-    urgent = any(token in text for token in ["urgent", "asap", "急", "很急", "赶"])
-    known = any(token in text for token in ["known", "familiar", "old supplier", "老供应商", "熟悉供应商", "靠谱"])
-    cheap = any(token in text for token in ["cheap", "price", "价格", "便宜", "别太离谱"])
-    quality = any(token in text for token in ["quality", "reliable", "质量", "靠谱", "可靠"])
-    return RFQStrategy(
-        priority="speed" if urgent else "price" if cheap and not urgent else "balanced",
-        supplier_scope="known_suppliers_first" if known else "known_suppliers_only",
-        public_bidding="fallback_only" if known else "disabled",
-        lead_time_confidence="P80" if urgent else "P50",
-        price_sensitivity="medium" if cheap else "low",
-        quality_sensitivity="high" if quality else "medium",
-        fallback_trigger=FallbackTrigger(
-            min_valid_supplier_replies=2,
-            max_wait_hours=24 if urgent else 48,
-            lead_time_risk_threshold="medium",
-        ),
-    )
-
-
 def _get_or_create_project(event: OpenClawEvent, classification: EventClassification, db: Session):
     repo = ProjectRepository(db)
     project_id = classification.project_id or event.project_id or get_project_id(event.conversation_id)
@@ -777,72 +587,6 @@ def _load_requirement(payload: dict | None) -> BuyerRequirement | None:
         return BuyerRequirement(**{k: v for k, v in payload.items() if k in BuyerRequirement.model_fields})
     except Exception:
         return None
-
-
-def _select_suppliers(giraffe: GiraffeContext, strategy: RFQStrategy) -> SupplierRoutingDecision:
-    suppliers = sorted(
-        giraffe.suppliers,
-        key=lambda s: (
-            s.get("past_performance_score", 0),
-            s.get("delivery_score", 0),
-            s.get("quality_score", 0),
-        ),
-        reverse=True,
-    )
-    selected = [s["supplier_id"] for s in suppliers if s.get("email")][:5]
-    skipped = [s["supplier_id"] for s in suppliers if not s.get("email")]
-    return SupplierRoutingDecision(
-        selected_supplier_ids=selected,
-        skipped_supplier_ids=skipped,
-        public_bidding_mode=strategy.public_bidding,
-        rationale=(
-            "Known suppliers selected first from Giraffe DB context; public bidding is "
-            f"{strategy.public_bidding} per strategy."
-        ),
-    )
-
-
-def _create_supplier_email_drafts(
-    project_id: str,
-    event: OpenClawEvent,
-    requirement: BuyerRequirement,
-    strategy: RFQStrategy,
-    giraffe: GiraffeContext,
-    gltg,
-    routing: SupplierRoutingDecision,
-    db: Session,
-) -> list[str]:
-    repo = DraftRepository(db)
-    suppliers_by_id = {supplier["supplier_id"]: supplier for supplier in giraffe.suppliers}
-    draft_ids = []
-    for supplier_id in routing.selected_supplier_ids:
-        supplier = suppliers_by_id[supplier_id]
-        message_text = _draft_supplier_email(requirement, strategy, supplier, gltg)
-        draft = repo.create(
-            project_id,
-            {
-                "tenant_id": event.tenant_id or "legacy",
-                "conversation_id": event.conversation_id,
-                "channel": "email",
-                "target_peer_id": supplier.get("email", ""),
-                "target_role": "supplier",
-                "message_text": message_text,
-                "message_type": "text",
-                "attachments_json": [],
-                "status": "pending_approval",
-                "created_by_agent": "aivan_rfq_execution",
-                "notes": f"draft_type=supplier_inquiry_email Known supplier: {supplier.get('name', supplier_id)}",
-            },
-        )
-        draft_ids.append(draft.draft_id)
-        ExecutionEventRepository(db).append(
-            project_id,
-            "PENDING_EMAIL_DRAFT_CREATED",
-            f"Supplier inquiry email draft created for {supplier.get('name', supplier_id)}",
-            payload={"draft_id": draft.draft_id, "supplier_id": supplier_id},
-            actor="aivan_rfq_execution",
-        )
-    return draft_ids
 
 
 def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session, *, tenant_id: str = "legacy") -> None:
