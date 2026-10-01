@@ -170,27 +170,26 @@ set `AIVAN_EMAIL_SEND_MODE=real_test` and `AIVAN_EMAIL_GATEWAY=openclaw_real_tes
 The real-test transport only sends approved drafts, requires
 `AIVAN_EMAIL_ALLOWED_RECIPIENTS`, and preserves the human approval gate.
 
-The CTYUN 163 mailbox configuration uses `giraffetechnology@163.com` with SMTP
-SSL on `smtp.163.com:465` and POP3 SSL on `pop.163.com:995`. 163 requires a
-client authorization code for `AIVAN_SMTP_PASSWORD` / `AIVAN_POP3_PASSWORD`; the
-web login password is not accepted for POP3/SMTP client access.
+Provider-specific mailbox identities, hosts, ports, and authorization codes are
+private deployment inputs. Inject them through the approved runtime secret store;
+do not commit them to source control or copy them into CI logs or evidence files.
 
 ```bash
 AIVAN_EMAIL_SEND_MODE=real_test
 AIVAN_EMAIL_GATEWAY=openclaw_real_test
-AIVAN_EMAIL_ALLOWED_RECIPIENTS=mich@giraffe.technology
-AIVAN_PRESET_MAILBOX=giraffetechnology@163.com
-AIVAN_SMTP_HOST=smtp.163.com
-AIVAN_SMTP_PORT=465
+AIVAN_EMAIL_ALLOWED_RECIPIENTS=<approved-recipient@example.com>
+AIVAN_PRESET_MAILBOX=<approved-sender@example.com>
+AIVAN_SMTP_HOST=<approved-smtp-host>
+AIVAN_SMTP_PORT=<approved-smtp-port>
 AIVAN_SMTP_USE_SSL=true
 AIVAN_SMTP_USE_TLS=false
-AIVAN_SMTP_USERNAME=giraffetechnology@163.com
-AIVAN_SMTP_PASSWORD=<163-client-authorization-code>
-AIVAN_POP3_HOST=pop.163.com
-AIVAN_POP3_PORT=995
+AIVAN_SMTP_USERNAME=<approved-smtp-user>
+AIVAN_SMTP_PASSWORD=<secret-store-reference>
+AIVAN_POP3_HOST=<approved-pop3-host>
+AIVAN_POP3_PORT=<approved-pop3-port>
 AIVAN_POP3_USE_SSL=true
-AIVAN_POP3_USERNAME=giraffetechnology@163.com
-AIVAN_POP3_PASSWORD=<163-client-authorization-code>
+AIVAN_POP3_USERNAME=<approved-pop3-user>
+AIVAN_POP3_PASSWORD=<secret-store-reference>
 ```
 
 ---

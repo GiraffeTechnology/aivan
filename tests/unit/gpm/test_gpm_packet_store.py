@@ -22,6 +22,15 @@ SAMPLE = {
 def mock_db():
     db = MagicMock()
     db.check_schema_version.return_value = {"schema_version": "0.1.0"}
+    db.check_packet_capabilities.return_value = {
+        "api_version": "gpm.packet-persistence.v1",
+        "capabilities": {
+            "create_packet": True,
+            "read_packet": True,
+            "idempotent_create": True,
+        },
+    }
+    db.get_packet.return_value = SAMPLE
     return db
 
 
@@ -47,6 +56,7 @@ def test_save_persists_to_db_and_memory(store, mock_db):
 # 2. save() → giraffe-db failure → memory fallback, no crash
 def test_save_degrades_to_memory_on_db_failure(store, mock_db):
     mock_db.create_packet.side_effect = GiraffeDBClientError("conn refused", 503)
+    mock_db.get_packet.return_value = None
     result = store.save(SAMPLE)
     assert result["packet_id"] == "gpm_pkt_test001"
     assert "gpm_pkt_test001" in store._mem
@@ -139,6 +149,7 @@ def test_production_db_failure_never_degrades_to_memory(monkeypatch, mock_db, op
 
     if operation == "save":
         mock_db.create_packet.side_effect = GiraffeDBClientError("err", 503)
+        mock_db.get_packet.return_value = None
         call = lambda: store.save(SAMPLE)
     elif operation == "get":
         mock_db.get_packet.side_effect = GiraffeDBClientError("err", 503)
@@ -176,3 +187,19 @@ def test_production_durable_success_never_populates_memory(monkeypatch, mock_db)
         SAMPLE["packet_id"], "approved", "op-001", tenant_id="default"
     ) == approved
     assert store._mem == {}
+
+
+def test_production_packet_read_preserves_provider_access_denial(monkeypatch, mock_db):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    store = GPMPacketStore(db_client=mock_db)
+    mock_db.get_packet.side_effect = GiraffeDBClientError(
+        "forbidden",
+        403,
+        error_code="forbidden",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.get("gpm_pkt_other_tenant", tenant_id="tenant-b")
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == {"error": "GPM_PACKET_ACCESS_DENIED"}
