@@ -20,8 +20,8 @@
   "assets": [
     {
       "key": "graphic-mark",
-      "label": "独立图形标志",
-      "usageConstraint": "独立使用时必须具有白色正圆形基底；白色页面中圆形可无描边，但圆形保护区仍须保留。不得改为椭圆、圆角方形或其他轮廓，图形外轮廓不得超出圆形安全区。",
+      "label": "Independent graphic mark",
+      "usageConstraint": "When used independently, the mark must have a white, perfectly circular base. On a white page the circle may have no outline, but the circular protection area must remain. Do not replace it with an ellipse, rounded square, or another shape. The mark's outer contour must not extend beyond the circular safe area.",
       "sourcePage": 4,
       "sourceObjectId": 7,
       "sourceXObjectName": "/FormXob.0245d01ded46c3b3ffe045261060aca0",
@@ -57,8 +57,8 @@
     },
     {
       "key": "english-combination",
-      "label": "英文组合标志",
-      "usageConstraint": "英文正式名称固定为 Giraffe Technology；图形、横线与文字为不可拆分组合，不得改名、缩写或使用其他拼法。",
+      "label": "English combination mark",
+      "usageConstraint": "The official English name is fixed as Giraffe Technology. The graphic, horizontal line, and text form an inseparable combination. Do not rename, abbreviate, or use an alternative spelling.",
       "sourcePage": 5,
       "sourceObjectId": 3,
       "sourceXObjectName": "/FormXob.b585460f5ceecc40fdbc1d18ca5eee4b",
