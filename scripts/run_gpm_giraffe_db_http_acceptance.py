@@ -177,8 +177,11 @@ def _assert_packet(packet: dict[str, Any], settings: Settings) -> str:
             reasoning = json.loads(reasoning)
         except json.JSONDecodeError:
             reasoning = None
-    if isinstance(reasoning, dict) and reasoning.get("runtime_status") == "unavailable":
-        raise AcceptanceFailure("GPM used an unavailable model runtime")
+    if isinstance(reasoning, dict) and reasoning.get("runtime_status") in {
+        "mock",
+        "unavailable",
+    }:
+        raise AcceptanceFailure("GPM did not use an available live model runtime")
     return packet_id
 
 
