@@ -105,7 +105,7 @@ def test_python_and_browser_authoritative_english_manifests_are_identical():
     start = javascript.index(marker) + len(marker)
     end = javascript.index(end_marker, start)
     browser_manifest = ast.literal_eval(javascript[start:end].strip().removesuffix(";"))
-    assert len(browser_manifest) == 128
+    assert len(browser_manifest) == 131
     assert browser_manifest == {
         source: canonical_messages()[message_id]
         for source, message_id in source_map().items()
