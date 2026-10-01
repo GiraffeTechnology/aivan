@@ -354,7 +354,6 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
         return _dependency_recovery_result(project, event, classification, requirement, exc, db)
 
     giraffe_db_graph: dict = {}
-    giraffe_db_graph_error: dict | None = None
     try:
         giraffe_db_graph = persist_rfq_gltg_graph(
             event=event,
@@ -373,6 +372,21 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
             "Failed to persist giraffe-db RFQ/GLTG graph",
             exc=exc,
             context={"project_id": project.project_id},
+        )
+        ExecutionEventRepository(db).append(
+            project.project_id,
+            "GIRAFFE_DB_GRAPH_PERSIST_FAILED",
+            "Failed to persist pre-PO transaction graph; no drafts were created.",
+            payload=giraffe_db_graph_error,
+            actor="giraffe_db",
+        )
+        return _dependency_recovery_result(
+            project,
+            event,
+            classification,
+            requirement,
+            RuntimeError("GIRAFFE_DB_GRAPH_PERSISTENCE_FAILED"),
+            db,
         )
     routing = _select_suppliers(giraffe, strategy)
 
@@ -430,15 +444,6 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
             payload=giraffe_db_graph,
             actor="giraffe_db",
         )
-    if giraffe_db_graph_error:
-        event_repo.append(
-            project.project_id,
-            "GIRAFFE_DB_GRAPH_PERSIST_FAILED",
-            "Failed to persist pre-PO transaction graph; RFQ workflow continued.",
-            payload=giraffe_db_graph_error,
-            actor="giraffe_db",
-        )
-
     drafts_created = _create_supplier_email_drafts(project.project_id, event, requirement, strategy, giraffe, gltg, routing, db)
     if drafts_created:
         _advance_to_awaiting_supplier(project, event, db)

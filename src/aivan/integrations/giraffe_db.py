@@ -208,7 +208,9 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         return {}
     base_url = os.environ.get("GIRAFFE_DB_BASE_URL", "").rstrip("/")
     if not base_url:
-        return {}
+        raise RuntimeError(
+            "GIRAFFE_DB_BASE_URL_REQUIRED_FOR_GRAPH_PERSISTENCE"
+        )
 
     # Fail closed: never stamp giraffe-db business facts under a guessed tenant.
     tenant_id = resolve_service_tenant(context="giraffe_db_rfq_graph_write")
