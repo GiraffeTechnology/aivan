@@ -96,6 +96,33 @@ assert.equal(window.myAivanI18n.candidateSha, oldCandidate);
 assert.equal(fetchLog[0].url, '/api/ui/catalogs/en');
 assert.equal(fetchLog[0].cache, 'no-store', 'English manifest must bypass stale candidate cache');
 
+// Inquiry outcome copy is part of the canonical catalog rather than a
+// Simplified-Chinese fallback. English and Traditional Chinese are local
+// mirrors; generated locales consume the same stable message ids.
+const inquiryOutcomeCopy = {
+  '服务器未确认案例创建，请检查输入后重试。': 'The server did not confirm case creation. Check the input and try again.',
+  '请求已受理，请按案例提示继续。': 'The request was accepted. Continue from the case guidance.',
+  '询盘草稿已生成，等待人工审批': 'The inquiry draft was created and is awaiting human approval.',
+};
+window.myAivanI18n.setLocale('en');
+for (const [sourceText, englishText] of Object.entries(inquiryOutcomeCopy)) {
+  assert.equal(window.myAivanI18n.t(sourceText), englishText);
+  assert.ok(sourceMap[sourceText], `${sourceText} must have a stable catalog id`);
+}
+window.myAivanI18n.setLocale('zht');
+assert.equal(
+  window.myAivanI18n.t('服务器未确认案例创建，请检查输入后重试。'),
+  '伺服器未確認案例建立，請檢查輸入後重試。',
+);
+assert.equal(
+  window.myAivanI18n.t('请求已受理，请按案例提示继续。'),
+  '請求已受理，請依案例提示繼續。',
+);
+assert.equal(
+  window.myAivanI18n.t('询盘草稿已生成，等待人工审批'),
+  '詢盤草稿已建立，等待人工審批',
+);
+
 // First selection loads once, installs, and subsequent requests reuse the in-memory promise/catalog.
 window.myAivanI18n.setLocale('fr');
 const firstLoad = await window.myAivanI18n.ensureGeneratedCatalog('fr');
@@ -105,6 +132,10 @@ assert.equal(await window.myAivanI18n.ensureGeneratedCatalog('fr'), true);
 const frRequests = fetchLog.filter(({ url }) => url.includes('/catalogs/fr?'));
 assert.equal(frRequests.length, 1, JSON.stringify(frRequests));
 assert.equal(window.myAivanI18n.t('登录 myAIVAN'), 'FR:Sign in to myAIVAN');
+assert.equal(
+  window.myAivanI18n.t('询盘草稿已生成，等待人工审批'),
+  'FR:The inquiry draft was created and is awaiting human approval.',
+);
 assert.equal(document.documentElement.lang, 'fr');
 
 // A translated HTML-looking value remains text-node content; no HTML sink is used by i18n.apply.
@@ -147,4 +178,93 @@ assert.ok(fetchLog.some(({ url }) => url === `/api/ui/catalogs/ko?candidate=${ne
 // Old-candidate catalog payloads fail closed after the switch.
 assert.equal(window.myAivanI18n.installGeneratedCatalog('ja', generated('ja', oldCandidate)), false);
 
-console.log('myAIVAN i18n runtime: 16 assertions passed');
+// Exercise the real i18n runtime together with the real inquiry outcome
+// classifier. This prevents identity t() stubs from hiding catalog omissions.
+for (const code of ['fr', 'es', 'de', 'ko', 'ja']) {
+  assert.equal(window.myAivanI18n.installGeneratedCatalog(code, generated(code, newCandidate)), true);
+}
+const appSourcePath = fileURLToPath(new URL('../src/aivan/app/static/app.js', import.meta.url));
+const appSource = fs.readFileSync(appSourcePath, 'utf8');
+const outcomeStart = appSource.indexOf('function inquirySubmissionOutcome');
+const inquiryStart = appSource.indexOf('async function submitInquiry');
+const inquiryEnd = appSource.indexOf('async function approveDraft');
+assert.ok(outcomeStart >= 0 && inquiryStart > outcomeStart && inquiryEnd > inquiryStart);
+const inquiryRuntime = appSource.slice(outcomeStart, inquiryEnd);
+const outcomeScenarios = [
+  {
+    payload: { status: 'error', project_id: 'ignored' },
+    kind: 'error', reset: 0, hidden: true,
+    message: () => `${window.myAivanI18n.t('创建失败：')}${window.myAivanI18n.t('服务器未确认案例创建，请检查输入后重试。')}`,
+  },
+  {
+    payload: { status: 'ok', action: 'pending_requirement_confirmation', project_id: 'case-pending' },
+    kind: 'info', reset: 0, hidden: false,
+    message: () => window.myAivanI18n.t('请求已受理，请按案例提示继续。'),
+  },
+  {
+    payload: { status: 'ok', action: 'pending_email_approval', project_id: 'case-empty', drafts_created: [] },
+    kind: 'info', reset: 0, hidden: false,
+    message: () => window.myAivanI18n.t('请求已受理，请按案例提示继续。'),
+  },
+  {
+    payload: { status: 'ok', action: 'pending_email_approval', project_id: 'case-ready', drafts_created: ['draft-1'] },
+    kind: 'success', reset: 1, hidden: false,
+    message: () => window.myAivanI18n.t('询盘草稿已生成，等待人工审批'),
+  },
+  {
+    payload: { status: 'ok', action: 'pending_email_approval', drafts_created: ['draft-1'] },
+    kind: 'error', reset: 0, hidden: true,
+    message: () => `${window.myAivanI18n.t('创建失败：')}${window.myAivanI18n.t('服务器未确认案例创建，请检查输入后重试。')}`,
+  },
+];
+
+for (const code of ['en', 'zht', 'fr', 'es', 'de', 'ko', 'ja']) {
+  window.myAivanI18n.setLocale(code);
+  for (const sourceText of [...Object.keys(inquiryOutcomeCopy), '创建失败：']) {
+    assert.notEqual(
+      window.myAivanI18n.t(sourceText),
+      sourceText,
+      `${code} must not fall back to Simplified Chinese for ${sourceText}`,
+    );
+  }
+  for (const scenario of outcomeScenarios) {
+    const fields = {
+      '#buyer-id': { value: 'buyer-i18n' },
+      '#buyer-name': { value: 'Buyer I18n' },
+      '#inquiry-text': { value: 'Please quote 100 shirts.' },
+      '#inquiry-result': { hidden: false, textContent: 'stale' },
+    };
+    const toasts = [];
+    let resetCalls = 0;
+    let loadCasesCalls = 0;
+    const inquiryContext = vm.createContext({
+      console,
+      JSON,
+      $: (selector) => fields[selector],
+      requestId: (prefix) => `${prefix}-i18n`,
+      t: (value) => window.myAivanI18n.t(value),
+      toast: (message, kind) => toasts.push({ message, kind }),
+      loadCases: async () => { loadCasesCalls += 1; },
+      api: async (path) => {
+        assert.equal(path, '/invoke');
+        return scenario.payload;
+      },
+    });
+    vm.runInContext(inquiryRuntime, inquiryContext, { filename: appSourcePath });
+    const submitInquiry = vm.runInContext('submitInquiry', inquiryContext);
+    await submitInquiry({
+      preventDefault() {},
+      target: { reset() { resetCalls += 1; } },
+    });
+    assert.equal(toasts.at(-1).kind, scenario.kind, `${code} toast kind`);
+    assert.equal(toasts.at(-1).message, scenario.message(), `${code} toast translation`);
+    assert.equal(resetCalls, scenario.reset, `${code} reset count`);
+    assert.equal(fields['#inquiry-result'].hidden, scenario.hidden, `${code} result visibility`);
+    assert.equal(loadCasesCalls, scenario.hidden ? 0 : 1, `${code} case refresh count`);
+  }
+}
+
+console.log('myAIVAN i18n runtime: catalog and 7-language inquiry outcome checks passed');
+
+
+await import('./myaivan-inquiry-runtime.test.mjs');

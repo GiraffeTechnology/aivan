@@ -17,6 +17,7 @@ from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.platform_repo import PlatformRepository
 from aivan.db.repositories.account_repo import AccountRepository
 from aivan.gpm.router import router as _gpm_router
+from aivan.api.draft_state import recover_case_after_quote_rejection
 from aivan.api.authorization import authorize_draft_action as _authorize_draft_action
 from aivan.api.relay_routes import router as _relay_router
 from aivan.api.session_routes import router as _session_router
@@ -610,6 +611,9 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
         source_trace_id=context.trace_id,
         db=db,
     )
+    project_repo = ProjectRepository(db)
+    project_repo.get_for_update(draft.project_id, tenant_id=draft.tenant_id)
+    db.refresh(draft)
     if draft.status != "pending_approval":
         raise HTTPException(
             status_code=409,
@@ -634,6 +638,9 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
         source_trace_id=context.trace_id,
         before={"draft_id": draft.draft_id, "status": "pending_approval"},
         after={"draft_id": draft.draft_id, "status": "rejected"},
+    )
+    recover_case_after_quote_rejection(db=db, draft=draft, identity=identity,
+        source_trace_id=context.trace_id,
     )
     db.commit()
     return {"draft_id": draft_id, "status": "rejected"}
@@ -1044,7 +1051,12 @@ def run_project_gltg(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
     giraffe = GiraffeDBClient(db, tenant_id=context.tenant_id).build_context(requirement, customer_id=project.customer_id)
-    simulation = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    simulation = GLTGClient().simulate(
+        requirement,
+        strategy,
+        supplier_count=len(giraffe.suppliers),
+        tenant_id=context.tenant_id,
+    )
     payload["strategy"] = strategy.model_dump()
     payload["gltg_simulation"] = simulation.model_dump()
     project_repo.update_requirement(project_id, payload)

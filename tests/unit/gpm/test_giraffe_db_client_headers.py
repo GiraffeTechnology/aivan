@@ -1,12 +1,13 @@
 """Verify GiraffeDBClient sends correct X-Service-Tenant-ID + X-Service-Auth headers."""
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import httpx
 import pytest
 
-from aivan.gpm.giraffe_db_client import GiraffeDBClient
+from aivan.gpm.giraffe_db_client import GiraffeDBClient, GiraffeDBClientError
 
 
 def _mock_response(json_body: dict, status: int = 200) -> httpx.Response:
@@ -86,11 +87,60 @@ class TestServiceHeaders:
         assert headers["X-Service-Tenant-ID"] == "acme"
         assert "X-Service-Auth" not in headers
 
-    def test_tenant_header_absent_when_no_tenant_id(self, client_with_secret: GiraffeDBClient) -> None:
-        resp_body = {"packet_id": "p1", "tenant_id": "acme"}
-        with patch.object(client_with_secret._session, "get", return_value=_mock_response(resp_body)) as mock:
+    def test_packet_read_rejects_missing_tenant_context(
+        self, client_with_secret: GiraffeDBClient
+    ) -> None:
+        with pytest.raises(GiraffeDBClientError) as exc_info:
             client_with_secret.get_packet("p1", tenant_id=None)
+
+        assert exc_info.value.error_code == "GPM_DB_TENANT_REQUIRED"
+
+    def test_tenant_scoped_credentials_select_matching_secret(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", raising=False)
+        monkeypatch.setenv(
+            "GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON",
+            json.dumps({"tenant-a": "secret-a", "tenant-b": "secret-b"}),
+        )
+        client = GiraffeDBClient("http://giraffe-db")
+        packet = {"packet_id": "p1", "tenant_id": "tenant-b"}
+
+        with patch.object(
+            client._session,
+            "post",
+            return_value=_mock_response(packet, 201),
+        ) as mock:
+            client.create_packet(packet, tenant_id="tenant-b")
+
         headers = mock.call_args[1]["headers"]
-        assert "X-Service-Tenant-ID" not in headers
-        # Auth still set (service identity even without tenant scope)
-        assert headers["X-Service-Auth"] == "test-svc-secret"
+        assert headers["X-Service-Tenant-ID"] == "tenant-b"
+        assert headers["X-Service-Auth"] == "secret-b"
+
+    def test_tenant_scoped_credentials_fail_closed_for_unknown_tenant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON",
+            json.dumps({"tenant-a": "secret-a"}),
+        )
+        client = GiraffeDBClient("http://giraffe-db")
+
+        with pytest.raises(GiraffeDBClientError) as exc_info:
+            client.check_schema_version("tenant-b")
+
+        assert exc_info.value.error_code == "GPM_DB_SERVICE_AUTH_MISSING"
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["not-json", "[]", '{"tenant-a": ""}', '{"": "secret"}'],
+    )
+    def test_tenant_scoped_credentials_reject_invalid_configuration(
+        self, monkeypatch: pytest.MonkeyPatch, raw: str
+    ) -> None:
+        monkeypatch.setenv("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", raw)
+
+        with pytest.raises(GiraffeDBClientError) as exc_info:
+            GiraffeDBClient("http://giraffe-db")
+
+        assert exc_info.value.error_code == "GPM_DB_SERVICE_AUTH_MISCONFIGURED"

@@ -221,6 +221,80 @@ def test_api_reject_approved_draft_returns_409(api_client, api_db):
     assert "approved" in resp.json()["detail"]
 
 
+def test_reject_final_quote_restores_case_for_revision(api_client, api_db):
+    from aivan.db.models.project import Project
+
+    project = Project(
+        project_id="proj-reject-revision",
+        tenant_id="test_tenant",
+        conversation_id="conv-reject-revision",
+        customer_id="buyer-1",
+        case_state="awaiting_approval",
+        selected_option_json={"option_id": "option-1"},
+    )
+    api_db.add(project)
+    draft = DraftRepository(api_db).create(
+        project.project_id,
+        {
+            "tenant_id": "test_tenant",
+            "message_text": "current recommendation",
+            "channel": "email",
+            "target_role": "customer",
+            "notes": "draft_type=customer_quote_email",
+        },
+    )
+    api_db.commit()
+
+    response = api_client.post(f"/api/drafts/{draft.draft_id}/reject")
+
+    assert response.status_code == 200
+    api_db.refresh(project)
+    assert project.case_state == "supplier_replied"
+    assert project.selected_option_json is None
+
+
+def test_reject_does_not_downgrade_case_when_new_pending_quote_exists(api_client, api_db):
+    from aivan.db.models.project import Project
+
+    project = Project(
+        project_id="proj-concurrent-quote",
+        tenant_id="test_tenant",
+        conversation_id="conv-concurrent-quote",
+        customer_id="buyer-1",
+        case_state="awaiting_approval",
+    )
+    api_db.add(project)
+    repo = DraftRepository(api_db)
+    old = repo.create(
+        project.project_id,
+        {
+            "tenant_id": "test_tenant",
+            "message_text": "old recommendation",
+            "channel": "email",
+            "target_role": "customer",
+            "notes": "draft_type=customer_quote_email",
+        },
+    )
+    current = repo.create(
+        project.project_id,
+        {
+            "tenant_id": "test_tenant",
+            "message_text": "new recommendation",
+            "channel": "email",
+            "target_role": "customer",
+            "notes": "draft_type=customer_quote_email",
+        },
+    )
+    api_db.commit()
+
+    response = api_client.post(f"/api/drafts/{old.draft_id}/reject")
+
+    assert response.status_code == 200
+    api_db.refresh(project)
+    assert project.case_state == "awaiting_approval"
+    assert DraftRepository(api_db).get(current.draft_id).status == "pending_approval"
+
+
 # ── Alias routes mirror the same state machine ─────────────────────────────────
 
 def test_alias_approve_rejected_returns_409(api_client, api_db):

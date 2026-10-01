@@ -53,6 +53,9 @@
     '事件时间线': 'Event timeline', '审计记录': 'Audit records', '待审批': 'Pending approval',
     '摘要回执': 'Receipt digest', '案例': 'Case', '已创建': 'created',
     '已进入 Core 工作流': 'Entered the Core workflow', '询盘已写入共享 Core': 'Inquiry recorded in shared Core',
+    '服务器未确认案例创建，请检查输入后重试。': 'The server did not confirm case creation. Check the input and try again.',
+    '请求已受理，请按案例提示继续。': 'The request was accepted. Continue from the case guidance.',
+    '询盘草稿已生成，等待人工审批': 'The inquiry draft was created and is awaiting human approval.',
     '创建失败：': 'Creation failed: ', '已审批，等待人工转发': 'Approved; awaiting manual relay',
     '已审批并产生发送回执': 'Approved with a send receipt', '审批完成': 'Approval complete',
     '审批失败：': 'Approval failed: ', '影响范围：': 'Impact scope: ', '预览失败：': 'Preview failed: ',
@@ -81,6 +84,10 @@
     '供应商已回复': '供應商已回覆', '等待审批': '等待審批', '已审批': '已審批',
     '采购': '採購', '审批人': '審批人', '审计员': '稽核員', '买家': '買家',
     '供应商': '供應商', '复制': '複製', '审批': '審批', '纠错': '糾錯', '导出审计': '匯出稽核',
+    '服务器未确认案例创建，请检查输入后重试。': '伺服器未確認案例建立，請檢查輸入後重試。',
+    '请求已受理，请按案例提示继续。': '請求已受理，請依案例提示繼續。',
+    '询盘草稿已生成，等待人工审批': '詢盤草稿已建立，等待人工審批',
+    '创建失败：': '建立失敗：',
   };
   const sourceByNode = new WeakMap();
   const generatedCatalogs = {};

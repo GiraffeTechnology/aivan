@@ -69,15 +69,15 @@ class GiraffeContext(BaseModel):
 
 
 class GLTGSimulation(BaseModel):
-    p50_days: int
-    p80_days: int
-    p90_days: int
-    minimum_feasible_days: int
+    p50_days: float
+    p80_days: float
+    p90_days: float
+    minimum_feasible_days: float | None = None
     supplier_set_feasibility: str
     known_suppliers_first_feasibility: str
     public_bidding_time_cost_days: int
     fallback_trigger_recommendation: FallbackTrigger
-    selected_confidence_days: int
+    selected_confidence_days: float
     deadline_risk_level: str = "unknown"
     explanation: str = ""
     gltg_run_id: str | None = None
@@ -86,6 +86,10 @@ class GLTGSimulation(BaseModel):
     assessment_packet: dict = Field(default_factory=dict)
     manual_review_required: bool | None = None
     fallback_supplier_required: bool | None = None
+    assessment_scope: Literal["requirement_baseline", "supplier_candidate"] = (
+        "requirement_baseline"
+    )
+    supplier_ids: list[str] = Field(default_factory=list)
 
 
 class SupplierRoutingDecision(BaseModel):
@@ -103,7 +107,7 @@ class RFQExecutionResult(BaseModel):
     strategy: RFQStrategy
     requirement: dict
     giraffe_context: GiraffeContext
-    gltg_simulation: GLTGSimulation
+    gltg_simulation: GLTGSimulation | None = None
     supplier_routing: SupplierRoutingDecision
     drafts_created: list[str] = Field(default_factory=list)
     user_control_message: str = ""

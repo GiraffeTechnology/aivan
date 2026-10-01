@@ -206,6 +206,13 @@ def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workb
     assert "'/api/session/test-login'" in script
     assert "history.replaceState" in script
     assert "JSON.stringify({ ticket: testTicket })" in script
+    assert 'data-action="reject"' in script
+    assert "async function rejectDraft" in script
+    assert "item.selected_option" in script
+    assert "item.requirement?.buyer_options" in script
+    assert "buyerOptionRow" in script
+    assert "Quote options" in script
+    assert "leadTime.expected_days" in script
 
 
 def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):

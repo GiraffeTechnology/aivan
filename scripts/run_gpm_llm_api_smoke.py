@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-GPM Live Qwen API Smoke Test
-用于 CI 和手动验证。
-需要环境变量：GPM_LLM_API_KEY（或 QWEN_API_KEY）
+GPM Live Qwen API Smoke Test.
+Use this script for CI and manual verification.
+Requires GPM_LLM_API_KEY (or QWEN_API_KEY).
 
-退出码：0 = PASS，1 = FAIL
+Exit codes: 0 = PASS, 1 = FAIL.
 """
 
 import os
@@ -60,7 +60,7 @@ def check_env() -> str:
 
 
 def test_qwen_connectivity(key: str) -> bool:
-    """直接调 DashScope 验证连通性（不走 GPM 层）。"""
+    """Call DashScope directly to verify connectivity without the GPM layer."""
     import urllib.request
     import urllib.error
 
@@ -103,7 +103,7 @@ def test_qwen_connectivity(key: str) -> bool:
 
 
 def test_gpm_llm_runtime(key: str) -> bool:
-    """通过 GPM LLM runtime 层测试（验证 aivan 集成）。"""
+    """Exercise the GPM LLM runtime layer to verify the Aivan integration."""
     try:
         from aivan.gpm.llm_runtime import analyze_quote
     except ImportError:
@@ -121,7 +121,7 @@ def test_gpm_llm_runtime(key: str) -> bool:
             quantity=500,
         )
 
-        # 验证 runtime 未降级为 unavailable（live Qwen 必须在线）
+        # The runtime must not degrade to unavailable; live Qwen must be online.
         if result.get("runtime_status") == "unavailable":
             reason = result.get("reason", "unknown")
             log.error(
@@ -131,12 +131,12 @@ def test_gpm_llm_runtime(key: str) -> bool:
             )
             return False
 
-        # 验证 human_approval_required = True
+        # Human approval must remain required.
         if result.get("human_approval_required") is not True:
             log.error("GPM runtime FAIL: human_approval_required != True")
             return False
 
-        # 验证 quote_position 合法
+        # Validate quote_position.
         valid_positions = {
             "below_market", "within_low_range", "within_mid_range",
             "within_high_range", "above_market", "insufficient_data",
@@ -145,18 +145,18 @@ def test_gpm_llm_runtime(key: str) -> bool:
             log.error("GPM runtime FAIL: invalid quote_position %r", result.get("quote_position"))
             return False
 
-        # 验证 recommendation 合法
+        # Validate recommendation.
         valid_recs = {"accept", "negotiate", "reject", "request_more_info", "human_review_required"}
         if result.get("recommendation") not in valid_recs:
             log.error("GPM runtime FAIL: invalid recommendation %r", result.get("recommendation"))
             return False
 
-        # 验证 confidence 合法
+        # Validate confidence.
         if result.get("confidence") not in {"high", "medium", "low"}:
             log.error("GPM runtime FAIL: invalid confidence %r", result.get("confidence"))
             return False
 
-        # 验证 key 未出现在输出中
+        # Ensure the key is not present in output.
         result_str = json.dumps(result)
         if key[:20] in result_str:
             log.error("SECURITY FAIL: API key fragment in GPM runtime output!")
@@ -177,14 +177,14 @@ def test_gpm_llm_runtime(key: str) -> bool:
 
 def test_gpm_api_service(key: str) -> bool:
     """
-    启动 GPM API service，发送真实 quote-guidance 请求（live Qwen）。
-    验证 packet 结构、dispatched=False、key 不泄露。
+    Start the GPM API service and send a real quote-guidance request using live Qwen.
+    Validate the packet structure, dispatched=False, and secret non-disclosure.
     """
     import subprocess
     import urllib.request
     import urllib.error
 
-    # 项目根目录（scripts/ 的上一级）
+    # Project root (parent of scripts/).
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src_dir = os.path.join(project_root, "src")
 
@@ -207,16 +207,16 @@ def test_gpm_api_service(key: str) -> bool:
         "GPM_LLM_API_KEY": key,
         "GIRAFFE_DB_BASE_URL": "",
         "AIVAN_TENANT_ID": "ci-smoke",
-        # 确保子进程能找到 aivan 包（src/ layout）
+        # Ensure the child process can import the Aivan src-layout package.
         "PYTHONPATH": src_dir + (
             os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else ""
         ),
     }
 
-    # 使用当前 venv 的 Python 而非再次调用 uv run（避免 venv 重建）
+    # Use the current virtualenv Python to avoid rebuilding it through uv run.
     python_exe = sys.executable
 
-    # 启动 service
+    # Start the service.
     proc = subprocess.Popen(
         [python_exe, "-m", "aivan.gpm.server"],
         env=env,
@@ -239,7 +239,7 @@ def test_gpm_api_service(key: str) -> bool:
             log.info("healthz: %s", health)
             assert health.get("status") == "ok", f"healthz not ok: {health}"
 
-        # quote-guidance（live Qwen）
+        # Exercise quote-guidance with live Qwen.
         payload = json.dumps({
             "sku": "CI-SMOKE-E2E-001",
             "supplier_id": "SUP-CI-01",
@@ -258,24 +258,24 @@ def test_gpm_api_service(key: str) -> bool:
         with urllib.request.urlopen(req, timeout=30) as resp:
             packet = json.loads(resp.read())
 
-        # 验证 dispatched = False（核心约束）
+        # dispatched=False is a core safety boundary.
         assert packet.get("dispatched") is False, \
             f"APPROVAL BOUNDARY FAIL: dispatched={packet.get('dispatched')}"
 
-        # 验证 human_approval_required = True
+        # Human approval must remain required.
         assert packet.get("human_approval_required") is True, \
             "human_approval_required must be True"
 
-        # 验证 key 未泄露
+        # Ensure the key is not disclosed.
         packet_str = json.dumps(packet)
         assert key[:20] not in packet_str, \
             "SECURITY FAIL: API key in packet response"
 
-        # 验证 runtime 未降级为 unavailable（包括 llm_reasoning 中嵌套的 JSON）
+        # Reject runtime degradation, including nested JSON in llm_reasoning.
         assert not _contains_unavailable_runtime(packet), \
             "LLM runtime unavailable; this is not a valid live Qwen E2E pass"
 
-        # 验证真实 LLM 分析字段存在且值合法
+        # Validate the live LLM analysis fields and values.
         valid_positions = {
             "below_market",
             "within_low_range",
@@ -329,11 +329,11 @@ def main():
     key = check_env()
     results = {}
 
-    # Test 1: Qwen 连通性
+    # Test 1: Qwen connectivity.
     log.info("\n── Test 1: Qwen API connectivity ──")
     results["qwen_connectivity"] = test_qwen_connectivity(key)
 
-    # Test 2: GPM LLM runtime 层
+    # Test 2: GPM LLM runtime layer.
     log.info("\n── Test 2: GPM LLM runtime layer ──")
     results["gpm_llm_runtime"] = test_gpm_llm_runtime(key)
 
@@ -341,7 +341,7 @@ def main():
     log.info("\n── Test 3: GPM API service E2E ──")
     results["gpm_api_e2e"] = test_gpm_api_service(key)
 
-    # 汇总
+    # Summary.
     log.info("\n" + "=" * 60)
     log.info("SMOKE RESULTS:")
     all_pass = True

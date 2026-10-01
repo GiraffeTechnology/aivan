@@ -275,6 +275,17 @@ function section(title, items, renderer) {
   return `<section class="detail-section"><div class="panel-heading"><h2>${escapeHtml(title)}</h2><span class="count">${items.length}</span></div>${items.length ? `<div class="timeline">${items.map(renderer).join('')}</div>` : emptyHtml()}</section>`;
 }
 
+function buyerOptionRow(option) {
+  const quote = option.quote || {};
+  const leadTime = option.lead_time_estimate || {};
+  const supplier = option.supplier_display_name || option.supplier_id || option.candidate_id || 'Supplier pending confirmation';
+  const warnings = Array.isArray(option.warnings) ? option.warnings : [];
+  return `<article class="draft-card"><div><strong>${escapeHtml(option.option_label || option.option_type || 'Recommendation pending review')}</strong><span>${escapeHtml(supplier)}</span></div>
+    <p>${escapeHtml(option.reasoning || 'No recommendation rationale is available.')}</p>
+    <p>Price: ${escapeHtml(quote.currency || '')} ${escapeHtml(quote.buyer_unit_price ?? 'Unknown')} · Lead time: ${escapeHtml(leadTime.expected_days ?? 'Unknown')}</p>
+    ${warnings.length ? `<p class="error">${escapeHtml(warnings.join(' · '))}</p>` : ''}</article>`;
+}
+
 async function openCase(caseId) {
   setView('case-detail');
   $('#case-detail').innerHTML = `<div class="loading-card">${ht('正在读取共享 Core 数据…')}</div>`;
@@ -283,12 +294,21 @@ async function openCase(caseId) {
     state.selectedCase = payload;
     const item = payload.case;
     const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
+    const selected = item.selected_option;
+    const buyerOptions = Array.isArray(item.requirement?.buyer_options) ? item.requirement.buyer_options : [];
+    const recommendation = selected ? `<section class="panel"><h2>Execution recommendation</h2>
+      <div class="person"><strong>${escapeHtml(selected.option_label || selected.option_type || 'Recommendation pending review')}</strong><span>${escapeHtml(selected.supplier_display_name || selected.supplier_id || selected.candidate_id || 'Supplier pending confirmation')}</span></div>
+      <p>${escapeHtml(selected.reasoning || 'No recommendation rationale is available.')}</p>
+      <p>Price: ${escapeHtml(selected.quote?.currency || '')} ${escapeHtml(selected.quote?.buyer_unit_price ?? 'Unknown')} · Lead time: ${escapeHtml(selected.lead_time_estimate?.expected_days ?? 'Unknown')}</p>
+      ${(selected.warnings || []).length ? `<p class="error">${escapeHtml(selected.warnings.join(' · '))}</p>` : ''}</section>` : '';
     $('#case-detail').innerHTML = `<section class="case-hero">
       <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
       <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${ht('导出审计')}</a>` : ''}</div>
     </section>
     <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
+    ${recommendation}
+    ${section('Quote options', buyerOptions, buyerOptionRow)}
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
     ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
     ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
@@ -302,9 +322,9 @@ async function openCase(caseId) {
 
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
-  const action = draft.status === 'pending_approval' && canApprove
-    ? `<button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('审批')}</button>` : '';
-  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${ht('复制')}</button>${action}</div></article>`;
+  const actions = draft.status === 'pending_approval' && canApprove
+    ? `<button class="secondary compact" data-action="reject" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('拒绝')}</button><button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('审批')}</button>` : '';
+  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${ht('复制')}</button>${actions}</div></article>`;
 }
 
 function eventRow(event) {
@@ -312,11 +332,30 @@ function eventRow(event) {
   return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
+function inquirySubmissionOutcome(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (payload.status !== 'ok' || typeof payload.project_id !== 'string') return null;
+  const projectId = payload.project_id.trim();
+  if (!projectId) return null;
+  const draftsCreated = payload.drafts_created;
+  const enteredApprovalFlow = payload.action === 'pending_email_approval'
+    && Array.isArray(draftsCreated)
+    && draftsCreated.length > 0
+    && draftsCreated.every((draftId) => typeof draftId === 'string' && draftId.trim());
+  return {
+    projectId,
+    enteredApprovalFlow,
+  };
+}
+
 async function submitInquiry(event) {
   event.preventDefault();
   const buyerId = $('#buyer-id').value.trim();
   const text = $('#inquiry-text').value.trim();
   const conversation = requestId('manual-conversation');
+  const result = $('#inquiry-result');
+  result.hidden = true;
+  result.textContent = '';
   const headers = {
     'X-AIVAN-Participant-ID': buyerId,
     'X-AIVAN-Participant-Role': 'buyer',
@@ -331,12 +370,20 @@ async function submitInquiry(event) {
         sender_display_name: $('#buyer-name').value.trim(), message_text: text,
       }),
     });
-    const result = $('#inquiry-result');
+    const outcome = inquirySubmissionOutcome(payload);
+    if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
     result.hidden = false;
-    result.textContent = `${t('案例')} ${payload.project_id || t('已创建')}\n${payload.user_control_message || payload.message || payload.reply_text || t('已进入 Core 工作流')}`;
-    event.target.reset();
+    const responseMessage = payload.action === 'pending_email_approval' && !outcome.enteredApprovalFlow
+      ? t('请求已受理，请按案例提示继续。')
+      : (payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。'));
+    result.textContent = `${t('案例')} ${outcome.projectId}\n${responseMessage}`;
     await loadCases(true);
-    toast(t('询盘已写入共享 Core'), 'success');
+    if (outcome.enteredApprovalFlow) {
+      event.target.reset();
+      toast(t('询盘草稿已生成，等待人工审批'), 'success');
+    } else {
+      toast(t('请求已受理，请按案例提示继续。'), 'info');
+    }
   } catch (error) {
     toast(`${t('创建失败：')}${error.message}`, 'error');
   }
@@ -348,6 +395,15 @@ async function approveDraft(draftId) {
     toast(payload.relay_required ? t('已审批，等待人工转发') : (payload.sent ? t('已审批并产生发送回执') : t('审批完成')), 'success');
     if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
   } catch (error) { toast(`${t('审批失败：')}${error.message}`, 'error'); }
+}
+
+async function rejectDraft(draftId) {
+  if (!window.confirm(t('确认拒绝当前草稿并返回修订？'))) return;
+  try {
+    await api(`/api/drafts/${encodeURIComponent(draftId)}/reject`, { method: 'POST', body: '{}' });
+    toast(t('已拒绝，案例可继续修订'), 'success');
+    if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
+  } catch (error) { toast(`${t('拒绝失败：')}${error.message}`, 'error'); }
 }
 
 async function showImpact(eventId) {
@@ -424,6 +480,7 @@ document.addEventListener('click', async (event) => {
     toast(t('已复制到剪贴板'), 'success');
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
+  if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
   if (action.dataset.action === 'impact') await showImpact(action.dataset.eventId);
   if (action.dataset.action === 'reverse') await reverseEvent(action.dataset.eventId);
 });
