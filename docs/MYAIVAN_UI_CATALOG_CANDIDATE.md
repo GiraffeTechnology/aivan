@@ -35,4 +35,4 @@ The UI renders the independent mark without distortion inside a white, strictly 
 
 ## Production acceptance gates
 
-Application completion requires a clean new candidate SHA/tree, full CI and CodeQL, independent Aivan P0/P1=0 review, five real non-fallback translator catalogs, and public desktop/mobile A–K acceptance. Server-side deployment and fault handling remain exclusively with the `全服务器` task. No real business message may be sent during acceptance, and the dedicated test entry must be disabled afterward.
+Application completion requires a clean new candidate SHA/tree, full CI and CodeQL, independent Aivan P0/P1=0 review, five real non-fallback translator catalogs, and public desktop/mobile A–K acceptance. Server-side deployment and fault handling remain exclusively with the server operations owner. No real business message may be sent during acceptance, and the dedicated test entry must be disabled afterward.
