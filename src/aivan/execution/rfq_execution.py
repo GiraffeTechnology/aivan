@@ -13,7 +13,11 @@ from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.repositories.domain_repo import CaseDomainRepository
-from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
+from aivan.integrations.giraffe_db import (
+    GiraffeDBClient,
+    GiraffeDBContextError,
+    persist_rfq_gltg_graph,
+)
 from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.integrations.gpm_guidance_client import GPMGuidanceUnavailableError
@@ -33,9 +37,7 @@ from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
 from aivan.schemas.rfq import (
     EventClassification,
-    FallbackTrigger,
     GiraffeContext,
-    GLTGSimulation,
     RFQExecutionResult,
     RFQStrategy,
     SupplierRoutingDecision,
@@ -199,7 +201,12 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
             supplier_count=len(giraffe.suppliers),
             tenant_id=project.tenant_id or event.tenant_id,
         )
-    except (GLTGUnavailableError, ExternalModelApiRequiresApprovalError, LocalModelUnavailableError) as exc:
+    except (
+        GiraffeDBContextError,
+        GLTGUnavailableError,
+        ExternalModelApiRequiresApprovalError,
+        LocalModelUnavailableError,
+    ) as exc:
         return _dependency_recovery_result(project, event, classification, requirement, exc, db)
 
     giraffe_db_graph: dict = {}
@@ -381,23 +388,6 @@ def _advance_to_awaiting_supplier(project, event: OpenClawEvent, db: Session) ->
         )
 
 
-def _empty_gltg_simulation() -> GLTGSimulation:
-    """A zeroed GLTG simulation for blocked/recovery results (GLTG not run)."""
-    return GLTGSimulation(
-        p50_days=0,
-        p80_days=0,
-        p90_days=0,
-        minimum_feasible_days=0,
-        supplier_set_feasibility="unknown",
-        known_suppliers_first_feasibility="unknown_without_deadline",
-        public_bidding_time_cost_days=0,
-        fallback_trigger_recommendation=FallbackTrigger(),
-        selected_confidence_days=0,
-        deadline_risk_level="unknown",
-        explanation="GLTG not run (requirement/dependency gate blocked execution).",
-    )
-
-
 def _persist_raw_requirement_only(project, requirement, gate, db) -> None:
     """Persist the raw requirement and gate state without executing anything."""
     payload = requirement.model_dump()
@@ -424,7 +414,7 @@ def _blocked_requirement_result(project, event, classification, requirement, gat
         strategy=RFQStrategy(),
         requirement=requirement.model_dump(),
         giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
         drafts_created=[],
         user_control_message=gate.operator_message,
@@ -497,7 +487,7 @@ def _pending_supplier_result(project, event, classification, requirement, strate
         strategy=strategy,
         requirement=requirement.model_dump(),
         giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
         drafts_created=[],
         user_control_message=message,
@@ -530,7 +520,7 @@ def _dependency_recovery_result(project, event, classification, requirement, exc
         strategy=RFQStrategy(),
         requirement=requirement.model_dump(),
         giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
         drafts_created=[],
         user_control_message=message,
@@ -629,6 +619,15 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             "Supplier reply must be attached to an existing validated Case thread",
             reason="supplier_reply_requires_validated_case_binding",
         )
+    project = ProjectRepository(db).get_for_update(
+        project.project_id, tenant_id=event.tenant_id or "legacy"
+    )
+    if project is None:
+        raise RoleAuthorizationError(
+            "SUPPLIER_CASE_BINDING_REQUIRED",
+            "Supplier reply must be attached to an existing validated Case thread",
+            reason="supplier_reply_case_disappeared_before_lock",
+        )
     supplier_identity = _require_event_capability(
         event, classification, Capability.RESPOND_AS_SUPPLIER, db
     )
@@ -671,12 +670,6 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     if not requirement:
         db.commit()
         empty_strategy = RFQStrategy()
-        gltg = GLTGClient().simulate(
-            BuyerRequirement(project_id=project.project_id, quantity=1),
-            empty_strategy,
-            0,
-            tenant_id=project.tenant_id or event.tenant_id,
-        )
         return RFQExecutionResult(
             project_id=project.project_id,
             event_type="supplier_reply",
@@ -685,7 +678,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             strategy=empty_strategy,
             requirement={},
             giraffe_context=GiraffeContext(),
-            gltg_simulation=gltg,
+            gltg_simulation=None,
             supplier_routing=SupplierRoutingDecision(selected_supplier_ids=[reply.supplier_id] if reply.supplier_id else []),
         )
 
@@ -915,12 +908,6 @@ def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassificat
     db.commit()
     empty_strategy = RFQStrategy()
     empty_context = GiraffeContext()
-    gltg = GLTGClient().simulate(
-        BuyerRequirement(project_id=project.project_id, quantity=1),
-        empty_strategy,
-        0,
-        tenant_id=project.tenant_id or event.tenant_id,
-    )
     return RFQExecutionResult(
         project_id=project.project_id,
         event_type=classification.event_type,
@@ -929,6 +916,6 @@ def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassificat
         strategy=empty_strategy,
         requirement={},
         giraffe_context=empty_context,
-        gltg_simulation=gltg,
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
     )

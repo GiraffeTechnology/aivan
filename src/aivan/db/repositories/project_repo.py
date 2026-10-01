@@ -28,6 +28,16 @@ class ProjectRepository:
             query = query.filter(Project.tenant_id == tenant_id)
         return query.first()
 
+    def get_for_update(
+        self, project_id: str, tenant_id: str | None = None
+    ) -> Project | None:
+        """Lock one case row for a state-changing transaction when supported."""
+
+        query = self.db.query(Project).filter(Project.project_id == project_id)
+        if tenant_id is not None:
+            query = query.filter(Project.tenant_id == tenant_id)
+        return query.with_for_update().first()
+
     def get_by_conversation(self, conversation_id: str, tenant_id: str | None = None) -> Project | None:
         query = self.db.query(Project).filter(Project.conversation_id == conversation_id)
         if tenant_id is not None:

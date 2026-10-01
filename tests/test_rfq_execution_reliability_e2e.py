@@ -104,11 +104,32 @@ def test_chinese_rfq_unresolved_destination_blocks_gltg_and_drafts(db_session, m
 
     assert result.action == "pending_destination_confirmation"
     assert result.drafts_created == []
-    assert result.gltg_simulation.p50_days == 0  # GLTG not run
+    assert result.gltg_simulation is None
     reply = result.user_control_message
     assert "东京" in reply
     assert "目的地" in reply
     assert "TBD" not in reply
+
+
+def test_internal_status_event_does_not_call_gltg(db_session, monkeypatch):
+    monkeypatch.setattr(
+        rfq_execution,
+        "classify_event",
+        lambda event, db: rfq_execution.EventClassification(
+            event_type="internal_status_request",
+            confidence=1.0,
+            reason="test",
+        ),
+    )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("status-only events must not call GLTG")
+
+    monkeypatch.setattr(rfq_execution.GLTGClient, "simulate", _boom)
+    result = create_rfq_from_event(_event("status"), db_session)
+
+    assert result.action == "recorded_no_rfq_created"
+    assert result.gltg_simulation is None
 
 
 def test_english_osaka_rfq_does_not_generic_backend_error(db_session, monkeypatch):
