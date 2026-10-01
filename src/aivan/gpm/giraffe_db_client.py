@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Any
@@ -37,6 +38,36 @@ class GiraffeDBClient:
         self.timeout = timeout
         self._session = httpx.Client(follow_redirects=False)
         self._service_auth = os.getenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "").strip()
+        self._tenant_service_auth = self._load_tenant_service_auth()
+
+    @staticmethod
+    def _load_tenant_service_auth() -> dict[str, str] | None:
+        raw = os.getenv("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", "").strip()
+        if not raw:
+            return None
+        try:
+            configured = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise GiraffeDBClientError(
+                "tenant service auth configuration is invalid",
+                error_code="GPM_DB_SERVICE_AUTH_MISCONFIGURED",
+            ) from exc
+        if (
+            not isinstance(configured, dict)
+            or not configured
+            or any(
+                not isinstance(tenant_id, str)
+                or not tenant_id
+                or not isinstance(secret, str)
+                or not secret
+                for tenant_id, secret in configured.items()
+            )
+        ):
+            raise GiraffeDBClientError(
+                "tenant service auth configuration is invalid",
+                error_code="GPM_DB_SERVICE_AUTH_MISCONFIGURED",
+            )
+        return configured
 
     def _service_headers(
         self,
@@ -48,8 +79,16 @@ class GiraffeDBClient:
         headers: dict[str, str] = {}
         if tenant_id:
             headers["X-Service-Tenant-ID"] = tenant_id
-        if self._service_auth:
-            headers["X-Service-Auth"] = self._service_auth
+        service_auth = self._service_auth
+        if self._tenant_service_auth is not None:
+            service_auth = self._tenant_service_auth.get(tenant_id or "", "")
+            if not service_auth:
+                raise GiraffeDBClientError(
+                    "tenant service auth is not configured",
+                    error_code="GPM_DB_SERVICE_AUTH_MISSING",
+                )
+        if service_auth:
+            headers["X-Service-Auth"] = service_auth
         if correlation_id:
             headers["X-AIVAN-Correlation-ID"] = correlation_id
         if idempotency_key:
