@@ -44,6 +44,18 @@ def _client(monkeypatch, handler):
     )
 
 
+def test_test_transport_is_rejected_in_production(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+
+    with pytest.raises(RuntimeError, match="forbidden in production"):
+        GPMGuidanceClient(
+            base_url="http://gpm.test",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(201, json=_response())
+            ),
+        )
+
+
 def test_create_guidance_sends_tenant_auth_trace_and_idempotency(monkeypatch):
     captured = {}
 

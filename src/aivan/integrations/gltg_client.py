@@ -65,7 +65,10 @@ class GLTGClient:
         timeout_seconds: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("GLTG_API_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+        effective_base_url = (
+            base_url or os.environ.get("GLTG_API_BASE_URL") or DEFAULT_BASE_URL
+        )
+        self.base_url = effective_base_url.rstrip("/")
         if timeout_seconds is not None:
             self.timeout = timeout_seconds
         else:

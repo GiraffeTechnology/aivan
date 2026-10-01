@@ -106,7 +106,18 @@ def test_http_error_surfaces_structured_error():
     res = client.estimate_lead_time(order={"quantity": 1}, suppliers=[])
     assert res.ok is False
     assert res.status_code == 500
-    assert "HTTP 500" in (res.error or "")
+    assert res.error == "GLTG_HTTP_500"
+    assert "boom" not in res.error
+
+
+def test_test_transport_is_rejected_in_production(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+
+    with pytest.raises(RuntimeError, match="forbidden in production"):
+        GLTGClient(
+            base_url="http://gltg.test",
+            transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+        )
 
 
 def test_redirect_is_not_accepted_as_gltg_success(monkeypatch):
