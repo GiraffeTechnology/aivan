@@ -655,11 +655,8 @@ def test_supplier_reply_gltg_failure_supersedes_stale_quote_and_selection(
         if draft["draft_type"] == "customer_quote_email"
         and draft["status"] == "pending_approval"
     ]
-    approval = api_client.post(
-        f"/api/projects/{created['project_id']}/drafts/{old_quote['draft_id']}/approve"
-    )
-    if approval.status_code == 200:
-        assert approval.json().get("status") != "approved"
+    approval = api_client.post(f"/api/drafts/{old_quote['draft_id']}/approve", json={})
+    assert approval.status_code == 409, approval.text
 
 
 def test_customer_personal_im_without_actor_requires_owner_resolution(api_client):
