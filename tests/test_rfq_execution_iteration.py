@@ -236,7 +236,7 @@ def test_chinese_user_control_message_is_localized_and_pending_approval():
     assert "Tokyo" in message
 
 
-def test_giraffe_db_graph_persist_failure_does_not_block_pending_drafts(api_client, api_db, monkeypatch):
+def test_giraffe_db_graph_persist_failure_blocks_pending_drafts(api_client, api_db, monkeypatch):
     import aivan.execution.rfq_execution as rfq_execution
 
     def fail_persist(**kwargs):
@@ -248,13 +248,12 @@ def test_giraffe_db_graph_persist_failure_does_not_block_pending_drafts(api_clie
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["action"] == "pending_email_approval"
-    assert payload["drafts_created"]
+    assert payload["action"] == "pending_dependency_recovery"
+    assert payload["drafts_created"] == []
 
     drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
     supplier_drafts = [draft for draft in drafts if draft["target_role"] == "supplier"]
-    assert supplier_drafts
-    assert {draft["status"] for draft in supplier_drafts} == {"pending_approval"}
+    assert supplier_drafts == []
 
     from aivan.db.repositories.event_repo import ExecutionEventRepository
 

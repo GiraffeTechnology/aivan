@@ -82,6 +82,23 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
         assert headers.get("idempotency-key") == "aivan:proj_1:msg_graph_001"
 
 
+def test_enabled_graph_persistence_requires_giraffe_db_endpoint(monkeypatch):
+    monkeypatch.setenv("AIVAN_PERSIST_GIRAFFE_DB_GRAPH", "true")
+    monkeypatch.delenv("GIRAFFE_DB_BASE_URL", raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="GIRAFFE_DB_BASE_URL_REQUIRED_FOR_GRAPH_PERSISTENCE",
+    ):
+        persist_rfq_gltg_graph(
+            event=_event(),
+            project_id="proj_missing_endpoint",
+            requirement=BuyerRequirement(quantity=5000, destination="Osaka"),
+            strategy=RFQStrategy(),
+            gltg=_gltg(),
+        )
+
+
 def test_graph_retry_uses_same_idempotency_key(monkeypatch):
     a = build_graph_trace_metadata(_event(), "proj_retry")
     b = build_graph_trace_metadata(_event(), "proj_retry")
