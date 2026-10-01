@@ -187,3 +187,19 @@ def test_production_durable_success_never_populates_memory(monkeypatch, mock_db)
         SAMPLE["packet_id"], "approved", "op-001", tenant_id="default"
     ) == approved
     assert store._mem == {}
+
+
+def test_production_packet_read_preserves_provider_access_denial(monkeypatch, mock_db):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    store = GPMPacketStore(db_client=mock_db)
+    mock_db.get_packet.side_effect = GiraffeDBClientError(
+        "forbidden",
+        403,
+        error_code="forbidden",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.get("gpm_pkt_other_tenant", tenant_id="tenant-b")
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == {"error": "GPM_PACKET_ACCESS_DENIED"}

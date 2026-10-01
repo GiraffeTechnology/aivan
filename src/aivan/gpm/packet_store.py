@@ -209,6 +209,11 @@ class GPMPacketStore:
                     self._remember(packet_id, row)
                 return row
             except GiraffeDBClientError as exc:
+                if exc.status_code == 403:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={"error": "GPM_PACKET_ACCESS_DENIED"},
+                    ) from exc
                 _raise_production_unavailable(exc)
                 logger.warning(
                     "GPMPacketStore.get: provider read failed error_code=%s",
