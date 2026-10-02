@@ -29,6 +29,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' }}
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Enforce one-way myAIVAN file ownership
@@ -54,6 +55,8 @@ jobs:
       GIRAFFE_DB_CONTRACT_TOKEN: ${{ secrets.GIRAFFE_DB_CONTRACT_TOKEN }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -84,6 +87,7 @@ jobs:
         if: ${{ env.GIRAFFE_DB_CONTRACT_TOKEN != '' }}
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          persist-credentials: false
           repository: GiraffeTechnology/giraffe-db
           path: giraffe-db-contract
           sparse-checkout: scripts/check_unified_data_ids.py
@@ -158,6 +162,8 @@ jobs:
         working-directory: integrations/openclaw-aivan-plugin
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -192,6 +198,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -245,12 +253,62 @@ jobs:
           --cov=aivan --cov-report=term-missing --cov-fail-under=75
 
   dependency-review:
+    # Keep the required context name; OSV performs the dependency vulnerability scan.
     name: Dependency review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: ${{ runner.temp }}/osv-offline
+      OSV_RECORD_VALIDATOR: ${{ runner.temp }}/osv-record-validator
+      GOTELEMETRY: "off"
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install OSV Scanner 2.6.0 (verified release digest)
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64 \
+            --output "$RUNNER_TEMP/osv-scanner"
+          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  $RUNNER_TEMP/osv-scanner" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Set up pinned Go for the upstream advisory decoder
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: "1.25.8"
+          cache: false
+      - name: Build the matching OSV record decoder
+        working-directory: tools/security/osv-record-validator
+        run: |
+          go test -mod=readonly ./...
+          go build -mod=readonly -buildvcs=false -trimpath -o "$OSV_RECORD_VALIDATOR" .
+      - name: Download complete public vulnerability databases (no project data)
+        run: |
+          set -euo pipefail
+          cache="$OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY/osv-scalibr"
+          mkdir -p "$cache/PyPI" "$cache/npm"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip \
+            --dump-header "$cache/PyPI/download-headers.txt" --output "$cache/PyPI/all.zip"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip \
+            --dump-header "$cache/npm/download-headers.txt" --output "$cache/npm/all.zip"
+      - name: OSV offline full lockfile vulnerability and coverage gate
+        run: python tools/security/scan.py osv
+      - name: Preserve OSV reports even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-osv-${{ github.run_id }}
+          path: security-reports/osv/
+          if-no-files-found: error
+          retention-days: 30
 
   stage6-candidate-evidence:
     name: Stage 6 candidate evidence (5 consecutive runs)
@@ -258,6 +316,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
