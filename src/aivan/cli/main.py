@@ -50,7 +50,7 @@ def cmd_demo(args):
         "source": "openclaw", "channel": "openclaw-weixin", "channel_account_id": "salesperson-main",
         "conversation_id": "demo_conv_001", "message_id": "demo_msg_001",
         "sender_id": "customer_001", "sender_display_name": "Demo Customer",
-        "message_text": "我需要采购10000件白色纯棉男士衬衣，发到温哥华，45天内交货。",
+        "message_text": "I need to source 10000 pcs white, pure cotton men's shirts for delivery to Vancouver within 45 days.",
         "message_type": "text", "attachments": [], "timestamp": "", "mode": "auto",
     }
     print("\nStep 1: Customer inquiry received")
@@ -66,7 +66,7 @@ def cmd_demo(args):
 
     msg2 = dict(msg1)
     msg2["message_id"] = "demo_msg_002"
-    msg2["message_text"] = "180gsm，S/M/L/XL = 20/40/30/10，单件独立袋装，目标价USD 4.80以内，优先空运，DDP最好。"
+    msg2["message_text"] = "180gsm, S/M/L/XL = 20/40/30/10, individually bagged, target price no more than USD 4.80, air freight preferred, DDP preferred."
     print("\nStep 2: Customer provides missing details")
     print(f"Message: {msg2['message_text']}")
     with db_session() as db:
