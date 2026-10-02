@@ -1,6 +1,6 @@
 # myAIVAN UI catalog candidate evidence
 
-This document records the application-side acceptance boundary for the myAIVAN permanent branch. It does not authorize or describe server, DNS, TLS, proxy, port, process, database, bridge, or cloud-control changes.
+This is a historical catalog/brand implementation record, not the product acceptance boundary. Current work and interaction use standard English, with non-English input/output dynamically translated through `giraffe-language-skill`. Static catalogs and fixed locale readiness are preserved implementation assets to reconcile, not mandatory product gates. This document authorizes no deployment or infrastructure change.
 
 ## Candidate lineage
 
@@ -8,13 +8,13 @@ This document records the application-side acceptance boundary for the myAIVAN p
 - Withdrawn baseline: commit `0747e79a8dd4ea4f1f6405f72db9ba82fe97ff89`, tree `eb76907b0380f66fbb2fb412afdb0250d608477f`.
 - A new full commit SHA and tree are recorded in the immutable build evidence after the candidate commit exists. The withdrawn baseline is never a production candidate.
 
-## UI catalog contract
+## Historical UI catalog implementation
 
-- The Python catalog in `src/aivan/app/ui_catalog.py` is the versioned authoritative English source. Stable message IDs are independent of their English values; any value or key-set change rotates `catalog_version`.
-- FR, ES, DE, KO, and JA are generated only through `giraffe-language-skill`. qwen3.5:9b is accepted only as `proofread-only`, never as provider, generator, backend, or translator fallback.
+- The earlier implementation used the Python catalog in `src/aivan/app/ui_catalog.py` as its versioned English UI source. Stable message IDs are independent of their English values; any value or key-set change rotates `catalog_version`.
+- The earlier candidate generated FR, ES, DE, KO, and JA through `giraffe-language-skill`. It assigned qwen3.5:9b a `proofread-only` role. This is an implementation record, not a new product restriction on a model brand.
 - Generated catalogs are candidate-bound, complete-key-set, fixed-input, read-only artifacts. The public API never accepts source text and never triggers translation.
 - Catalog files and directories must be absolute, non-symlink, private on POSIX, safely opened and atomically replaced. Artifact SHA-256 is emitted by the generator.
-- `/readyz` fails closed until all five generated locales match the active candidate, catalog version, policy, provider/model/backend, message set, and per-message provenance.
+- The historical `/readyz` implementation fails closed until all five generated locales match the active candidate, catalog version, policy, provider/model/backend, message set, and per-message provenance.
 - The browser forces English-manifest revalidation across deployment switches, rejects an old candidate, loads generated languages before authentication, caches one promise per locale, ignores late responses for inactive locales, and renders generated values only through text or escaped HTML paths.
 
 ## Giraffe Technology VI input
@@ -33,6 +33,8 @@ The authoritative PDF contains no independent vector `/Form` logo object, so the
 
 The UI renders the independent mark without distortion inside a white, strictly circular base. The approved mark is at least 40px high in the header and 52px on the login screen. ArtCCH, the QC icon, JINÉ/NÉSHA, old Stage 3 UI, `giraffe-icon-tight.png`, screenshots, and JPG sources are excluded. This asset may be called an **approved-PDF-derived raster asset**, never an original vector master; unlimited scaling/print editing still requires brand-owner SVG/AI/EPS/vector-PDF delivery.
 
-## Production acceptance gates
+## Current acceptance and preservation
 
-Application completion requires a clean new candidate SHA/tree, full CI and CodeQL, independent Aivan P0/P1=0 review, five real non-fallback translator catalogs, and public desktop/mobile A–K acceptance. Server-side deployment and fault handling remain exclusively with the `全服务器` task. No real business message may be sent during acceptance, and the dedicated test entry must be disabled afterward.
+Use [MyAivan Web Requirements](MYAIVAN_WEB_PRD.md) and [Acceptance Criteria](ACCEPTANCE_CRITERIA.md). A fixed five-locale set, public A-K checklist, zero-P0/P1 review label or paid scanning feature does not independently establish an additional product gate. CI must be green before a merge; unavailable checks and engineering risks are reported accurately, not hidden.
+
+Retain brand assets and truthful raster provenance. Preserve candidate code/tests and record legacy static-catalog/readiness differences in the scope inventory for separate authorized implementation. Do not delete useful assets, silently disable runtime guards or claim this documentation update changed the UI. Any target deployment or external message still requires its applicable authorization.

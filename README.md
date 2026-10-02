@@ -1,14 +1,65 @@
-# AIVAN — Private-Domain AI Trade Execution Worker
+# Aivan — Giraffe Agent's Digital Trade Assistant
 
-`Python 3.11+` | `AIVAN v0.3.0` | `Standalone Product` | `OpenClaw Gateway` | `giraffe-language-skill` | `giraffe-db` | `GLTG` | `Human Approval`
+`Python 3.11+` | `Inquiry → Quotation → Order Confirmation` | `DB-backed workflow` | `Human review`
 
-AIVAN is a private-domain AI trade execution worker for high-stakes RFQ and quote workflows.
+Aivan is the frontend application of Giraffe Agent for inquiry, quotation and order confirmation. It helps businesspeople structure requirements, find and assess suppliers, compare responses, use lead-time/path reasoning, prepare messages and confirm orders with human control.
 
-It receives buyer inquiries from approved communication channels through OpenClaw, canonicalizes multilingual input through `giraffe-language-skill`, structures RFQ intake data, checks private-domain facts through AIVAN DB / giraffe-db, calls GLTG for lead-time feasibility, drafts supplier or buyer messages, and keeps all counterparty-facing actions behind a mandatory human approval gate.
+abcdYi is the apparel/textile industry application of Giraffe Agent and its frontend calls Aivan. MyAivan is Aivan's web version, maintained on the permanent `myaivan-web` release branch. Do not merge that branch into `main`.
 
-AIVAN is not a generic chatbot. It is an auditable trade-execution system for trading companies, merchandisers, sourcing teams, and cross-border procurement operators.
+## Product and acceptance documents
 
----
+- [Aivan product requirements](docs/AIVAN_PRODUCT_PRD.md)
+- [MyAivan first web iteration](docs/MYAIVAN_WEB_PRD.md)
+- [Observable acceptance criteria](docs/ACCEPTANCE_CRITERIA.md)
+- [Source reconciliation and superseded interpretations](docs/PRODUCT_SOURCE_RECONCILIATION.md)
+- [Code preservation inventory](docs/SCOPE_PRESERVATION_INVENTORY.md)
+- [Repository instructions](AGENTS.md)
+
+These documents define the reconciled delivery target. They do not claim that the current branch, a candidate PR or a deployed service has completed it. Legacy issues and stage reports are evidence about their own revisions; they do not independently authorize extra requirements.
+
+## Component boundary
+
+| Component | Responsibility |
+| --- | --- |
+| Aivan | Shared inquiry, quotation, human review and order-confirmation frontend workflow |
+| MyAivan | Conversation-first web version of Aivan; separate release line, shared business truth |
+| abcdYi | Apparel/textile industry rules and full industry order execution; frontend calls Aivan |
+| OpenClaw-Aivan | IM/email access through the OpenClaw gateway/runtime and account-connectivity layer |
+| GLTG | API-invoked lead-time and feasibility calculation |
+| GPM | API-invoked quotation/pricing guidance through its API contract |
+| Private-domain DB | Dynamic business history and process system of record; giraffe-db or a compatible user DB |
+| giraffe-language-skill | Dynamic translation before non-English input enters workflow and for requested localized output |
+| Human | Outbound-message review and consequential commercial decisions |
+
+The product is not limited to a monitoring/takeover control plane. No separate formal-contract record, signature or version check is a mandatory extra prerequisite before production.
+
+## Data and language
+
+Aivan reads facts and process state from the private-domain DB and persists workflow changes there. It must resume correctly after a conversation switch or restart. Chat/LLM context and browser memory are not business truth. A DB-derived request-context object is allowed.
+
+The DB provider is replaceable through its compatible API/adapter. The two designated simulated databases, generated from real local data, are valid acceptance sources. Exercise actual application code, selected APIs, writes/readback and recovery; do not confuse legitimate simulated datasets with fake service responses or skipped integration steps.
+
+Standard English is the language of work and interaction. Non-English input is dynamically translated through `giraffe-language-skill` before business workflow. Non-English output also uses that module. Except for enterprise/user profile information, the DB must not store non-English content, including raw-message, audit or metadata copies. See [the language and storage rule](docs/GIRAFFE_INTERNAL_WORKING_LANGUAGE.md). Existing data is inventoried for a safe authorized migration, not deleted by this documentation change.
+
+## User workflow
+
+1. Receive an inquiry, supplier response, supported file/image or operator instruction.
+2. Show structured requirements, known facts and missing-field questions.
+3. Read suppliers, products and history from the configured private-domain DB.
+4. Prepare supplier inquiries and compare actual responses using the applicable GLTG/GPM APIs.
+5. Present quotations/options and risk notes for human review, rejection or revision.
+6. Carry out the explicitly authorized channel action with truthful status.
+7. Confirm the selected order and persist its state and audit evidence.
+
+Return the actual number of available options; never fabricate a third supplier. Preserve supplier-stated facts separately from inference and forecasts. Model percentiles are estimates, not an unmeasured delivery guarantee.
+
+## MyAivan first web iteration
+
+The required UI is **Welcome → Start Working → Conversation**. The conversation page has a top message stream, middle generated-draft review and bottom text/paste/file/image input. User messages align right and Aivan messages left. File/image input must work; voice transcription may be an honest placeholder. Case Markdown backup is required.
+
+Draft actions are Copy, Send by Email, Mark as manually sent and Reject. All IM channels, including WeChat, WhatsApp, LINE and Wangwang, use review/copy/manual-send/confirmation. Email uses explicit confirmation and a configured OpenClaw-Aivan adapter; unavailable email shows a clear manual-copy fallback. Mock, failed or uncertain delivery is never shown as actual success.
+
+The original five-consecutive-run, 20-case UI checks remain required. A first-UI pass does not claim that all full-product, industry-lifecycle or deployment work has passed. Supporting operations screens do not replace the conversation experience.
 
 ## Install
 
@@ -17,10 +68,10 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/GiraffeTechnology/aivan.git
 cd aivan
-./scripts/bootstrap_local.sh   # copies .env.example -> .env, uv sync, aivan init
+./scripts/bootstrap_local.sh
 ```
 
-Or manually:
+Or prepare the existing local development profile manually:
 
 ```bash
 cp .env.example .env
@@ -28,321 +79,41 @@ uv sync
 uv run aivan init
 ```
 
+For MyAivan work, use its permanent branch and target web PRs to `myaivan-web`. These commands are local development instructions, not authorization to replace a running service or its data.
+
 ## Run locally
 
 ```bash
-uv run aivan serve             # FastAPI server on AIVAN_HOST:AIVAN_PORT (default 127.0.0.1:8765)
-uv run aivan demo              # offline core RFQ demo (mock providers)
+uv run aivan serve
+uv run aivan demo
 ```
 
-The local dashboard is served at `http://127.0.0.1:8765/app`.
+The existing local app route is `http://127.0.0.1:8765/app`. The demo uses explicit mock providers. A successful mock demo is useful smoke evidence but does not prove the real DB/GLTG/GPM/channel integrations or the required first-web-iteration UI.
 
-## Test
+## Repository checks
 
 ```bash
-uv run pytest -q                                              # unit + contract tests, offline
-uv run python scripts/validate_clawhub_aivan_plugin.py        # ClawHub plugin metadata
+uv run pytest -q
+uv run python scripts/validate_clawhub_aivan_plugin.py
 uv run python scripts/run_aivan_openclaw_plugin_smoke_test.py --offline
-uv run python scripts/run_aivan_openclaw_full_check.py        # full OpenClaw plugin check
-uv run python scripts/run_private_domain_rfq_e2e.py           # offline private-domain RFQ loop
-uv run python scripts/run_aivan_e2e.py                        # full E2E (requires a live GLTG server)
+uv run python scripts/run_aivan_openclaw_full_check.py
+uv run python scripts/run_private_domain_rfq_e2e.py
+uv run python scripts/run_aivan_e2e.py
 ```
 
----
+Check each script's selected profile and prerequisites. The private-domain offline runner and mocked transports do not establish real API acceptance. Record actual executed steps; a skipped step is not a pass. Keep CI green before merge, and report configuration/scan availability separately from product functionality.
 
-## OpenClaw Gateway Discovery and Install
+## OpenClaw integration
 
-OpenClaw connects to AIVAN through the bridge plugin in
-`integrations/openclaw-aivan-plugin/`:
+The bridge lives in `integrations/openclaw-aivan-plugin/`. Its plugin ID is `openclaw-aivan`; the package is `@giraffetechnology/openclaw-aivan`. The entry registers an agent harness. Inbound IM/email is normalized into the shared event contract and submitted to `/invoke`; existing aliases include `/api/openclaw/events`, `/api/skill/invoke` and `/api/rfq/create-from-event`.
 
-- **Discovery.** The plugin manifest `openclaw.plugin.json` declares the stable
-  plugin id `openclaw-aivan`, `activation.onStartup`, and an `aivanBaseUrl`
-  config schema. The npm package `@giraffetechnology/openclaw-aivan` points
-  `main`/`exports` and `openclaw.extensions` at the committed `dist/index.js`.
-- **Registration.** The built entry default-exports a `definePluginEntry`
-  object; OpenClaw calls its `register(api)`, which registers an agent harness
-  (id `openclaw-aivan`) via `api.registerAgentHarness(...)`.
-- **Invocation.** The harness's `runAttempt` normalizes the inbound IM/email
-  message into an OpenClaw-standard event and POSTs it to the local AIVAN
-  server (`AIVAN_BASE_URL`, default `http://127.0.0.1:8765`) at `/invoke`.
-  AIVAN also exposes `/api/openclaw/events`, `/api/skill/invoke`, and
-  `/api/rfq/create-from-event` for the same event contract.
-- **Skill listing.** `skills/aivan-trade-salesperson/SKILL.md` is the ClawHub
-  skill listing (slug `aivan-trade-salesperson`); it routes trade-sourcing
-  intent to the plugin and holds no business logic.
+`skills/aivan-trade-salesperson/SKILL.md` routes trade intent to the plugin. The event's case/project and participant context distinguish buyer-side inquiry, supplier-side reply and operator commands. The transport does not independently authorize a business action or declare delivery.
 
-These contracts are enforced by `tests/test_gateway_metadata_contract.py` and
-the `scripts/run_aivan_openclaw_*` check scripts.
+Account credentials remain with the authorized connectivity/configuration boundary. Aivan keeps account metadata, never platform passwords, cookies or session tokens. Platform trust does not imply supplier trust or waive outbound review.
 
-## B/M Role Switching
+## GLTG and GPM integration
 
-Every OpenClaw event carries a `role_context`. AIVAN routes on it:
-
-- `buyer`, `customer`, `b_side` (or empty) → treated as a buyer-side (B) inquiry:
-  requirement structuring, supplier routing, quote drafting.
-- `supplier`, `seller`, `m_side` → treated as a supplier-side (M) reply:
-  parsed into a structured supplier quote and attached to the owning project.
-- `user` with `mode=command` → operator commands to AIVAN itself.
-
-Supplier-side events are never misclassified as new buyer inquiries;
-`project_id` and `role_context` are preserved end-to-end through the plugin
-(verified by `scripts/run_aivan_openclaw_gateway_p0_test.py`).
-
-## Buyer → Supplier → Buyer Loop
-
-1. **Buyer inquiry** arrives as an OpenClaw event and is structured into a
-   provenance-tagged requirement (language skill first for non-English input).
-2. **Intermediary handling**: AIVAN looks up private-domain context
-   (suppliers, history) and drafts supplier inquiry emails/IMs — all pending
-   human approval.
-3. **Supplier replies** are parsed (`parse_supplier_reply`) into unit price,
-   MOQ, lead time, and terms; missing fields stay `None` and never crash the flow.
-4. **Markup**: `calculate_buyer_quote` applies the configured margin
-   (`AIVAN_DEFAULT_MARGIN_RATE` or a fixed margin) on top of supplier cost.
-5. **Freight / insurance**: domestic and international logistics fees are
-   added as pass-through costs before margin.
-6. **Lead time**: GLTG P50/P80/P90 estimates set `risk_buffer_days`
-   (conservative vs expected delivery) and deadline feasibility.
-7. **Final buyer reply**: Top-3 options (fastest / lowest cost / most
-   reliable) with supplier identity and cost hidden when configured — again
-   behind the human approval gate.
-
----
-
-## Current Status
-
-```text
-Current product role: standalone private-domain trade execution worker
-Current package: AIVAN v0.3.0
-Primary runtime: FastAPI + local DB + OpenClaw bridge
-Primary channel path: OpenClaw normalized events
-GLTG integration: v1 HTTP client, v2 contract target
-Language boundary: giraffe-language-skill P0 required for non-English input
-Human approval: mandatory for outbound counterparty actions
-```
-
-Validated / implemented areas:
-
-```text
-local install and CLI flows
-FastAPI health and event endpoints
-OpenClaw plugin bridge structure
-WeChat-priority live channel path through OpenClaw
-RFQ / project / draft workflow skeleton
-Giraffe DB / GPM context contract
-GLTG v1 lead-time call path
-human approval draft workflow
-```
-
-Known active gaps:
-
-```text
-production GLTG v2 behavior/statistical simulation is not yet the default
-non-English raw RFQ extraction must be blocked until language-skill integration is complete
-live model/provider availability depends on configured backend services
-ClawHub/public production packaging requires final release gate validation
-```
-
----
-
-## System Boundary
-
-AIVAN owns trade execution workflow logic. It does not own every infrastructure layer.
-
-```text
-OpenClaw                = channel/account connectivity
-giraffe-language-skill  = multilingual canonicalization and output localization
-giraffe-db              = private business facts and synthetic/private test data
-GLTG                    = lead-time feasibility simulation
-GPM                     = procurement graph/path reasoning
-AIVAN                   = controlled RFQ execution workflow
-Human operator          = legal/commercial approval
-```
-
-AIVAN must not silently absorb OpenClaw credentials, language canonicalization rules, private data ownership, GLTG math, or QC model inference.
-
----
-
-## Controlled Real-Test Email
-
-Real email sending is disabled by default. For an approved OpenClaw real-test run,
-set `AIVAN_EMAIL_SEND_MODE=real_test` and `AIVAN_EMAIL_GATEWAY=openclaw_real_test`.
-The real-test transport only sends approved drafts, requires
-`AIVAN_EMAIL_ALLOWED_RECIPIENTS`, and preserves the human approval gate.
-
-The CTYUN 163 mailbox configuration uses `giraffetechnology@163.com` with SMTP
-SSL on `smtp.163.com:465` and POP3 SSL on `pop.163.com:995`. 163 requires a
-client authorization code for `AIVAN_SMTP_PASSWORD` / `AIVAN_POP3_PASSWORD`; the
-web login password is not accepted for POP3/SMTP client access.
-
-```bash
-AIVAN_EMAIL_SEND_MODE=real_test
-AIVAN_EMAIL_GATEWAY=openclaw_real_test
-AIVAN_EMAIL_ALLOWED_RECIPIENTS=mich@giraffe.technology
-AIVAN_PRESET_MAILBOX=giraffetechnology@163.com
-AIVAN_SMTP_HOST=smtp.163.com
-AIVAN_SMTP_PORT=465
-AIVAN_SMTP_USE_SSL=true
-AIVAN_SMTP_USE_TLS=false
-AIVAN_SMTP_USERNAME=giraffetechnology@163.com
-AIVAN_SMTP_PASSWORD=<163-client-authorization-code>
-AIVAN_POP3_HOST=pop.163.com
-AIVAN_POP3_PORT=995
-AIVAN_POP3_USE_SSL=true
-AIVAN_POP3_USERNAME=giraffetechnology@163.com
-AIVAN_POP3_PASSWORD=<163-client-authorization-code>
-```
-
----
-
-## P0 Language Boundary
-
-Standard English is the only internal working language across Giraffe products.
-
-For non-English buyer, supplier, operator, IM, email, marketplace, or RFQ input:
-
-```text
-raw multilingual input
--> giraffe-language-skill
--> canonical English packet
--> AIVAN RFQ/workflow logic
--> giraffe-db / GPM / GLTG calls
--> decision packet / draft
--> localized user-facing output
-```
-
-AIVAN must not:
-
-```text
-call its requirement LLM with raw non-English business text
-run deterministic fallback extraction over raw non-English business text
-infer product/category/destination/material/quality/supplier capability/price/lead time from raw non-English text
-write graph data from raw non-English input
-call GLTG from raw non-English input
-create outbound drafts from raw non-English input
-```
-
-If `giraffe-language-skill` is unavailable or cannot produce a valid canonical packet, AIVAN must block local extraction and ask for canonicalization or operator confirmation.
-
-English RFQs may continue through AIVAN's existing local LLM and deterministic fallback path, with language-skill normalization used when available.
-
----
-
-## Core Workflow
-
-```text
-Buyer inquiry / operator command
--> OpenClaw normalized event
--> language boundary check
--> giraffe-language-skill canonical packet if needed
--> RFQ/project workspace detection
--> requirement structuring
--> private-domain lookup in AIVAN DB / giraffe-db
--> supplier routing / GPM context
--> GLTG lead-time feasibility
--> quote / supplier-follow-up draft
--> operator approval request
--> approved outbound execution
--> execution graph / memory update
--> localized user-facing summary
-```
-
----
-
-## GLTG Integration
-
-Current AIVAN GLTG integration targets the standalone GLTG service:
-
-```bash
-GLTG_API_BASE_URL=http://localhost:8090
-GLTG_API_TIMEOUT_SECONDS=30
-```
-
-Current default is v1-compatible lead-time estimation. Setting
-`GLTG_API_VERSION=v2` switches the client to the v2 simulation endpoints:
-
-```text
-POST /v2/lead-time/simulate
-POST /v2/paths/enumerate
-POST /v2/reforecast
-```
-
-The v2 behavior/statistical simulation rollout (full request builder,
-`source_observation_ids` propagation, `gltg_run_id` persistence) is tracked in
-`docs/GLTG_BEHAVIORAL_STATISTICAL_MODEL_ITERATION_PRD.md`.
-
-AIVAN must not calculate lead time locally and must not silently replace GLTG with LLM guesses.
-
----
-
-## giraffe-db / Private Data Contract
-
-AIVAN consumes private-domain facts from AIVAN DB and giraffe-db.
-
-Expected data categories include:
-
-```text
-customers / buyers
-suppliers
-supplier products
-historical RFQs
-historical quotes
-leadtime observations
-supplier capacity snapshots
-risk events
-behavior observations
-buyer behavior snapshots
-supplier behavior snapshots
-buyer-supplier pair metrics
-gltg simulation runs
-gltg behavior inputs
-execution events
-audit records
-```
-
-Synthetic records from `synthetic_private_v1` must remain clearly labeled as synthetic and must not be represented as real transaction history.
-
----
-
-## Human Approval Boundary
-
-AIVAN can draft and recommend. It cannot legally or commercially commit by itself.
-
-Human approval is required for:
-
-```text
-supplier inquiries
-buyer quotations
-supplier selection
-delivery commitment
-order confirmation
-payment instruction
-contractual commitment
-high-risk exception handling
-```
-
----
-
-## Environment
-
-Core runtime:
-
-```bash
-AIVAN_ENV=local
-AIVAN_HOST=127.0.0.1
-AIVAN_PORT=8765
-AIVAN_DB_URL=sqlite:///./data/aivan.db
-AIVAN_REQUIRE_HUMAN_APPROVAL=true
-```
-
-OpenClaw:
-
-```bash
-OPENCLAW_BASE_URL=http://localhost:3000
-OPENCLAW_MOCK_MODE=true
-```
-
-GLTG:
+GLTG is a standalone API dependency. Existing configuration includes:
 
 ```bash
 GLTG_API_BASE_URL=http://localhost:8090
@@ -350,82 +121,42 @@ GLTG_API_TIMEOUT_SECONDS=30
 GLTG_API_VERSION=v1
 ```
 
-Language boundary:
+The selected version determines the estimate/simulation, path and reforecast contract. See [the GLTG integration requirements](docs/GLTG_BEHAVIORAL_STATISTICAL_MODEL_ITERATION_PRD.md). Do not silently calculate replacement lead times locally. GPM quotation/pricing guidance and durable decisions likewise use their chosen API/provider contract, with source, tenant and persisted process-state evidence.
+
+Full DAG simulation, optional schema expansion and long-term calibration are later model work, not default prerequisites for a usable first iteration.
+
+## Configuration and existing runtime behavior
+
+The existing local profile includes:
 
 ```bash
-AIVAN_LANGUAGE_SKILL_ENABLED=true
-AIVAN_LANGUAGE_SKILL_BASE_URL=http://127.0.0.1:8788
-AIVAN_LANGUAGE_SKILL_FAIL_SOFT=true
+AIVAN_ENV=local
+AIVAN_HOST=127.0.0.1
+AIVAN_PORT=8765
+AIVAN_DB_URL=sqlite:///./data/aivan.db
+AIVAN_REQUIRE_HUMAN_APPROVAL=true
+OPENCLAW_MOCK_MODE=true
 ```
 
-See `.env.example` for the full annotated list.
+See `.env.example` for supported settings. Provider choice and runtime configuration must satisfy the actual selected data contract; a local filename is not the product's mandated system of record.
 
 Production is intentionally stricter:
 
-- set `AIVAN_DB_URL` explicitly through the authorized configuration store;
-- bind `AIVAN_API_KEY` to `AIVAN_TENANT_ID`, or use a reviewed
-  `AIVAN_TENANT_API_KEYS` mapping;
-- set `GIRAFFE_DB_BASE_URL` for GPM durable persistence and active-tenant checks;
-- set `AIVAN_CORS_ORIGINS` to an exact comma-separated browser allowlist
-  (production defaults to none and rejects `*`);
-- treat `deploy/aivan.production.env.example` as a schema, not as authorization
-  to deploy or modify a host.
+- Authentication must use trusted server-side identity and tenant binding; request-body role or tenant strings are not authority.
+- A public browser profile needs safe sessions, exact CORS and protection of credentials and data.
+- In the existing main-branch dependency-probe implementation, the giraffe-db probe verifies `/healthz` readiness and the authenticated `/api/data/schema-version` response against its selected contract; provider response tenant echo is not required by that endpoint's current response shape.
+- Report actual selected-provider compatibility and failed dependencies honestly. The current runtime policy and probe configuration are implementation facts; they do not make a particular provider instance, legacy product-role string, static locale bundle or named stage an independent product requirement.
+- A state-changing operation requires the appropriate committed DB result and audit/idempotency semantics; dependency failure must not produce false success or fake memory persistence.
 
-In production, a caller-supplied `X-Tenant-ID` is never authentication. GPM
-fails closed when giraffe-db is missing, unavailable, or not durable.
+In production, protected data and external actions must remain safe. If a legacy guard prevents a now-required compatible provider or product flow, record the mismatch and fix it in an authorized scoped code change while preserving its safety purpose. This documentation proposal does not disable guards, change configuration or claim such a fix is implemented.
 
-LLM providers are optional and must not bypass deterministic gates, GLTG, giraffe-db, or the language boundary.
+No README or passing preflight authorizes deployment, migration, production writes, outbound messages, DNS/proxy changes or service restarts. Apply environment-specific operational restrictions when that environment is actually involved; do not turn a full operational program into an unrelated functional-acceptance gate.
 
----
+## Preservation and status
 
-## Required Tests
+Useful code, tests, operational protections and assets are retained. Scope-expanded or unconfirmed work is inventoried and frozen at recorded revisions rather than deleted or silently activated. Runtime gaps and non-English-content migration require separate scoped work; this cleanup changes documentation only.
 
-AIVAN must test:
-
-```text
-non-English input calls giraffe-language-skill first
-non-English input without valid canonical packet is blocked
-local LLM never receives raw non-English business text
-deterministic fallback does not canonicalize raw non-English fields
-GLTG v1 path still works
-GLTG v2 mock transport works when enabled
-GLTG failure surfaces error instead of silent local fallback
-human approval is required before outbound messages
-localized output is separate from canonical English internal state
-static guards reject multilingual alias maps inside AIVAN
-```
-
----
-
-## Product Principle
-
-```text
-Language is normalized by giraffe-language-skill.
-Facts come from giraffe-db.
-Lead time comes from GLTG.
-Procurement path reasoning comes from GPM.
-Channel connectivity comes from OpenClaw.
-Execution control lives in AIVAN.
-Final responsibility stays with humans.
-```
-
-### Stage 4 channel delivery contract
-
-| Channel | Delivery mode |
-| --- | --- |
-| Email | `auto_send` |
-| LINE | `auto_send` |
-| WeChat / Wangwang | `guided_relay` |
-| WhatsApp | `unsupported` |
-
-Guided relay keeps approved messages in `GET /api/relay/outbox`. After a human
-copies and sends the message in the channel client, the client records delivery
-through `POST /api/relay/{draft_id}/confirm` with an `Idempotency-Key` and a
-receipt reference. Relayed replies enter the same tenant-scoped Case pipeline
-through `POST /api/relay/inbound`; they are not attributed to a fixed service
-actor.
-
----
+For any completion report, identify the exact candidate, tested scope, DB source/provider, APIs, actual results and remaining limitations. Documents, PRs, historical evidence and green aggregate jobs do not establish current product acceptance by themselves.
 
 ## License
 
