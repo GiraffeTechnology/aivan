@@ -1,114 +1,29 @@
-# Aivan Delivery Stage Framework v1.1
+# Bounded Delivery Guidance
 
-Authority: [issue #96](https://github.com/GiraffeTechnology/aivan/issues/96). Product direction remains the seven-function loop in [#90](https://github.com/GiraffeTechnology/aivan/issues/90).
+Reconciled: 2026-10-02. Current product scope is defined in [Aivan Product Requirements](AIVAN_PRODUCT_PRD.md), with [observable acceptance](ACCEPTANCE_CRITERIA.md).
 
-Establish staged delivery for abcdyi / Aivan without changing product direction or reducing engineering quality. Existing implementation is preserved; only delivery stages are separated.
+## Product target and finite work
 
-## Stage 1 — Demonstrable Product
+Aivan is the Giraffe Agent frontend for inquiry, quotation and order confirmation. MyAivan is its web version. Deliver a finite requested user flow, integrate the components needed by that flow, test it, demonstrate the result and record the exact delivered scope.
 
-Objective:
-Demonstrate the complete industrial order execution loop.
+The earlier seven-function RFQ-to-human-approval loop and four-stage framework in issues #90/#96 are historical planning references. They are neither the complete current product definition nor independent authorization for new operational, institutional or enterprise prerequisites. Legacy Stage 5/6/7 and Stage A-D names identify historical engineering work, not an ordered chain that must all finish before the current user-facing result can be accepted.
 
-Scope:
+## Preserve and converge
 
-RFQ Input
-→ Requirement Structuring
-→ Supplier Inquiry Draft
-→ Supplier Reply Parsing
-→ GLTG
-→ Execution Recommendation
-→ Human Approval
+- Preserve useful implementation, source-defined tests, data isolation, authorization and integrity protections.
+- Finish defects and missing integration actually needed for the requested flow.
+- Freeze unrelated expanded work with its source revision and inventory. Do not delete it, refactor it away, silently disable it or promote it into a new requirement.
+- Report observations and proposed later improvements separately from demonstrated failures of the current scope.
+- Never use AI authorship or complexity alone as a reason to condemn or remove code.
 
-Acceptance:
+## Evidence
 
-- Complete user workflow;
-- Data persistence works;
-- Core integrations work;
-- Demo can be executed end-to-end;
-- Relevant tests pass.
+Identify the branch/candidate, chosen DB provider and designated simulated database, actual service contracts, test actions and limitations. Functional acceptance may use the two designated simulated DBs. It must execute actual application/API paths and persist/read back state, including recovery; mocks, skipped jobs and static screens do not establish that result.
 
-Not blocking Stage 1:
+Retain the original MyAivan five-run UI requirement at its actual scope. A completed UI iteration, a full inquiry-to-order-confirmation flow, an abcdYi lifecycle run and a target-host deployment must each be reported at the scope actually proved. This is a distinction between claims, not a new set of mandatory product stages.
 
-- Enterprise scale deployment;
-- Full observability;
-- Advanced automation;
-- Complete Digital Twin;
-- Future platform capabilities.
+## Operations and branch separation
 
-## Stage 2 — Operational Readiness
+`myaivan-web` remains independently released and must never merge into `main`. CI must be green before a merge; neither a docs change nor a passing check authorizes a merge or deployment.
 
-Objective:
-Support controlled pilot usage.
-
-Additional scope:
-
-- Multi-user operation;
-- Permission management;
-- Monitoring;
-- Error recovery;
-- Operational tooling.
-
-## Stage 3 — Production Scale
-
-Objective:
-Commercial production deployment.
-
-Additional scope:
-
-- Performance;
-- Reliability;
-- Disaster recovery;
-- Security hardening;
-- SLA.
-
-## Stage 4 — Enterprise / Institutional Grade
-
-Objective:
-Large-scale institutional deployment.
-
-Additional scope:
-
-- Compliance;
-- External audit;
-- Advanced governance;
-- Institutional integration.
-
-## Delivery Rule
-
-Each stage has independent acceptance criteria.
-
-A later stage MUST NOT block an earlier stage unless technically required for the current stage.
-
-## Current Stage 1 Task
-
-Complete and demonstrate the seven-function loop already defined in #90. The bounded work classification in #92 supports delivery; it does not replace the product baseline. Stage 1 completion is not a claim of controlled-pilot, production-scale, or institutional readiness.
-
-Preserve existing implementation and relevant security, integrity, and test protections. Classify current work as KEEP, FINISH-NOW, FREEZE-LATER, or REMOVE; REMOVE applies only to unsupported active instructions or demonstrably harmful/obsolete material, not a broad implementation rollback.
-
-
-## Current Work Classification
-
-| Category | Current work | Treatment |
-| --- | --- | --- |
-| KEEP | Existing RFQ handling, structuring, drafts, reply parsing, GLTG integration, recommendation, human approval, UI, persistence, tenant/auth protections, valid tests and safeguards | Preserve useful implementation and engineering quality. |
-| FINISH-NOW | Demonstrate the Stage 1 loop through the UI and backend, persist and read back its business data, fix fractional lead-time and recommendation-currency defects, validate required integrations and approval | Work through focused implementation PRs and record actual tests/demo evidence. |
-| FREEZE-LATER | Enterprise scaling, full observability, advanced automation, complete Digital Twin, and future platform capabilities not technically needed for Stage 1 | Preserve existing work; exclude unrelated expansion from Stage 1 acceptance. |
-| REMOVE | Unsupported active instructions that demand later-stage completion before Stage 1, obsolete duplicate gates and inaccurate completion claims | Retire the conflicting instruction, not useful code or necessary security evidence. |
-
-## Stage 1 Execution and Evidence
-
-- Objective: complete and demonstrate the existing #90 RFQ-to-human-approval loop, not redefine it.
-- Affected repository: Aivan, with required interfaces supplied by the existing component repositories.
-- Minimum files: only files implementing a demonstrated defect or missing step and their focused tests; this framework PR changes documentation only.
-- Validation command: each focused PR records the exact repository-supported test and demo commands for its changed path. Relevant integration checks must exercise the required real components; skipped jobs or mocks are not substitutes for the end-to-end demo.
-- Exit evidence: a reproducible user-flow demonstration, successful backend execution, persisted business data and readback, core integration results, and relevant passing tests.
-
-Current Stage 1 task: #90 implementation and end-to-end demonstration, supported by the bounded classification task #92. The UI and correctness slices may proceed independently when they have no technical dependency. This framework does not declare Stage 1 complete.
-
-## Preserve Quality and Stage Boundaries
-
-The additional scope of Stages 2–4 does not remove authentication, permissions, tenant isolation, approval controls, integrity protections, or error handling technically needed for Stage 1. No existing tests, CI checks, security safeguards, runtime code, or deployment configuration are disabled by this document.
-
-Freeze a completed stage by recording its delivered scope, tested revision, and evidence. Do not erase valid implementation or prohibit necessary defect fixes. Stage 1 demonstrates the product; controlled pilot and commercial production claims require their respective stages. This document does not itself order a deployment or cancel separately authorized work.
-
-Only the explicitly approved four stages are introduced here. Agents must not invent additional acceptance gates or use later-stage observations as current blockers without a technical dependency.
+Deployment and external test sending require authorization for those actions, and relevant environment-specific safeguards remain in force. Full operational platforms, production-customer datasets, every live channel, long-term model calibration or a formal-contract signature gate do not become default prerequisites for a functional product delivery.

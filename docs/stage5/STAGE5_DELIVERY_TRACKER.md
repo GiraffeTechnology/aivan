@@ -1,53 +1,20 @@
-# Stage 5 delivery tracker
+# Historical Stage 5 Asset Inventory
 
-Stage 5 is intentionally split into independently reviewable PRs. PR #36 is a
-reference only: its independent `web_*` Case, draft, and audit state machines
-must not be merged into the shared Core.
+Reconciled: 2026-10-02. This record preserves earlier engineering organization without treating it as the current product scope or a mandatory stage chain.
 
-## Stage 5A — Core event correction
+## Useful areas retained
 
-Status: **implementation merged**; downstream invalidation, compensation task,
-and correction-draft integration remain carried by Stage 7B.
+- Event impact preview and immutable correction, with tenant, role and idempotency checks.
+- Shared case, conversation, participant, draft, approval and audit APIs.
+- Channel adapters and guided-relay records with truthful approval/delivery distinctions.
+- Web session/workbench, audit and supporting operations views.
 
-- `GET /api/events/{event_id}/impact`
-- `POST /api/events/{event_id}/reverse`
-- tenant-scoped lineage, payload digest, idempotent reversal ledger
-- append-only correction/compensation evidence; no physical history deletion
+The original tracker marked several areas incomplete. This cleanup does not relabel them passed. Current results must be verified at the selected candidate.
 
-## Stage 5B — MyAIVAN Core API
+## Reconciled scope
 
-Status: **not delivered**.
+MyAivan uses the shared Aivan business model on its independent `myaivan-web` release branch, which never merges into `main`. Its first UI is Welcome/Start Working and conversation/review/input, usable files/images, copy/manual IM, explicit configured-email confirmation/fallback and Markdown backup.
 
-- expose current Core Project/Case/Conversation/Participant/Draft/Approval/Audit
-  models to the workbench
-- migrate useful PR #36 behavior without importing `web_*` business tables or
-  its independent draft status machine
-- keep uploads in a separate, least-privilege boundary
+All first-web IM channels, including LINE and WhatsApp, use manual copy/send/confirmation. Existing automatic adapters remain preserved assets, not a requirement or authorization for that iteration. Attachment placeholders do not satisfy required file/image input. Broader correction and operational surfaces may remain useful without becoming hidden UI prerequisites.
 
-## Stage 5C — unified delivery adapters
-
-Status: **not delivered**. Guided-relay repository APIs and automated tests do
-not substitute for authorized real-channel receipts.
-
-- Email and LINE auto-send through Core approval, receipt, and audit semantics
-- WeChat/Wangwang continue through guided relay
-- WhatsApp remains fail-closed unsupported
-
-## Stage 5D — MyAIVAN UI
-
-Status: **not delivered**. PR #36 remains reference-only.
-
-- role, approver, delivery mode, dependency error, relay card, impact preview,
-  correction action, receipt, and audit timeline
-- the browser stores no channel password, private key, or API token
-
-## Carried acceptance items
-
-Claude Code found no blocking defect in PR #56. The following operational
-evidence remains deliberately unclaimed and is carried into Stage 5/6:
-
-- current-main mobile WeChat/Relay five-run production evidence;
-- transfer-card UI and attachment placeholder behavior;
-- CTYun deployment evidence using the existing `abcdyi-sin` bridge for every
-  non-China destination;
-- AIVAN ports 443/8443 remain reserved and must not be modified.
+Use [current acceptance](../ACCEPTANCE_CRITERIA.md), including the original five-run UI tests and later DB/English requirements. Preserve expanded code by exact revision in [the inventory](../SCOPE_PRESERVATION_INVENTORY.md); do not delete it or infer that every complex feature is unauthorized.

@@ -1,62 +1,27 @@
-# AIVAN control-plane responsibility matrix
+# Aivan Product and Dependency Responsibility Matrix
 
-Status: Stage A frozen boundary
-Date: 2026-08-28
+Reconciled: 2026-10-02. The path is retained for existing links; the product is not monitoring-only. See [Aivan Product Requirements](../AIVAN_PRODUCT_PRD.md).
 
-This matrix is normative for the AIVAN product runtime. It does not transfer
-repository development responsibility and it does not authorize production
-deployment.
+| Boundary | Responsibility | Required behavior | Failure handling |
+| --- | --- | --- | --- |
+| Aivan frontend | Inquiry, quotation, human review and order confirmation | Shared business workflow, source-grounded user-visible results | Show the precise failed step; no false completion |
+| MyAivan web | Conversation/review/input UX over Aivan | Permanent independent release line, same business truth | Retain recoverable case state and honest UI status |
+| abcdYi industry app | Apparel/textile rules and full industry execution | Frontend calls Aivan; industry lifecycle uses shared data semantics | Preserve actual status and permissions |
+| Private-domain DB | Dynamic history and process system of record | Compatible replaceable provider, real reads/writes/readback/recovery | No chat-memory or fake-persistence fallback |
+| GLTG | Lead-time and feasibility API | Use returned model/evidence contract, no duplicate local engine | Structured unavailable/invalid result, no invented lead time |
+| GPM | Procurement/path reasoning API | Grounded results and durable process evidence | No fabricated recommendation/decision |
+| OpenClaw-Aivan | IM/email access, account/channel connectivity | Human-approved channel actions; first-web IM remains manual | Accurate unsent/failed/unknown/mock status |
+| Language module | Dynamic `giraffe-language-skill` translation | Standard-English workflow; non-English DB only for enterprise/user profiles | No raw-language business fallback or side-store exception |
+| Human actor | Review, reject, revise and authorize commercial actions | Actual action, content, recipient and case remain traceable | Draft/approval is not delivery or order completion |
+| Runtime engineering | Auth, isolation, integrity, safe files/logs and idempotency | Preserve protections required by selected workflow | Fail safely without corruption or secret exposure |
+| Deployment operations | Authorized environment-specific changes | Separate scoped authorization and target protection | No implied deployment from docs, merge or preflight |
 
-| Boundary | Authority / owner | AIVAN may do | AIVAN must not do | Production failure behavior |
-|---|---|---|---|---|
-| Business facts other than QC | `giraffe-db` | Consume an audited, versioned API/SDK contract | Treat local tables, fixtures, stubs, or generated history as authoritative | No canonical context; stop the dependent step |
-| QC facts | Existing QC authority, excluded from this program | Preserve the existing boundary | Reassign QC ownership through this change | Preserve existing behavior; escalate contract ambiguity |
-| Lead-time result | GLTG | Submit versioned inputs and consume returned evidence | Calculate or silently replace GLTG results locally | Mark dependency unavailable; no commercial side effect |
-| Channel connectivity | OpenClaw | Consume normalized inbound events; submit an approved outbound request | Hold channel credentials outside the adapter or bypass approval | Stable error reference; remain unsent |
-| Email test transport | Approved test-only adapter | Send only under its explicit allowlist and real-test mode | Become a general production fallback | Deny recipient/transport; remain unsent |
-| Translation generation | `giraffe-language-skill` dedicated translator | Request canonicalization/rendering and verify provider provenance | Use qwen, ollama, mock, or an LLM as translation generator | Preserve source; require confirmation/takeover |
-| Translation proofreading | qwen in proofread-only role | Review translator output when explicitly configured | Generate the source translation or silently replace it | Keep authoritative translator output or fail closed |
-| Local model reasoning | Approved private model | Produce non-authoritative draft/advisory output | Create business facts, approve, send, or act as external translation generator | Stable unavailable state; deterministic evidence only |
-| External model API | Approval/consent policy | Call only inside a scoped, active approval context | Automatic call, implicit fallback, or secret-bearing telemetry | Deny before network call |
-| Monitoring and takeover state | AIVAN | Persist control state and audit evidence; later implement Stage B/C state machines | Claim Stage B/C closure during Stage A | Not-ready / no side effect |
-| Local persistence | AIVAN control-plane store | Store control, audit, or an explicit cache/projection with provenance, TTL, invalidation, and rebuild rules | Become a second system of record | Reject production canonical-context construction until Stage D |
-| Code and repository operations | Development toolchain outside runtime | None in the packaged product | Generate/execute code, shell out, write repositories, commit, or run Git | Process startup fails when a prohibited capability is enabled |
-| Deployment and infrastructure | MyAivan / authorized operations task | Produce immutable application artifacts and instructions in later stages | Login, deploy, change DNS/TLS/proxy/ports, or touch mail/MX | No remote action |
+## Data and acceptance
 
-## Authorized side-effect adapters
+The same replaceable DB truth relationship applies across Giraffe Agent, abcdYi and Aivan. Its two designated simulated DBs are valid for functional acceptance through real application/API execution. No particular database brand, production-customer dataset or named stage is an automatic prerequisite.
 
-Production business side effects are allowlisted to reviewed adapters only:
+Persist necessary process and history records through the appropriate owner/API, using standard-English business text. References/hashes may preserve provenance without storing prohibited non-English raw business content. Do not make local control state or an LLM transcript a competing system of record.
 
-- OpenClaw outbound delivery after the shared authorization and channel-policy
-  gates;
-- the explicitly allowlisted email test transport, never as a general fallback;
-- versioned `giraffe-db` writes after its API/SDK consumer contract is accepted
-  in Stage D.
+## Existing implementation
 
-GLTG, language-skill, search, and model calls are dependency requests, not
-commercial approval. Their results cannot themselves authorize sending,
-approval, repository mutation, or a state transition with external effect.
-
-## Stage A enforcement status
-
-- API, GPM, and CLI production entry points validate the frozen runtime policy
-  before mutable initialization or command dispatch.
-- Standalone GPM resolves public binds across CLI/direct-ASGI startup and the
-  actual request socket. A non-loopback bind requires the HMAC secret that the
-  GPM request authenticator really verifies; API-key profiles are not treated as
-  equivalent authentication for that server.
-- Production rejects mocks/stubs/test transports, automatic external-model
-  calls, and enabled code/repository capability flags.
-- The legacy local business-context constructor fails closed in production.
-  Replacement by an accepted `giraffe-db` API/SDK is deliberately deferred to
-  Stage D.
-- Monitoring closure and takeover state machines are deliberately deferred to
-  Stages B and C. This document is not evidence that those stages are complete.
-
-## Error and evidence contract
-
-Remote response bodies and exception strings are not returned to callers or
-written to logs. Runtime errors use a stable category plus an opaque correlation
-identifier; logs retain only that identifier, exception type, and reviewed
-low-cardinality context. Secrets remain environment/secret-store inputs and are
-never included in readiness output or evidence manifests.
+Versioned contracts and runtime checks are useful assets. Legacy control-plane settings, fixed providers, frozen locale catalogs and stage-specific readiness behavior must be assessed against the current requirements; their existence alone does not create product scope. Preserve conflicting or unselected code in the inventory and change behavior only in scoped authorized work.

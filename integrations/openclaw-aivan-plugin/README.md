@@ -1,26 +1,14 @@
 # @giraffetechnology/openclaw-aivan
 
-OpenClaw plugin bridge for **AIVAN** — the trade monitoring and human-takeover control plane.
+OpenClaw plugin bridge for **Aivan**, Giraffe Agent's frontend for inquiry, quotation and order confirmation.
 
 ---
 
 ## What is AIVAN?
 
-AIVAN monitors high-stakes RFQ and quote workflows and provides an auditable
-human-takeover control surface. It is not a standalone business system of
-record. Through reviewed service contracts it:
+Aivan is the digital trade assistant frontend of Giraffe Agent. MyAivan is its web version; abcdYi is the apparel/textile industry application whose frontend calls Aivan. OpenClaw-Aivan is the IM/email access dependency, with GLTG/GPM invoked through APIs. The replaceable private-domain DB stores business history and process state.
 
-- Receive buyer inquiries → structure requirements
-- Reads non-QC business facts from `giraffe-db`
-- Draft outbound messages (inquiries, options, confirmations)
-- Screen supplier risk
-- Requests lead-time evidence from GLTG
-- Generate buyer option comparisons
-- Manage order execution milestones
-
-AIVAN keeps counterparty-facing actions behind human approval. Local durable
-state is limited to control state, audit evidence, and declared short-lived
-cache/projection data; external-model calls require separate scoped approval.
+The plugin transports events and authorized requests; it does not own commercial decisions or create a second system of record. Human review, tenant isolation, accurate delivery state and credential protection remain required. See [the product requirements](../../docs/AIVAN_PRODUCT_PRD.md).
 
 ---
 
@@ -35,7 +23,7 @@ This plugin is a **thin HTTP bridge** between OpenClaw and your local AIVAN serv
 
 The plugin contains **no business logic**. It cannot authorize an outbound
 message: AIVAN's shared authorization and channel-policy gates remain mandatory.
-Business facts stay authoritative in `giraffe-db`, and lead-time results stay
+Business facts and process state stay authoritative in the chosen private-domain DB (`giraffe-db` or a compatible replacement), and lead-time results stay
 authoritative in GLTG.
 
 ---
@@ -59,7 +47,7 @@ Human operator approves in AIVAN dashboard
        │
        │  POST /api/drafts/{id}/approve
        ▼
-AIVAN sends via OpenClaw SDK
+Authorized channel action / manual IM relay
 ```
 
 ---
@@ -142,7 +130,7 @@ In mock mode:
 - All LLM calls return deterministic mock responses
 - OpenClaw events are simulated without a real IM/email connection
 - No external API calls are made
-- All tests pass
+- Test results must be recorded for the exact candidate; mock success does not establish live channel delivery
 
 ---
 
@@ -164,7 +152,7 @@ The workflow:
 4. `aivan.getPendingDrafts` returns the draft to the operator.
 5. The operator reviews the message in the AIVAN dashboard or via
    `aivan.approveDraft`.
-6. Only after approval does AIVAN send the message via OpenClaw.
+6. Execute only the authorized action supported by the selected channel policy. In the first MyAivan web iteration all IM channels use manual copy/send/confirmation; configured email uses explicit confirmation, with an honest copy fallback when unavailable.
 
 OpenClaw has no generic numeric priority field for skills. The explicit
 `$aivan-trade-salesperson` reference is the supported workflow-level skill
@@ -178,9 +166,11 @@ The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the actio
 
 ---
 
-## Local-first data boundary
+## Data and language boundary
 
-All data — buyer requirements, supplier details, conversations, drafts, risk reports, lead-time estimates — is stored in a local SQLite database (`data/aivan.db`). Nothing is synced to Giraffe Technology servers or any third-party cloud service unless you explicitly configure an external LLM provider.
+The private-domain DB is the replaceable system of record for business history and process state; chat/LLM context and local caches are not business truth. The two designated simulated DBs are valid acceptance sources when the actual application and API path execute. Fake transport responses remain mock-test evidence.
+
+Standard English is the work/interaction language. Non-English input/output uses dynamic `giraffe-language-skill` translation. Except enterprise/user profiles, the DB must not store non-English content. The account/connectivity layer owns credentials. Local-first does not mean that configured remote services receive no data; approved dependency processing and external business sending have distinct permissions.
 
 ---
 
@@ -228,3 +218,4 @@ This validates metadata and package structure without actually publishing.
 | `aivan.getPendingDrafts` | query | List drafts awaiting approval |
 | `aivan.approveDraft` | action | Approve a pending draft for sending |
 | `aivan.rejectDraft` | action | Reject and discard a pending draft |
+

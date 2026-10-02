@@ -27,11 +27,15 @@ This plugin does not:
 
 All marketplace and IM operations route through OpenClaw's documented channel SDK.
 
-## Local SQLite data boundary
+## Private-domain data and service boundary
 
-All trade data — buyer requirements, supplier details, conversations, risk reports, drafts — is stored exclusively in a local SQLite file (`data/aivan.db`). This data does not leave the operator's machine unless:
-- The operator explicitly approves a draft message (sent via OpenClaw)
-- The operator configures an external LLM provider (optional; mock is default)
+The chosen private-domain DB (`giraffe-db` or a compatible replacement) is the system of record for business history and process state. A compatible local SQLite profile may be used; it is not the only permitted database or a reason to make chat context authoritative.
+
+Explicitly configured DB, GLTG, GPM, language and connectivity APIs may process the minimum data needed for their authorized function. Approved dependency processing is distinct from sending an external business message, which still requires human authorization. Do not claim that no data can leave the device when remote dependencies are configured.
+
+Standard English is the work/interaction language. Non-English input/output uses dynamic `giraffe-language-skill` translation before workflow or for requested display. Except enterprise/user profiles, stored textual business content is standard English; raw-message/audit/metadata copies are not exceptions. Safe file/image input remains supported.
+
+The two designated simulated DBs are valid for functional acceptance through real application/API execution. Keep data labels, authentication, tenant/object isolation, durable writes/readback, safe storage and truthful outcomes. No simulated dataset authorizes fabricated facts or skipped checks.
 
 ## External LLM keys are optional
 
@@ -50,3 +54,4 @@ AIVAN does not make binding legal, credit, sanctions, or compliance decisions. A
 ## Reporting vulnerabilities
 
 To report a security vulnerability, open a private issue on the [AIVAN GitHub repository](https://github.com/GiraffeTechnology/aivan) or contact the Giraffe Technology team directly. Please do not disclose vulnerabilities publicly before they have been addressed.
+

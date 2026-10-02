@@ -1,66 +1,32 @@
-# ADR 0003: AIVAN control-plane and runtime safety boundary
+# ADR 0003: Frontend Runtime and Data Responsibility
 
-Status: Accepted for Stage A
-Date: 2026-08-28
+Status: Reconciled with product-owner corrections on 2026-10-02. This replaces the former monitoring-only identity and mandatory Stage A-D cutover interpretation. Existing runtime code is preserved, not changed by this ADR.
 
-## Context
+## Context and decision
 
-AIVAN was described and partly implemented as a standalone trade-execution
-worker with local business facts and test fallbacks. The approved product role
-is instead the P0 monitoring and human-takeover control plane. `giraffe-db` is
-the authority for all non-QC business facts; GLTG owns lead-time results;
-OpenClaw owns channel connectivity; giraffe-language-skill owns translation
-generation; humans retain final commercial responsibility.
+Aivan is Giraffe Agent's frontend for inquiry, quotation and order confirmation. Monitoring/takeover are possible capabilities, not the entire product. The private-domain DB is the dynamic, extensible system of record for both business history and process state. giraffe-db is one replaceable provider; a user's compatible private DB is allowed.
 
-## Decision
+Aivan obtains facts from that provider, writes successful process changes through the proper service contract, and recovers from DB state across conversation switches/restarts. It does not reconstruct business truth from chat/LLM context or a browser cache. A provider-derived context object is legitimate input.
 
-Production AIVAN declares and validates these exact invariants before mutable
-state is initialized:
+GLTG and GPM are API dependencies. OpenClaw-Aivan provides IM/email access. Standard English is the work/interaction language, with dynamic language-skill translation before non-English input enters workflow. Non-English DB content is prohibited except enterprise/user profile information.
 
-- `AIVAN_PRODUCT_ROLE=monitoring_takeover_control_plane`;
-- `AIVAN_BUSINESS_FACT_AUTHORITY=giraffe-db`;
-- `AIVAN_LOCAL_STATE_SCOPE=control_audit_cache_only`;
-- human approval remains mandatory;
-- mock LLM, mock OpenClaw, mock search, mock marketplace, mock GPM, stub
-  suppliers, fake HTTP transports, fabricated histories, and automatic external
-  model calls are rejected;
-- code generation, code execution, repository writes, and Git operations are
-  prohibited runtime capabilities.
+## Existing runtime policy versus product definition
 
-The packaged CLI no longer launches developer test processes. Tests are run by
-the repository toolchain outside the product runtime. GPM binds to loopback by
-default. Every standalone GPM startup path and its ASGI request boundary require
-the HMAC profile backed by `AIVAN_AUTH_SECRET` for a non-loopback bind;
-`AIVAN_API_KEY` and `AIVAN_TENANT_API_KEYS` do not satisfy that gate because
-the non-production GPM request authenticator does not consume those profiles.
+The historical runtime has literal settings such as `monitoring_takeover_control_plane` and `control_audit_cache_only`, plus a production context guard. These identify existing implementation behavior; they are not current product identity or authorization to require a named Stage D before delivering a compatible DB provider.
 
-Existing local business tables are not approved facts. Until Stage D replaces
-their reads/writes with an accepted giraffe-db API/SDK contract, production
-context construction fails closed. Stage A does not implement that cutover.
-Local persistence is allowed only for control state, audit evidence, or an
-explicit cache/projection with source version, TTL, invalidation, and rebuild
-semantics.
+If a guard blocks the required real provider/API flow, fix that specific mismatch in authorized code work while preserving authentication, isolation, no-fabrication and durable-state behavior. Do not disable every guard or claim the documentation itself repaired the implementation.
 
-## Runtime denylist scope
+The two designated simulated DBs are legitimate acceptance sources. Executing the real application/API path against them is different from fake HTTP transports, invented histories or uncommitted memory persistence. Keep simulated labels and truthful evidence; do not reject the valid dataset merely for being simulated.
 
-The denylist applies to `src/aivan` and every production entry point, including
-the API, standalone GPM process, CLI, scheduled jobs, and integration clients.
-It excludes repository-owned developer tooling under `tests/` and `scripts/`,
-which is never imported or launched by the packaged runtime. CI statically
-rejects `subprocess`, `os.system`, `os.popen`, `eval`, `exec`, `compile`, shell
-execution, and Git-library imports in `src/aivan`.
+## Preserved runtime safety
+
+- Human approval remains required for external business messages and consequential commercial actions.
+- Trusted server-side identity, tenant/object authorization and idempotency remain necessary.
+- An unavailable DB/API must not yield fabricated facts, claimed commits or false delivery.
+- Account credentials and secrets remain outside repository content and public evidence.
+- Product runtime does not acquire repository-write, shell/code-execution or deployment authority from this product cleanup. Existing capability protections are preserved.
+- Tests and developer tooling are distinct from production business execution; report what actually ran.
 
 ## Consequences
 
-- A misconfigured production process fails before database initialization.
-- Readiness reports each policy invariant without exposing configuration values.
-- Local/test environments retain explicit mocks for deterministic tests.
-- Stage B must add monitoring closure, Stage C takeover state machines, and
-  Stage D the real giraffe-db consumer cutover. This ADR does not claim those
-  stages complete.
-
-## Rollback
-
-Rollback restores the previous application SHA but must not weaken the denylist
-or re-enable production mocks. If the policy prevents startup, the safe state is
-not-ready/no side effects until configuration or code is corrected and audited.
+Keep useful tested code and expanded/unselected assets in the [preservation inventory](../SCOPE_PRESERVATION_INVENTORY.md). No code is deleted or silently disabled. A separately released web branch shares the same business model and DB truth. Current acceptance follows [the source-based criteria](../ACCEPTANCE_CRITERIA.md), not the historical monitoring-only program.
