@@ -1,9 +1,6 @@
 # GPM Persistence Adapter Contract v1
 
-Status: AIVAN G2-A consumer boundary. This document does not claim that a real
-giraffe-db API, SDK, schema, migration, or Postgres deployment implements the
-contract. Production remains fail-closed until the corresponding giraffe-db
-stage is independently accepted and proven end to end.
+Reconciled: 2026-10-02. This is the existing Aivan consumer contract, not a mandatory independent product stage or a claim that a particular provider is deployed. A compatible private-domain DB may replace giraffe-db. Verify the real selected API, durable decision, isolation and recovery semantics using the designated simulated databases when accepting the integration.
 
 ## Identity and authentication
 
@@ -66,14 +63,11 @@ persistence and cannot establish real database support.
 
 Consumer-visible adapter errors expose only a stable error code and correlation
 ID. Raw URLs, response bodies, credentials, stack traces, or remote exception
-messages are not included. Production never falls back to memory, mock, stub,
-or synthetic persistence. External unavailability leaves the operation
+messages are not included. Business operations never substitute memory, mock or stub responses for a committed DB result. A real DB populated with a designated simulated dataset is valid; that dataset does not make its persistence fake. External unavailability leaves the operation
 uncommitted and undispatched.
 
-## Deferred acceptance
+## Provider acceptance and language
 
-G2-A validates only the provider-neutral AIVAN consumer boundary. Real API/SDK
-compatibility, schema/migration ownership, Postgres concurrency, durable replay
-across processes/restarts, and live end-to-end evidence remain blocked on the
-independent giraffe-db stage. No database files or migration definitions are
-changed by G2-A.
+Verify real API compatibility, durable replay across processes/restarts, tenant isolation, concurrent/idempotent decisions and actual end-to-end readback for the chosen provider. Do not require a separate named giraffe-db stage, a fixed Postgres instance or production-customer data when another compatible provider satisfies the contract.
+
+The DB is the history/process system of record. Except enterprise/user profile information, stored textual content is standard English. Non-English inputs are translated dynamically before workflow; notes, audit and metadata are not exceptions. This document changes no database files, migrations, runtime code or deployment configuration.

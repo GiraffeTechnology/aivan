@@ -1,48 +1,19 @@
-# Stage 6 execution tracker
+# Historical Stage 6 Engineering Record
 
-Baseline reconciled 2026-08-10: `main@61e456688952cda6e09574b33413b4eb1f84aac3`.
+Reconciled: 2026-10-02. Earlier record baseline: `61e456688952cda6e09574b33413b4eb1f84aac3` (2026-08-10). Counts below are historical reports, not current acceptance.
 
-## 6A — release gates and automated evidence
+## Preserved implementation references
 
-- [x] cover all seven event-correction blocker codes
-- [x] add five-run preflight evidence runner
-- [x] add requirement-to-evidence traceability matrix
-- [x] full local regression and GitHub CI
-- [x] Claude Code cross-review
+PRs #58, #59 and #60 introduced the five-run preflight runner, CI evidence and correction-test coverage. The earlier record reported PR #60 as 6/6 CI. A later workbench candidate reported 797 passed / 2 skipped, 81.52% coverage, Ruff, 12-file Mypy and Bandit results. Preserve the actual commits and tests; verify the selected current revision before relying on these reports.
 
-Evidence: PR #58 established the runner and digest-only evidence; PR #59 added
-candidate CI execution; PR #60 passed 6/6 CI and Claude Code cross-review before
-merge. These automated gates are not production acceptance.
+Useful areas include correction blocker coverage, case/tenant models, session authentication, workbench APIs, audit exports, dependency probes and release-evidence tooling. They do not establish current Welcome/conversation UI, usable attachments, real dependency calls, order confirmation or deployment.
 
-## Stage 7B–7E candidate under review
+## Current evidence to record
 
-The `codex/stage7b-myaivan-workbench` candidate adds a trusted HttpOnly UI
-session, role projections, workbench APIs/UI, digest-only message evidence,
-schema validation and migration orchestration, readiness/metrics, security
-headers and CodeQL. Local evidence is 797 passed / 2 skipped with 81.52%
-coverage, plus Ruff, 12-file Mypy and Bandit gates. This is a candidate, not a
-merged release or production acceptance.
+Use [Acceptance Criteria](../ACCEPTANCE_CRITERIA.md) and [the source-mapped matrix](STAGE6_REQUIREMENT_TRACEABILITY.md). Record actual execution for the requested UI/business-flow scope, DB truth and process recovery, API dependencies, truthful channel outcomes, applicable safety checks and five-run UI results.
 
-## Required before candidate freeze
+The former open checklist requiring Stage 5B-D, all live channel receipts, full operational work and multiple signatures before every delivery is retired. The two designated simulated DBs are valid acceptance sources. Operational safety and action-specific deployment authorization remain applicable when performing those operations.
 
-- [ ] Stage 5B MyAIVAN shared-Core API (candidate implements the workbench
-  aggregate API; separately paginated child collections and attachment storage
-  remain)
-- [ ] Stage 5C Email/LINE controlled adapters and real receipts
-- [ ] Stage 5D MyAIVAN operator UI (responsive candidate implemented; real
-  device end-to-end and attachment upload recovery remain)
-- [ ] current-main transfer card and attachment placeholder evidence
+## Preservation boundary
 
-## Production acceptance
-
-- [ ] approved CTYun maintenance window and verified backup
-- [ ] migrations previewed/applied/re-previewed
-- [ ] all non-China paths verified through `abcdyi-sin`
-- [ ] AIVAN ports 443/8443 proved unchanged
-- [ ] UI/RFQ/roles/approval/OpenClaw/Email/LINE/Relay/Reversal/Token Guard 5/5
-- [ ] real mobile WeChat guided-relay round trip 5/5
-- [ ] backup restore, dependency failure, and rollback drills
-- [ ] product/engineering/operations/supervisor sign-off
-
-Unchecked items are not delivered and must not be reported as passed.
-
+No existing source code, tests or evidence artifacts are removed. Expanded or unselected implementation is frozen by revision and inventoried, not made mandatory by this tracker and not silently disabled. Historical incomplete items are not relabeled passed; current scope is evaluated on its own actual evidence.

@@ -261,21 +261,36 @@ def test_product_boundary_is_versioned_in_docs_and_environment_schema():
     matrix = (
         ROOT / "docs/architecture/aivan-control-plane-responsibility-matrix.md"
     ).read_text(encoding="utf-8")
-    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     plugin = (
         ROOT / "integrations/openclaw-aivan-plugin/README.md"
     ).read_text(encoding="utf-8")
-    assert "Standalone Product" not in readme
-    assert "monitoring and human-takeover control plane" in readme
-    assert "trade monitoring and human-takeover control plane" in project
-    assert "standalone, local-first AI assistant" not in plugin
-    assert "human-takeover control plane" in plugin
-    assert "giraffe-db" in matrix
-    assert "Code and repository operations" in matrix
+    # Product documentation follows the owner-corrected definition. Existing
+    # runtime-policy literals remain an implementation compatibility boundary,
+    # not authority to restore the superseded monitoring-only product identity.
+    assert "frontend application of Giraffe Agent" in readme
+    assert "inquiry, quotation and order confirmation" in readme
+    assert "digital trade assistant frontend of Giraffe Agent" in plugin
+    assert "inquiry, quotation and order confirmation" in adr
+    assert "The DB provider is replaceable" in readme
+    assert "Private-domain DB" in matrix
+    assert "compatible replaceable provider" in matrix.lower()
+    assert "Runtime engineering" in matrix
+    assert "Product runtime does not acquire repository-write" in adr
+    assert "Existing capability protections are preserved" in adr
+    assert "dynamic translation" in readme.lower()
+    assert "Except for enterprise/user profile information" in readme
+    assert "must not store non-English content" in readme
+    assert "two designated simulated databases" in readme
+    assert "No separate formal-contract record" in readme
+    assert "Do not merge that branch into `main`" in readme
     for assignment in (
         f"AIVAN_PRODUCT_ROLE={PRODUCT_ROLE}",
         f"AIVAN_BUSINESS_FACT_AUTHORITY={BUSINESS_FACT_AUTHORITY}",
         f"AIVAN_LOCAL_STATE_SCOPE={LOCAL_STATE_SCOPE}",
     ):
         assert assignment in production
-        assert assignment in adr
+    # Document the preserved implementation values explicitly as historical;
+    # keep every runtime, capability-denylist and environment safety test above.
+    assert PRODUCT_ROLE in adr
+    assert LOCAL_STATE_SCOPE in adr
+    assert "existing implementation behavior" in adr

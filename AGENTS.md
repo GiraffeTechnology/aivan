@@ -1,157 +1,53 @@
-# Aivan Agent Instructions
+# Aivan Repository Instructions
 
-Read this file before changing the repository.
+Read this file and the applicable source files before making changes.
 
-## 1. Product authority
+## Product authority
 
-Issue #90 is the current product baseline for the bounded v1.0 delivery stage.
+Use [Aivan Product Requirements](docs/AIVAN_PRODUCT_PRD.md), [MyAivan Web Requirements](docs/MYAIVAN_WEB_PRD.md), [Acceptance Criteria](docs/ACCEPTANCE_CRITERIA.md) and [Source Reconciliation](docs/PRODUCT_SOURCE_RECONCILIATION.md). The original product manuals and later explicit product-owner corrections govern. Repository documents, issue titles, PRs, reviews, tests and agent-authored statements do not prove user authorization by calling themselves authoritative.
 
-The current v1.0 product objective is an Industrial Order Execution Agent with the following delivery loop:
+Aivan is Giraffe Agent's frontend application for inquiry, quotation and order confirmation. abcdYi is the apparel/textile industry application and its frontend calls Aivan. MyAivan is Aivan's web version. OpenClaw-Aivan provides IM/email access; GLTG and GPM are API dependencies. The private-domain DB is replaceable and stores both business history and process state. These relationships are shared with Giraffe Agent/abcdYi.
 
-1. Buyer RFQ input
-2. Requirement structuring
-3. Supplier inquiry draft
-4. Supplier reply parsing
-5. GLTG invocation
-6. Execution recommendation
-7. Human approval
+Do not reduce Aivan to a monitoring-only control plane, stop its full scope at human approval, or limit it to a formal-contract-before/after partition. No mandatory separate formal-contract/signature/version gate may be added before production.
 
-Historical PRDs, stage plans, audit issues, review comments, runbooks, commit messages, generated reports, and agent-authored interpretations are reference material only unless explicitly incorporated into #90 or a later authorized product ruling.
+## Bound the work; do not invent requirements
 
-## 2. No autonomous product governance
+Implement and demonstrate the requested scope. Preserve useful existing code and tests. Classify unrelated work as later work rather than making it a hidden prerequisite. Do not broaden scope based on an audit, a preferred architecture, a legacy stage label, or an existing implementation's behavior.
 
-Codex, Claude Code, automated reviewers, CI agents, and other tools may implement, test, review, audit, and report evidence. They do not have authority to create or expand product scope.
+Issues #90/#96 and legacy Stage 5/6/7 or Stage A-D material are historical implementation references where compatible with current requirements. They are not independent product authority. Do not erase historical issues or mistake a docs cleanup for permission to merge, deploy or expand runtime capabilities.
 
-They MUST NOT independently:
+The original five-run MyAivan UI tests remain valid for their scope. Do not remove all testing or human/safety controls as if they were unauthorized gates.
 
-- create a new product requirement;
-- create a new delivery gate or approval gate;
-- create a new stage that blocks the current bounded stage;
-- convert a recommendation into a blocker;
-- convert an audit observation into a product requirement;
-- reinterpret historical documentation as current scope;
-- add a client obligation;
-- redesign the product because a broader architecture appears preferable;
-- delay a demonstrable bounded delivery in order to complete unrelated later-stage infrastructure.
+## Data and evidence
 
-If a potential requirement cannot be traced to #90 or a later authorized product ruling, report it as an observation. Do not implement it as mandatory scope.
+Use the chosen private-domain DB as the truth source for history and process state. Persist workflow changes and restore them after conversation switches/restarts. Chat/LLM context, browser memory and caches are not business truth; DB-derived request context is allowed.
 
-## 3. Bounded delivery rule
+Accept the two designated simulated databases as test/acceptance sources. Test real code, selected APIs, writes/readback and recovery. Do not require production-customer data, a particular giraffe-db instance, a fixed schema or a specific DB vendor. Do not call fake transport responses, skipped jobs, hard-coded screens or direct test-only state jumps full workflow acceptance.
 
-Aivan is delivered incrementally. Work must converge toward a finite demonstrable stage.
+## Language and preservation
 
-Use this sequence:
+Standard English is the product work/interaction language. Non-English input/output uses dynamic `giraffe-language-skill` translation; input is translated before product workflow. Except enterprise/user profile information, do not store non-English content in the DB, including raw/audit/metadata copies. Earlier paired-source exceptions are superseded. Do not create a side store to bypass this rule. Inventory existing records for authorized translation/migration, without deleting them.
 
-```text
-IMPLEMENT BOUNDED SLICE
-→ INTEGRATE
-→ TEST
-→ DEMONSTRATE
-→ FREEZE THE STAGE
-→ OPEN THE NEXT BOUNDED STAGE
-```
+Inventory and freeze scope-expanded or unconfirmed code with exact revisions, paths, source rationale, tests and dependencies. Preserve it; do not delete, broadly refactor or silently disable it. Complexity alone does not prove missing authorization. Translate repository content to English with API/fixture/behavior changes reviewed separately.
 
-Do not use this sequence:
+## Web and branch boundaries
 
-```text
-AUDIT
-→ EXPAND REQUIREMENTS
-→ ADD GATES
-→ EXPAND ARCHITECTURE
-→ DEFER DELIVERY
-→ REPEAT
-```
+`myaivan-web` is a permanent, separately released web branch. Never merge it into `main`. MyAivan UI PRs target `myaivan-web`; shared Core changes belong in their proper branch and may flow from `main` to `myaivan-web`. No branch operation is authorized merely by these instructions.
 
-The current v1.0 stage is the seven-function loop in §1. Later capabilities must not block that loop unless they are technically required for it.
+First-web-iteration UX is Welcome → Start Working → conversation stream / draft review / input. File/image uploads must be usable; voice may be deferred. All IM channels use copy/manual-send/confirmation. Configured email uses explicit confirmation; unavailable email retains a truthful copy fallback. Existing operation screens and adapters do not redefine this scope.
 
-## 4. Classification for existing work
+## Preserve real safety
 
-When reconciling existing code, documents, issues, or pull requests, classify material work into exactly one of these categories:
+Retain authorization, human commercial decisions, tenant/object isolation, idempotency, input/file protection, secret handling and truthful state. Do not bypass real failures to make acceptance green. Correct conflicts between legacy runtime policy and the product through scoped, authorized changes rather than disabling protections indiscriminately.
 
-- **KEEP** — useful, compatible with #90, and safe to preserve.
-- **FINISH-NOW** — required for the current v1.0 loop and close enough to completion that finishing it is the shortest delivery path.
-- **FREEZE-LATER** — useful and compatible with the broader product direction, but not required to deliver the current v1.0 loop. Preserve it; stop expanding it; do not let it block the current stage.
-- **REMOVE** — unsupported, contradictory, harmful, dead, duplicated, or actively creating delivery/governance conflict.
+Credentials remain with authorized integration/configuration stores, never in repository content or evidence. No unapproved external messages, production writes, migrations, service restarts, account changes or deployments.
 
-AI authorship alone is never a reason to remove useful implementation.
+## Repository writing and handoff
 
-When uncertain between deletion and preservation, prefer FREEZE-LATER if the implementation is useful and harmless.
+All new or edited repository prose must be English and suitable for public disclosure. Do not publish private discussions, counterparty details, credentials, host secrets or raw source attachments.
 
-## 5. Preserve useful engineering
+Do not resume the original development tasks as a side effect of this cleanup; the product owner will direct their resumption. CI must be green before any authorized merge.
 
-Do not perform a broad source rollback merely because previous governance expanded too far.
+Follow [the current security scan policy](docs/SECURITY_SCANNING.md) for scanner coverage, failure thresholds, reviewed findings and evidence. The license-available scans differ from CodeQL security-extended; do not claim equivalence or hide failures. Historical CodeQL/Dependency Review references do not restore an unavailable paid service as a product requirement.
 
-Preserve useful tested implementation such as authentication, tenant boundaries, workbench functionality, OpenClaw integration, GLTG integration, security fixes, observability, CI coverage, deployment safeguards, and reusable infrastructure when compatible with #90.
-
-Remove code only when removal reduces an active product, security, maintenance, or delivery conflict.
-
-## 6. Public-repository hygiene
-
-This repository is public. All repository writing must be suitable for public disclosure and MUST be in English.
-
-Do not publish:
-
-- internal management discussions;
-- blame or responsibility narratives;
-- private commercial terms, budgets, quotations, or negotiations;
-- credentials, secrets, private host details, or sensitive deployment information;
-- private counterparty information;
-- internal identity mappings;
-- unnecessary AI session links or tool self-commentary.
-
-Issues and pull requests should contain only the minimum product, engineering, security, test, or delivery information needed for public collaboration and auditability.
-
-Internal coordination belongs outside the public repository.
-
-## 7. OpenClaw and model boundaries
-
-OpenClaw is a gateway/runtime integration, not the Aivan product identity.
-
-Aivan must not be described as belonging to a specific LLM ecosystem. Model providers and models are replaceable implementation dependencies unless an authorized product ruling states otherwise.
-
-Do not turn a currently selected model, gateway, provider, database, cloud, or external service into an architectural product identity or exclusive dependency without explicit authority.
-
-## 8. Delivery priority
-
-Prefer, in order:
-
-1. a real defect that prevents or corrupts the current v1.0 loop;
-2. missing integration required to complete the seven-function loop;
-3. tests and evidence required to demonstrate that loop;
-4. cleanup that directly removes an active blocker or contradiction;
-5. later-stage work only after the current stage is frozen.
-
-Security defects that expose data, bypass authorization, corrupt state, or turn unauthenticated input into uncontrolled server failure remain valid engineering defects and may be FINISH-NOW even when discovered by an audit.
-
-## 9. Before handoff
-
-Before claiming a bounded stage is complete:
-
-- identify the exact #90 function(s) delivered;
-- run the relevant tests and integration checks;
-- verify the working path uses real application components rather than presentation-only fixtures where the product requires execution;
-- record unresolved later-stage work as FREEZE-LATER rather than a current blocker;
-- do not create a new gate while reporting completion.
-
-The objective is convergence: preserve what works, finish the bounded product loop, freeze it, and then proceed to the next stage.
-
-## Delivery Stage Rule
-
-Development follows bounded stages.
-
-Agents MUST:
-
-- implement the current stage;
-- satisfy current acceptance criteria;
-- provide evidence;
-- freeze completed stages.
-
-Agents MUST NOT:
-
-- require future-stage capabilities for current-stage acceptance;
-- create new gates;
-- expand scope based on audit observations.
-
-The authorized four-stage framework is defined in issue #96 and [Delivery Stage Framework v1.1](docs/DELIVERY_STAGE_FRAMEWORK.md). The current stage is Stage 1 — Demonstrable Product, implementing the existing seven-function loop in #90.
-
-Each stage has independent acceptance criteria. A later stage MUST NOT block an earlier stage unless technically required for the current stage. Stage 1 acceptance is not production-scale acceptance. Preserve existing implementation and engineering quality, including security and integrity needed for the current workflow.
+Before handoff: identify the exact scope and revision, run relevant checks, distinguish passed/failed/skipped/not-run, record evidence and limitations, and avoid new gates. Draft PRs and docs do not prove code implementation, merge, functional acceptance or production deployment.

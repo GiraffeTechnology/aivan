@@ -1,90 +1,44 @@
-# Giraffe Internal Working Language
+# Giraffe Product Language and Data Boundary
 
-## P0 Global Rule
+Reconciled: 2026-10-02. The product language for work and interaction is **standard English**. Non-English input and output are supported through **dynamic translation by `giraffe-language-skill`**.
 
-Standard English is the only internal working language across Giraffe products.
+## Workflow ingress
 
-All raw multilingual user/operator/customer input must pass through `giraffe-language-skill` before any product workflow code extracts business fields, evaluates supplier routing, runs GLTG, writes graph data, creates QC test points, generates decision packets, or creates outbound drafts.
+Non-English user, operator, buyer, supplier, IM, email, marketplace, file/image-extracted or other business text is translated by the language module before it enters the product workflow. Aivan consumes the module's canonical English structured RFQ packet for business extraction, supplier routing, GLTG/GPM inputs, graph writes and drafts.
 
-After internal work is complete, user-facing output is localized into the target language requested by the user.
+Do not give raw non-English business input to Aivan's requirement LLM or deterministic extraction fallback. Do not build product-local translation prompts, multilingual alias maps, a competing translation service or static locale bundles as a substitute for the language module. If valid canonicalization is unavailable, expose that limitation and retain a safe user correction/retry path; do not guess canonical facts.
 
-This is a P0 architecture rule. Any implementation that bypasses it is invalid.
+English inputs may use the applicable normal English workflow. Keep original source identifiers and permitted evidence references so translation/extraction can be traced without redefining inference as an observed fact.
 
----
+## Database rule
 
-## AIVAN Enforcement
+Except for **enterprise/user profile information**, the DB may store only standard-English textual business content. This applies to business history and process state, requirements, messages, drafts, quotations, order details, dependency explanations, events, audit descriptions and free-text metadata.
 
-AIVAN does not own multilingual RFQ extraction.
+The profile exception concerns enterprise/user profile information, such as their names and profile particulars. It is not a blanket exception for conversations, transactions, attachments, drafts or arbitrary business metadata.
 
-For non-English RFQ input:
+Earlier guidance permitting non-English source text alongside a canonical English field is superseded. Do not add a `raw_text` field, audit-text exception or side store to evade the rule. Use allowed source references, hashes and canonical English content as appropriate. Non-linguistic identifiers, hashes and numeric values are not prose that needs invented translation.
 
-- `giraffe-language-skill` must normalize the raw message into canonical English.
-- `giraffe-language-skill` must produce the structured RFQ packet used for quantity, product, destination, lead time, quality, supplier constraints, logistics requirements, pricing intent, and user intent.
-- AIVAN must not call its requirement LLM with raw non-English business text.
-- AIVAN must not run deterministic fallback extraction over raw non-English business text.
-- AIVAN must not infer canonical product, category, destination, material, quality level, supplier capability, price, or lead time from raw non-English text.
-- If language-skill is unavailable or cannot produce a valid canonical packet, AIVAN blocks local extraction and asks for canonicalization / operator confirmation instead of guessing fields.
-- GLTG, supplier routing, Giraffe DB graph writes, and outbound draft creation must not run from raw non-English input.
+Existing non-English records must be inventoried and preserved for an authorized migration/translation plan. This documentation change does not delete data, run a migration or authorize irreversible cleanup.
 
-English RFQs may continue through AIVAN's existing local LLM and deterministic fallback path, with language-skill normalization used when available.
 
----
+The DB text-language rule does not prohibit non-English file/image input or require rewriting image pixels. Translate extracted business text through the language module before workflow and storage. File references and binary inputs follow the selected safe storage/authorization boundary; they do not justify retaining prohibited raw business text in DB fields or an evasion side store.
 
-## Output Localization
+## Output
 
-Internally, product workflow state remains canonical English.
+The default interaction is standard English. When non-English output is requested, obtain it dynamically through `giraffe-language-skill`. Localized display/send text is not an alternative DB truth. Persist the canonical English business record and permissible delivery/source evidence; do not store the translated non-English business text in the DB outside the profile exception.
 
-User-visible operator replies, approval summaries, customer drafts, supplier drafts, QC reports, and decision summaries use language metadata from `giraffe-language-skill`, including:
+A translation or language model response cannot approve a draft, supply unobserved supplier/material facts, or establish delivery. Preserve known uncertainty, source relationships and human review across localization.
 
-- `requested_output_language`
-- `final_output_language`
-- `detected_language`
-- source conversation language
+## Tests and implementation reconciliation
 
-If explicit output metadata is absent, the system may fall back to the source language.
+Verify:
 
-Localized output is not the internal source of truth. The canonical English packet remains the audit source.
+1. Non-English input reaches the language module before business workflow/extraction.
+2. Invalid/unavailable canonicalization does not silently enter a raw-language fallback.
+3. Aivan consumes the canonical English structured RFQ packet.
+4. Non-profile DB writes reject non-English textual business content, including nested metadata and audit descriptions.
+5. Enterprise/user profile exceptions remain narrowly scoped.
+6. Requested non-English output uses dynamic language-skill translation without non-English business persistence.
+7. Canonical facts, DB recovery, authorization and draft/delivery status survive the language boundary.
 
----
-
-## Prohibited In Product Repos
-
-Product repositories, including AIVAN, must not add:
-
-- internal RFQ translation prompts such as `REQUIREMENT_TRANSLATION_SYSTEM`
-- multilingual city alias maps
-- destination alias maps
-- product alias maps
-- SKU alias maps
-- material alias maps
-- quality alias maps
-- supplier alias or capability maps
-- category keyword maps
-- raw non-English field extraction paths that bypass `giraffe-language-skill`
-- LLM extraction directly from raw non-English business text
-
-Those rules belong in `giraffe-language-skill`, canonical resolver services, or Giraffe DB canonical data layers so all Giraffe products share one canonical language boundary.
-
----
-
-## Required Tests
-
-Each relevant product repo must include tests proving:
-
-1. Non-English input calls `giraffe-language-skill` before business extraction.
-2. Non-English input without a valid language-skill packet is blocked.
-3. Local LLM does not receive raw non-English business text.
-4. Deterministic fallback does not canonicalize raw non-English product, destination, category, material, quality, or supplier information.
-5. Final user-facing output is localized into the target language requested by the user.
-6. Canonical English internal state is preserved separately from localized output.
-7. Static guards fail if product repos add alias maps or multilingual business-semantic hardcoding.
-
----
-
-## Final Required Statement
-
-P0 Global Rule Enforced:
-
-Standard English is the only internal working language across Giraffe products.
-All raw multilingual input must pass through `giraffe-language-skill` before product workflow.
-After internal work is complete, user-facing output is localized into the target language requested by the user.
+Existing translation catalogs, provider-specific checks and proofreading implementation may be preserved as engineering assets. A mandatory fixed set of FR/ES/DE/KO/JA catalogs, a model brand or a static-catalog readiness gate is not established by the current product definition. Record any runtime conflict for a scoped code change; do not silently disable safeguards or claim it has already been fixed.
