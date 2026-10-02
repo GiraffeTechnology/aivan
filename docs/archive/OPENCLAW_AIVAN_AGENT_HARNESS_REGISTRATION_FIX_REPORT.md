@@ -2,6 +2,8 @@
 
 Date: 2026-06-29
 
+Historical record. Non-English display excerpts below were translated into English during the 2026-10-02 repository-language cleanup; they are translations, not byte-identical raw logs. The original record remains in Git history. This report does not authorize automatic IM output or define current product acceptance.
+
 ## 1. Root Cause
 
 OpenClaw loaded `openclaw-aivan`, but did not invoke its named `register(api)` export. The installed runtime only registers agent harnesses through the default plugin entry contract: a default function, or a default object with `register` / `activate`.
@@ -95,8 +97,8 @@ Harness success included:
 ```text
 [aivan] registerAgentHarness registered successfully
 [aivan] forwarding event: prompt_len=22 session=sess-wechat-001
-[aivan] AIVAN HTTP status=200 fields={"status":"ok","output":"已收到您的询价需求：5000件格子衬衫，45天交东京。","reply_text":"已收到您的询价需求：5000件格子衬衫，45天交东京。"}
-[aivan] AIVAN reply: 已收到您的询价需求：5000件格子衬衫，45天交东京。
+[aivan] AIVAN HTTP status=200 fields={"status":"ok","output":"Received your inquiry: 5,000 plaid shirts, delivery to Tokyo in 45 days.","reply_text":"Received your inquiry: 5,000 plaid shirts, delivery to Tokyo in 45 days."}
+[aivan] AIVAN reply: Received your inquiry: 5,000 plaid shirts, delivery to Tokyo in 45 days.
 ```
 
 ## 7. OpenClaw Inspect Before / After
@@ -178,9 +180,9 @@ Live harness smoke against AIVAN returned:
 {
   "harnessId": "openclaw-aivan",
   "assistantTexts": [
-    "AIVAN 处理请求时遇到后端依赖错误，请稍后再试。"
+    "AIVAN encountered a backend dependency error while processing the request. Please try again later."
   ],
-  "lastAssistantText": "AIVAN 处理请求时遇到后端依赖错误，请稍后再试。",
+  "lastAssistantText": "AIVAN encountered a backend dependency error while processing the request. Please try again later.",
   "sessionIdUsed": "harness-smoke-20260629"
 }
 ```
@@ -188,7 +190,7 @@ Live harness smoke against AIVAN returned:
 The required mobile WeChat trace was requested:
 
 ```text
-AIVAN-TRACE-HARNESS-FIX 询价5000件格子衬衫，45天交东京，高品质
+AIVAN-TRACE-HARNESS-FIX Inquiry for 5,000 high-quality plaid shirts, delivery to Tokyo in 45 days
 ```
 
 Result:
@@ -215,3 +217,4 @@ commit: 182b046370059a8043ac267de814d40c3720c903
 ```
 
 CODE FIX REQUIRED — new PR opened
+

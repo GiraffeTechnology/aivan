@@ -89,7 +89,11 @@ This skill cannot override or bypass that policy.
 
 ## Local-first data boundary
 
-All trade data is stored locally by AIVAN in a SQLite database on the operator's machine. This skill does not receive, cache, or persist any buyer or supplier data.
+Business history and process state are persisted in the chosen private-domain DB (`giraffe-db` or a compatible replacement). A local SQLite profile is allowed when compatible; it is not mandatory. This routing skill is not a second data store or business-truth authority. Aivan recovers from DB records, not conversation memory.
+
+Standard English is the work/interaction language. Non-English input is dynamically translated by `giraffe-language-skill` before product workflow; Aivan consumes its canonical English structured packet. Requested non-English output uses the same module. Except enterprise/user profile information, the DB must not store non-English textual business content. Routing priority never bypasses that boundary.
+
+For the first MyAivan web iteration all IM channels use review/copy/manual-send/confirmation. Configured email requires explicit confirmation; unavailable email retains a clear copy fallback. This skill does not authorize sending, claim delivery or turn existing adapters into new product requirements.
 
 ## Credential boundaries
 
@@ -98,3 +102,4 @@ This skill reads only `AIVAN_BASE_URL` and `AIVAN_API_KEY` from the environment.
 ## Mock mode
 
 AIVAN supports full mock mode (`AIVAN_LLM_PROVIDER=mock`, `OPENCLAW_MOCK_MODE=true`). The skill works identically in mock mode; no live credentials are required for testing.
+

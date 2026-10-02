@@ -1,10 +1,10 @@
 # myaivan-web Branch Policy
 
-Status: ACTIVE product decision (2026-07-05).
+Branch-direction rules retained from 2026-07-05; product terminology reconciled 2026-10-02. MyAivan is Aivan's web version, not a separate business system. This wording change does not authorize or perform any branch operation.
 
 ## Rules
 
-1. **`myaivan-web` is the permanent standalone product branch** for the
+1. **`myaivan-web` is the permanent, separately released web branch of Aivan** for the
    myaivan.com / myaivan.cn responsive workbench, session UI, role projection,
    case/audit views, i18n and Giraffe VI assets. It is deployed to the AIVAN
    server as a whole:
@@ -51,3 +51,4 @@ auth MUST be active (implemented in `aivan.api.session_auth`, tested in
 - Modules: `src/aivan/api/session_*`, `src/aivan/api/workbench_routes.py`, and
   templates/static assets under `src/aivan/app/`
 - Tests: `tests/test_myaivan_workbench.py`
+
