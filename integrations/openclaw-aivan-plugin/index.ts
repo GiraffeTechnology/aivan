@@ -830,8 +830,8 @@ export function register(api: any): void {
           const replyText =
             result.reply_text ??
             (result.project_id
-              ? `已处理请求 (项目: ${result.project_id})`
-              : "已收到您的请求");
+              ? `Request processed (project: ${result.project_id})`
+              : "Your request has been received");
 
           process.stderr.write(
             `[aivan] AIVAN result captured locally: reply_length=${replyText.length}; outbound suppressed\n`
