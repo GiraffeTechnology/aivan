@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,8 +31,11 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))  # for tests.gltg_fake
 
 # ── Private-domain env (P0-6) ────────────────────────────────────────────────
-DB_PATH = "/tmp/aivan_full_business_closure_e2e.sqlite3"
-OUTBOX_PATH = "/tmp/aivan_full_business_closure_outbox.jsonl"
+# Private per-run storage prevents collisions and pre-created symlink writes.
+_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="aivan-business-e2e-")
+_TEMP_PATH = Path(_TEMP_DIRECTORY.name)
+DB_PATH = str(_TEMP_PATH / "business-closure.sqlite3")
+OUTBOX_PATH = str(_TEMP_PATH / "outbox.jsonl")
 os.environ.update({
     "AIVAN_ENV": "local",
     "AIVAN_DB_URL": f"sqlite:///{DB_PATH}",
@@ -49,11 +54,6 @@ os.environ.update({
     "AIVAN_EMAIL_SEND_MODE": "simulation",
     "AIVAN_PRESET_MAILBOX": "test-buyer@giraffe.local",
 })
-for p in (DB_PATH, OUTBOX_PATH):
-    try:
-        os.remove(p)
-    except OSError:
-        pass
 
 import httpx  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
@@ -325,7 +325,10 @@ def _rank_quotes(requirement: BuyerRequirement, replies: list[dict], db_supplier
 def main() -> int:
     report = {"stages": {}, "p0_checks": {}, "evidence": {}, "commit": None}
     try:
-        report["commit"] = os.popen("git -C %s rev-parse HEAD" % ROOT).read().strip()
+        report["commit"] = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
     except Exception:
         pass
 
@@ -425,7 +428,7 @@ def main() -> int:
     # ── Phase 8: supplier replies -> GLTG analysis -> Top 10 ─────────────────
     print("\n== Phase 8: supplier replies + GLTG ranking (Top 10) ==")
     replies = _supplier_replies_fixture()
-    Path("/tmp/aivan_supplier_replies_e2e.json").write_text(json.dumps(replies, ensure_ascii=False, indent=2))
+    (_TEMP_PATH / "supplier-replies.json").write_text(json.dumps(replies, ensure_ascii=False, indent=2))
     requirement = BuyerRequirement(**{k: v for k, v in proj.requirement_json.items() if k in BuyerRequirement.model_fields})
     ok("replies_ingested", len(replies) >= 12, f"{len(replies)} supplier replies ingested")
 
@@ -546,4 +549,7 @@ def _render_md(report, names, top10, outbox) -> str:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    finally:
+        _TEMP_DIRECTORY.cleanup()

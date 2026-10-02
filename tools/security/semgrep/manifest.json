@@ -1,0 +1,330 @@
+{
+  "source": "https://github.com/patched-codes/semgrep-rules",
+  "revision": "1118d79823ae756534678378a4aac0cbfa5d3041",
+  "license": "MIT",
+  "rule_files": 79,
+  "rules_per_language": {
+    "python": 69,
+    "javascript": 10,
+    "typescript": 9
+  },
+  "files": [
+    {
+      "path": "python/assert/rule-assert-used.yml",
+      "sha256": "4d7b043d9f28520757eab4e6070b1532bd79c3d6ff15b90d749300dd80cb2a20"
+    },
+    {
+      "path": "python/bind_all_interfaces/rule-general-bindall-interfaces.yml",
+      "sha256": "04e6d54b19e0ac5e399363aa0b0d03a3ade1a04298386f917e021f823804ac30"
+    },
+    {
+      "path": "python/crypto/rule-cipher-modes.yml",
+      "sha256": "164dccbb66a5f0eec27844257a8646e15691e2fa296112dd48f9e43bd1ca91dd"
+    },
+    {
+      "path": "python/crypto/rule-crypto-cipher-blowfish.yml",
+      "sha256": "1f993787f4a8c81d8631fc339da075d857cd25169ec6c5ed94209490c5d9487e"
+    },
+    {
+      "path": "python/crypto/rule-crypto-cipher-des.yml",
+      "sha256": "4f85a30603ba573528c0178993f3ad495a98379856648062f9fa955b06890d92"
+    },
+    {
+      "path": "python/crypto/rule-crypto-cipher-rc2.yml",
+      "sha256": "f6ffca001574ef517ba04eb7580b33553f394a8d6d4c9df93decf447b2d3c3ce"
+    },
+    {
+      "path": "python/crypto/rule-crypto-cipher-rc4.yml",
+      "sha256": "063c348e3894f944c20a43358476c4e517567b5efa478b5aa387f5e3d901a96b"
+    },
+    {
+      "path": "python/crypto/rule-crypto-cipher-xor.yml",
+      "sha256": "3903db1000bb01bea0021bad6256b611ba40949a42cee1df7af72d9ecd262587"
+    },
+    {
+      "path": "python/crypto/rule-crypto-encrypt-dsa-rsa.yml",
+      "sha256": "c7890e23eac6e47b9f074e64f85f97784dec77b47f90dabd23b9c6ec181afc33"
+    },
+    {
+      "path": "python/crypto/rule-crypto-encrypt-ec.yml",
+      "sha256": "aed9f70f0070c1f87834674e946f3a88f23649d7bb39bc6697e4dda6b32d4e56"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hash-md5.yml",
+      "sha256": "977567a4c29fd8a43f8e01bbc78f1ab2c6f33748729ce169939a37f8b84a7fef"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hash-sha1.yml",
+      "sha256": "682562ddd44ff38a6045ee3f34e7881b30a43a74f8d0bfff5e4b730cb226648a"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hazmat-cipher-arc4.yml",
+      "sha256": "6dbf9eef490c16a7d53e9a0181c2bef3dd172a930e93110ced84599b42643680"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hazmat-cipher-blowfish.yml",
+      "sha256": "63d5fbc5e3aae9f87541b46815768d0662b4cca3531c3690fca3513aaa00b293"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hazmat-cipher-idea.yml",
+      "sha256": "b89c53d4d9ac70596ea02950d2237828e60952100286443ed5f8d43055753823"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hazmat-hash-md5.yml",
+      "sha256": "3502030c9bf0f390e2b960999665227b632ba5b63a1b1f0dbec0c6d2abdc6568"
+    },
+    {
+      "path": "python/crypto/rule-crypto-hazmat-hash-sha1.yml",
+      "sha256": "f16217a6ccc57421b42f3354ee50cab40c7bed487de0098b9fcabd470d2c1188"
+    },
+    {
+      "path": "python/crypto/rule-hash-md2.yml",
+      "sha256": "9b2ed185a84dfdaa8c3b7515422b0324fc81b806cdd82427b0ec2f3a59649878"
+    },
+    {
+      "path": "python/crypto/rule-hash-md4.yml",
+      "sha256": "27ca479f8892398e1dacc2ebca9e69e3ac76332532618269f0db38d3cbaeb2b6"
+    },
+    {
+      "path": "python/crypto/rule-hash-md5.yml",
+      "sha256": "79bd8dce94fc902de49496e65dda6b4ce97584c3e8bb5aaee7e0fe0fb2acba2c"
+    },
+    {
+      "path": "python/crypto/rule-hash-sha1.yml",
+      "sha256": "1246a33fb7039696b04596f1fcaf0c7c19f0fcbbea7b5ed50248017d10ea6123"
+    },
+    {
+      "path": "python/crypto/rule-hashlib-new-insecure-functions.yml",
+      "sha256": "2203be07b2d3c82d9bafb93f7f23c8808c079a34f2e4d4a93d89918294ea0ae8"
+    },
+    {
+      "path": "python/crypto/rule-import-pycrypto.yml",
+      "sha256": "d2db2652ede1bb4aecd6b8572181b63b7facb44cb62c790c4ee35682d1308e13"
+    },
+    {
+      "path": "python/deserialization/rule-cpickle.yml",
+      "sha256": "b9c0ad5ae34edcf6ca8cbb0738d646508c4b16c1c1b32663886442dc1af26bd4"
+    },
+    {
+      "path": "python/deserialization/rule-dill.yml",
+      "sha256": "7d5209e212e3fdce98a3ea5359767655762e61638feebc534dcbb876302be81d"
+    },
+    {
+      "path": "python/deserialization/rule-marshal.yml",
+      "sha256": "ade1cb93e43a028c77c556d224b057c460a72d49f39ab9f4b17ffcd6ae93be7d"
+    },
+    {
+      "path": "python/deserialization/rule-pickle.yml",
+      "sha256": "4555ebcbde63605e9956a6c52a9bfec28a180dfb425d273b2f8052a864399563"
+    },
+    {
+      "path": "python/deserialization/rule-shelve.yml",
+      "sha256": "4652118ca146579c2ae2e5460975a40f51dcf5fb3637fbc665ed7bb1a06f2795"
+    },
+    {
+      "path": "python/deserialization/rule-yaml-load.yml",
+      "sha256": "4567842495c2d2f0cdb337bf588452e1451d540818a89fbab1467f7c7d8657d6"
+    },
+    {
+      "path": "python/django/rule-django-extra-used.yml",
+      "sha256": "7df73bad8c21e958f611d2817c72a2fa16fb25e8be2f0b49a795741a7a33a7d0"
+    },
+    {
+      "path": "python/escaping/rule-jinja2-autoescape-false.yml",
+      "sha256": "bfad7e64168dea1dfa6d99730a60c74e6a91b2a9c3860b78a4ac4b85ad26e944"
+    },
+    {
+      "path": "python/escaping/rule-use-of-mako-templates.yml",
+      "sha256": "f551c0dc00c68791c1d2224adbe2c12845e9a593acfad684a014fa14c3f26ff7"
+    },
+    {
+      "path": "python/eval/rule-eval.yml",
+      "sha256": "4d636bb84001a6e1acc7715452b33cca01427871270e0558376c00fe60675244"
+    },
+    {
+      "path": "python/exec/rule-exec-used.yml",
+      "sha256": "17563d5a49636da7b1273790f3bd46e128469bba93525d1815d9f269c0072b92"
+    },
+    {
+      "path": "python/exec/rule-linux-command-wildcard-injection.yml",
+      "sha256": "c78b58400f82dfb4b16f6d84549d0a587fc7ee00323159fdbee87e7991deb045"
+    },
+    {
+      "path": "python/exec/rule-os-path.yml",
+      "sha256": "5a9303039bb16092d3cc830621fd4d0a25198d6266f6ad01f03b011e4809101f"
+    },
+    {
+      "path": "python/exec/rule-os-popen2.yml",
+      "sha256": "0aebb9609761104a6e9547fc18912d471764a18f51c606472d3a0df7e8a26b7f"
+    },
+    {
+      "path": "python/exec/rule-paramiko-calls.yml",
+      "sha256": "a37cbbf3dd54a9c2e63971a37992caaa7fcebce3686a3be6f746183247b2a9e0"
+    },
+    {
+      "path": "python/exec/rule-start-process-with-no-shell.yml",
+      "sha256": "3ce2596b877fc5bccd7602f68fb44a31f206dbcbac59edc8affc4db907133e4c"
+    },
+    {
+      "path": "python/exec/rule-subprocess-call.yml",
+      "sha256": "6f857256a3b9643096d7c977b28843621f9ca54f38a58882c723820523f2c2ef"
+    },
+    {
+      "path": "python/exec/rule-subprocess-popen-shell-true.yml",
+      "sha256": "a99107fcdb39d93cee9deb23c7181c1934dba994a350e1b1f6c8408f2d181573"
+    },
+    {
+      "path": "python/exec/rule-subprocess-shell-TRUE.yml",
+      "sha256": "d47b51e9ff4a3b8aafbd91ce483bd23269ebcf03acaa703aff1a0ddf50ddeba8"
+    },
+    {
+      "path": "python/file_permissions/rule-general-bad-permission.yml",
+      "sha256": "d7796aecf3f152178c3c542b19f2448ea2e131dbaf37ce917decae829bb977df"
+    },
+    {
+      "path": "python/files/rule-tarfile-unsafe-members.yml",
+      "sha256": "1ac23e28eae9462e98b0382e4cbda23ad58ad8001c7e42d75cc2fcf863768dbf"
+    },
+    {
+      "path": "python/flask/rule-app-debug.yml",
+      "sha256": "4122ca443253641ce92b4f5189c92c259e996bfb746c577659736b0212ccfa2c"
+    },
+    {
+      "path": "python/ftp/rule-ftplib.yml",
+      "sha256": "3eeee6fe9597055fe0da1eef577bcea398f376f75e2b92bc4dcbffc935f4ee65"
+    },
+    {
+      "path": "python/log/rule-logging-config-insecure-listen.yml",
+      "sha256": "2a4409a93ac8f245a7fd7e5a293cd28bddd634fa5c855aeda5d88a88a27c1281"
+    },
+    {
+      "path": "python/random/rule-random.yml",
+      "sha256": "47176c6ca152ec867e27dd32b3aefa4c92260946b2cab2051b025c5c57fdeba0"
+    },
+    {
+      "path": "python/requests/rule-request-without-timeout.yml",
+      "sha256": "8c62396d3b34eaf873e86b4733b2eb04308f8f1624d36e73b9edcc433e1b1398"
+    },
+    {
+      "path": "python/snmp/rule-insecure-snmp-version.yml",
+      "sha256": "efb7b8521ab3631f88323b91eb3fc8a9ec6a629bf4898e6b89961a47050a5708"
+    },
+    {
+      "path": "python/snmp/rule-snmp-weak-cryptography.yml",
+      "sha256": "14b9c9529932ddf32f3a72950ea79d2312ae42829f139377c1962a5f773f7804"
+    },
+    {
+      "path": "python/sql/rule-hardcoded-sql-expression.yml",
+      "sha256": "c87519650c5eb77704577c92d02239f62c27b9a9135e7f65a6adf16e5498de04"
+    },
+    {
+      "path": "python/ssh/rule-ssh-nohost-key-verification.yml",
+      "sha256": "882f2f75d4013d314007ef24904b0f2c44bf758b2bbc97136caf82e26232e1ea"
+    },
+    {
+      "path": "python/ssl/rule-req-no-certvalid.yml",
+      "sha256": "583e9402e51350d063be98756a7bdb7ee62fbe7ae2b4e566d4b90c7a775d2f6c"
+    },
+    {
+      "path": "python/ssl/rule-ssl-no-version.yml",
+      "sha256": "3a91d2d3abaceed5b7518ae7996dae475c606c6826eed06bb30e606ef8b11153"
+    },
+    {
+      "path": "python/ssl/rule-ssl-with-bad-version.yml",
+      "sha256": "8f31cd67d3105be11945b1064e0ec1f9f924cad2bdb05c529971eb691c76f2f2"
+    },
+    {
+      "path": "python/ssl/rule-unverified-context.yml",
+      "sha256": "9d3cc65db85551731ed560383335f1d3b837244752945c7db1b54f143d3cafdc"
+    },
+    {
+      "path": "python/telnet/rule-import-telnib.yml",
+      "sha256": "c663e00de1ec3518675a0d68e798a17feaae7018b6f8b8600dc72ba2b82e4a83"
+    },
+    {
+      "path": "python/tmpdir/rule-hardcodedtmp.yml",
+      "sha256": "5d18691b6757df52a8b5b86d10b9f6848fa2ff7db540932e422a3ced246119d2"
+    },
+    {
+      "path": "python/tmpdir/rule-mktemp-q.yml",
+      "sha256": "bcf8978b761363da104f83e16a54a2e694225647db3613d90dbd8132b65762ff"
+    },
+    {
+      "path": "python/urlopen/rule-urllib-urlopen.yml",
+      "sha256": "f2020f995245c9cb9b11dc9cab99ea58ced28aeab2f8d7f729e8d5ba596807ea"
+    },
+    {
+      "path": "python/xml/rule-celement.yml",
+      "sha256": "1139087dff3bb98280e075fb982243d011120712f9eb310dab9922d2a91bc240"
+    },
+    {
+      "path": "python/xml/rule-element.yml",
+      "sha256": "978b13b4e1a51584eda075930f821d4617d2e6f23e36006ac566f759485bb6c8"
+    },
+    {
+      "path": "python/xml/rule-etree.yml",
+      "sha256": "392cba931136bb4fc96f0780e251e03a9a7fa44456fcc5b9782319be61ddc118"
+    },
+    {
+      "path": "python/xml/rule-expatbuilder.yml",
+      "sha256": "86bb88b478b12f702db7dc5031b83f4841a4a3e69c9090cd955feac070cf7f16"
+    },
+    {
+      "path": "python/xml/rule-expatreader.yml",
+      "sha256": "bf7941e71cdabeae6b1ae103568b9ded441dd6ff784fae46eb6bc9d52c968866"
+    },
+    {
+      "path": "python/xml/rule-minidom.yml",
+      "sha256": "8fb76cc526044a34862b7d3d5e45b19c45170d0b738e1af004f4d4fa52bca47b"
+    },
+    {
+      "path": "python/xml/rule-pulldom.yml",
+      "sha256": "33e6d962d64538be3ff4a327eeea5e9de93dff443e62b3ec3deb0be48215f167"
+    },
+    {
+      "path": "python/xml/rule-sax.yml",
+      "sha256": "8b20ad57933000929570daa04501adc8b8802e055731e09919b8c15fcdd7286f"
+    },
+    {
+      "path": "javascript/buf/rule-buffer-noassert.yml",
+      "sha256": "50f8dbfded935595aaf0a8f953427fb4fb3e0617c13dba3d7dc72924ece35058"
+    },
+    {
+      "path": "javascript/buf/rule-detect-new-buffer.yml",
+      "sha256": "4b1ca91bd91b36e70b6c92c2532992abf37759c80027fff4e786d34acd5564f2"
+    },
+    {
+      "path": "javascript/dos/rule-non-literal-regexp.yml",
+      "sha256": "5178adc3e41175c46b4f0b377cfc87de5bb5d7580af75a32bbfb183f5feb22ff"
+    },
+    {
+      "path": "javascript/eval/rule-eval-with-expression.yml",
+      "sha256": "4619edd1c06d50f1b365c499b419219cea77ffe2234c1cfc8c59f6c86c4517f9"
+    },
+    {
+      "path": "javascript/pathtraversal/rule-non-literal-fs-filename.yml",
+      "sha256": "be36e67f52c3be2f213a19117b23fab0866b2d55eeef2a9d4e275528bd37050e"
+    },
+    {
+      "path": "javascript/random/rule-pseudo-random-bytes.yml",
+      "sha256": "dd5330fdb8d12f48ac82439cf9e0a1d5666eeb3fcd757d0f692ba962da62b2e0"
+    },
+    {
+      "path": "javascript/react/rule-dangerouslysetinnerhtml.yml",
+      "sha256": "c45645a3f3ac5834981bf97effc3a2d780b87d4efbe944a74573a29b507bdec6"
+    },
+    {
+      "path": "javascript/require/rule-non-literal-require.yml",
+      "sha256": "31e11835d8f49089dcfda51b4b877457788c75b7abaa893237f117136dc4d296"
+    },
+    {
+      "path": "javascript/timing/rule-possible-timing-attacks.yml",
+      "sha256": "1da1357f255aedb018bd6e3bbbba7c92d13e940cddb772413dc244018d370f0e"
+    },
+    {
+      "path": "javascript/xss/rule-mustache-escape.yml",
+      "sha256": "66c5f820a4242c10050f5884e9eac99c2b21830b3a605d6976b59f5e0c11cf39"
+    }
+  ],
+  "license_sha256": "a3801fde4f248f335926db5dbec84ea70d196a63e3f51ddca8cb0e46a43c61ef"
+}
