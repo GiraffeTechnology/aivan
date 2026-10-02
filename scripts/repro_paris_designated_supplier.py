@@ -1,6 +1,7 @@
 """Reproduce the WeChat failure from IMG_9885:
 
-Input: "询价 5000 件高品质格子衬衫，45 天内交巴黎。请向指定供应商 abcdyi 询价"
+Original input: the unchanged Chinese RFQ_ZH constant below.
+English meaning: "Request quotes for 5000 high-quality plaid shirts, delivered to Paris within 45 days, from the designated supplier abcdyi."
 Observed on device: "⚠️ Agent couldn't generate a response. Please try again."
 
 This runs the REAL AIVAN pipeline locally (no CTYUN). It measures:
