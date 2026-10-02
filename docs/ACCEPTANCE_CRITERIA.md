@@ -65,6 +65,8 @@ Retain real human authorization, data isolation, secure handling and correct sta
 
 Do not impose additional formal-contract gates, full observability/enterprise platforms, a fixed cloud/DB vendor, all live channels, unrelated statistical research, mandatory production-customer data or additional signatory chains as product acceptance prerequisites. Existing repository checks and unavailable paid scanning services must be reported accurately as engineering/check availability; they do not independently redefine the product.
 
+The current engineering scans, their failure policy and coverage differences are documented in [Repository security scans](SECURITY_SCANNING.md). The independently merged security change uses Semgrep, offline OSV and zizmor while retaining Bandit/npm audit. These checks are not equivalent to CodeQL security-extended. Preserve real scan findings, errors and reports, and verify the exact candidate's CI before an authorized merge.
+
 Deployment or external test sending requires authorization for that action. Operational protections apply to the target actually being changed. Functional acceptance on the designated simulated DB does not require first completing a production-host deployment, and acceptance does not itself authorize one.
 
 ## 8. Evidence record and completion report

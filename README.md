@@ -103,6 +103,8 @@ uv run python scripts/run_aivan_e2e.py
 
 Check each script's selected profile and prerequisites. The private-domain offline runner and mocked transports do not establish real API acceptance. Record actual executed steps; a skipped step is not a pass. Keep CI green before merge, and report configuration/scan availability separately from product functionality.
 
+The current [security scan policy](docs/SECURITY_SCANNING.md) documents the independent security change: Semgrep source checks, offline OSV dependency matching, zizmor Actions checks, retained Bandit/npm audit, and their coverage limits. These scans are not equivalent to CodeQL security-extended. Preserve actual findings, scanner failures and reports; passing these checks does not establish product acceptance.
+
 ## OpenClaw integration
 
 The bridge lives in `integrations/openclaw-aivan-plugin/`. Its plugin ID is `openclaw-aivan`; the package is `@giraffetechnology/openclaw-aivan`. The entry registers an agent harness. Inbound IM/email is normalized into the shared event contract and submitted to `/invoke`; existing aliases include `/api/openclaw/events`, `/api/skill/invoke` and `/api/rfq/create-from-event`.

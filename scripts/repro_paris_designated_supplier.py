@@ -11,9 +11,13 @@ This runs the REAL AIVAN pipeline locally (no CTYUN). It measures:
 """
 from __future__ import annotations
 import os
+import tempfile
 import time
+from pathlib import Path
 
-DB_PATH = "/tmp/aivan_repro_paris.sqlite3"
+# The reproduction owns a private per-run database, never a shared fixed path.
+_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="aivan-paris-repro-")
+DB_PATH = str(Path(_TEMP_DIRECTORY.name) / "repro.sqlite3")
 os.environ.update({
     "AIVAN_ENV": "local",
     "AIVAN_DB_URL": f"sqlite:///{DB_PATH}",
@@ -31,10 +35,6 @@ os.environ.update({
     "AIVAN_TEST_TENANT_ID": "repro_tenant",
     "AIVAN_EMAIL_SEND_MODE": "simulation",
 })
-try:
-    os.remove(DB_PATH)
-except OSError:
-    pass
 
 import httpx  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
@@ -213,4 +213,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        _TEMP_DIRECTORY.cleanup()

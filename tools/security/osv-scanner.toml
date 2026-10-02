@@ -1,0 +1,2 @@
+# Deliberately no vulnerability ignores. An explicit config prevents auto-loading
+# an incidental per-directory config that silently hides findings.
