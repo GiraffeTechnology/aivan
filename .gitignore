@@ -80,3 +80,6 @@ Thumbs.db
 
 # Generated benchmark reports
 artifacts/
+
+# Local security scan evidence is uploaded as CI artifacts.
+/security-reports/

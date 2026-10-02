@@ -48,4 +48,6 @@ All new or edited repository prose must be English and suitable for public discl
 
 Do not resume the original development tasks as a side effect of this cleanup; the product owner will direct their resumption. CI must be green before any authorized merge.
 
+Follow [the current security scan policy](docs/SECURITY_SCANNING.md) for scanner coverage, failure thresholds, reviewed findings and evidence. The license-available scans differ from CodeQL security-extended; do not claim equivalence or hide failures. Historical CodeQL/Dependency Review references do not restore an unavailable paid service as a product requirement.
+
 Before handoff: identify the exact scope and revision, run relevant checks, distinguish passed/failed/skipped/not-run, record evidence and limitations, and avoid new gates. Draft PRs and docs do not prove code implementation, merge, functional acceptance or production deployment.
