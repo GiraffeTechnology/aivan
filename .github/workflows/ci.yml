@@ -259,8 +259,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: ${{ runner.temp }}/osv-offline
-      OSV_RECORD_VALIDATOR: ${{ runner.temp }}/osv-record-validator
       GOTELEMETRY: "off"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -278,6 +276,8 @@ jobs:
           echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  $RUNNER_TEMP/osv-scanner" | sha256sum --check --strict
           chmod +x "$RUNNER_TEMP/osv-scanner"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          echo "OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=$RUNNER_TEMP/osv-offline" >> "$GITHUB_ENV"
+          echo "OSV_RECORD_VALIDATOR=$RUNNER_TEMP/osv-record-validator" >> "$GITHUB_ENV"
       - name: Set up pinned Go for the upstream advisory decoder
         uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
