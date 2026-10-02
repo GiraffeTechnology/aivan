@@ -102,8 +102,11 @@ def test_unhandled_exception_returns_200_error_envelope(client, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "error"
-    assert body["output"].strip()
-    assert body["reply_text"].strip()
+    expected = (
+        "AIVAN encountered a backend dependency error while processing your request. "
+        "Please try again later."
+    )
+    assert body["output"] == body["reply_text"] == expected
     assert "traceback" not in body["output"].lower()
     assert "traceback" not in body["reply_text"].lower()
 
