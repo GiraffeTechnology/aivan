@@ -10,16 +10,65 @@
     {
       "rule": "python_urlopen_rule-urllib-urlopen",
       "path": "scripts/run_gpm_llm_api_smoke.py",
-      "sha256": "579c75ea31f1a6de4107173989b5e27fce904257607330b99a7d1ddc6abd89fe",
+      "sha256": "ccc28d8b6cd3f6a12b9fa237cbb3acb823b7fdd1efa6c8f0af776089b230e3b4",
       "count": 3,
-      "reason": "Smoke-test destinations are literal localhost or operator-supplied QWEN_BASE_URL; not application request input. Requests retain explicit timeouts. Reviewed at lines 91, 237 and 258."
+      "reason": "Re-reviewed after synthetic quote payload fields were added. Destinations remain literal localhost or operator-supplied QWEN_BASE_URL, not application request input; explicit timeouts are unchanged. Exact calls at lines 91, 237 and 266. This does not certify the script's live-provider acceptance."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-i18n-runtime.test.mjs",
-      "sha256": "99e454c085860e44af2e536b739c70b487aa9c40391122cc32f17ebbb3a148f7",
+      "sha256": "b1cbb6aeaf1224bc3b8799cb8be52f124ff11f8aed1dbdcaa7c8708784804cab",
+      "count": 2,
+      "reason": "Exact reads at lines 8 and 192 resolve literal i18n.js and app.js URLs from import.meta.url through fileURLToPath. No request, environment, argument or fixture controls either filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-attachments-runtime.test.mjs",
+      "sha256": "edb7a199ed85f877ef7b86980d42baf45677e775fc5d84fecb19a9eb2dee7111",
+      "count": 2,
+      "reason": "Exact reads at lines 14 and 75 use literal attachments.js and app.js URLs relative to import.meta.url. Upload filenames and API responses never reach either filesystem read."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-clipboard-runtime.test.mjs",
+      "sha256": "13447d32b4978960e8f42a1b4c9b1178eb2596fa823f4022d06f803ceb3fe6bd",
       "count": 1,
-      "reason": "Test reads the constant ../src/aivan/app/static/i18n.js URL resolved from import.meta.url; no user-controlled path. Present only on the web branch."
+      "reason": "The line 4 filesystem read uses a literal app.js URL relative to import.meta.url. Clipboard content and denial fixtures do not control the filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-conversation-runtime.test.mjs",
+      "sha256": "71bb18ec871938e33c0d763a4ecadac513a93f256042f075787b49b93b6fcaa1",
+      "count": 2,
+      "reason": "Reads at lines 4 and 5 use literal app.js and index.html URLs relative to import.meta.url. Conversation data never controls filesystem paths."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-copy-audit-runtime.test.mjs",
+      "sha256": "df0664352119208792326f5afc2057e93cb4f69dc4e0ab4d91bf0341201bf791",
+      "count": 1,
+      "reason": "The line 5 filesystem read uses a literal app.js URL relative to import.meta.url. Draft content, digest and audit payload fixtures do not control the filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-inquiry-runtime.test.mjs",
+      "sha256": "13b0fb6610f45eafb81a8e8c93db859d66dba1bee322456cbd181239ceb40732",
+      "count": 1,
+      "reason": "The line 7 read uses the literal app.js URL resolved from import.meta.url through fileURLToPath. Inquiry text and HTTP result fixtures cannot change the source filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-message-readback-runtime.test.mjs",
+      "sha256": "c955daaec62d777ca7ea8a2cbaa9b2a8ea2482182a00f20094694d7d5b637f9e",
+      "count": 1,
+      "reason": "The line 5 read uses a literal app.js URL relative to import.meta.url. Saved-message content is only renderer input, never a filesystem filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-welcome-runtime.test.mjs",
+      "sha256": "b53f5ec8a510f814b6a686ffd458c927784f3d4d2de2bf4201f2210862c22592",
+      "count": 2,
+      "reason": "Reads at lines 5 and 6 use literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
     }
   ],
   "zizmor": [
