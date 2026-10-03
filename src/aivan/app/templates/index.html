@@ -155,6 +155,13 @@
   </div>
 
   <template id="empty-template"><div class="empty"><strong>暂无数据</strong><span>当前筛选条件下没有可显示的记录。</span></div></template>
+  <dialog id="manual-copy-dialog" aria-labelledby="manual-copy-title">
+    <h2 id="manual-copy-title">Copy draft manually</h2>
+    <p>Select the text and use Ctrl+C or Cmd+C. Copying does not send a message.</p>
+    <label for="manual-copy-text">Draft body</label>
+    <textarea id="manual-copy-text" rows="8" readonly></textarea>
+    <form method="dialog"><button class="secondary" type="submit">Close</button></form>
+  </dialog>
   <script src="/static/i18n.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>

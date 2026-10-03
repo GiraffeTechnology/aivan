@@ -430,6 +430,22 @@ async function confirmOrder(caseId, optionId) {
   }
 }
 
+async function copyDraftText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied to clipboard. This does not send the draft.', 'success');
+    return true;
+  } catch (_) {
+    const field = $('#manual-copy-text');
+    field.value = text;
+    $('#manual-copy-dialog').showModal();
+    field.focus();
+    field.select();
+    toast('Automatic copy was unavailable. Use Ctrl+C or Cmd+C on the selected text.', 'info');
+    return false;
+  }
+}
+
 async function showImpact(eventId) {
   try {
     const payload = await api(`/api/events/${encodeURIComponent(eventId)}/impact`);
@@ -500,8 +516,7 @@ document.addEventListener('click', async (event) => {
   const action = event.target.closest('[data-action]');
   if (!action) return;
   if (action.dataset.action === 'copy') {
-    await navigator.clipboard.writeText(action.dataset.copy || '');
-    toast(t('已复制到剪贴板'), 'success');
+    await copyDraftText(action.dataset.copy || '');
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
   if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
