@@ -7,6 +7,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, ConfigDict, Field
 
 from aivan.api.request_context import (
     RequestContext,
@@ -126,6 +128,7 @@ def _serialize_draft(record: InquiryDraftRecord) -> dict:
         "channel": record.channel,
         "status": record.status,
         "message_text": record.message_text,
+        "content_sha256": hashlib.sha256(record.message_text.encode("utf-8")).hexdigest(),
         "message_type": record.message_type,
         "attachments": record.attachments_json or [],
         "approval_id": record.approval_id,
@@ -354,6 +357,69 @@ def get_case_detail(
             for item in audits
         ],
     }
+
+
+class DraftCopyCompletion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@router.post("/cases/{case_id}/drafts/{draft_id}/copy")
+def record_draft_copy(
+    case_id: str, draft_id: str, body: DraftCopyCompletion,
+    db: Session = Depends(get_db), context: RequestContext = Depends(_context),
+):
+    """Record a user's clipboard completion report, not provider delivery."""
+    _get_case(db, context, case_id)
+    identity = _identity(context)
+    if identity.business_role == BusinessRole.AUDITOR:
+        raise HTTPException(status_code=403, detail={"error": "COPY_AUDIT_READ_ONLY"})
+    if not context.idempotency_key:
+        raise HTTPException(status_code=400, detail={"error": "IDEMPOTENCY_KEY_REQUIRED"})
+    ProjectRepository(db).get_for_update(case_id, tenant_id=context.tenant_id)
+    draft = db.query(InquiryDraftRecord).filter_by(
+        tenant_id=context.tenant_id, project_id=case_id, draft_id=draft_id,
+    ).execution_options(populate_existing=True).first()
+    if (draft is None or (identity.business_role not in _INTERNAL_ROLES
+                         and draft.target_role != identity.business_role.value)):
+        raise HTTPException(status_code=404, detail={"error": "DRAFT_NOT_FOUND"})
+    digest = hashlib.sha256(draft.message_text.encode("utf-8")).hexdigest()
+    if body.content_sha256 != digest:
+        raise HTTPException(status_code=409, detail={"error": "DRAFT_COPY_VERSION_MISMATCH"})
+    key = hashlib.sha256(
+        f"{context.tenant_id}\0{identity.actor_id}\0{context.idempotency_key}\0copy".encode()
+    ).hexdigest()[:56]
+    audit_id = f"copy_{key}"
+    evidence = {"draft_id": draft_id, "content_sha256": digest, "draft_status": draft.status,
+                "action": "copied", "delivery_claim": False}
+
+    def replay(record):
+        if (record is None or record.tenant_id != context.tenant_id
+                or record.case_id != case_id or record.actor_id != identity.actor_id
+                or record.event_type != "DRAFT_COPIED" or record.after_json != evidence):
+            raise HTTPException(status_code=409, detail={"error": "COPY_IDEMPOTENCY_CONFLICT"})
+        return {"status": "copied", "delivery_claim": False,
+                "audit_id": audit_id, "idempotent_replay": True}
+
+    existing = db.get(AuditLogRecord, audit_id)
+    if existing is not None:
+        return replay(existing)
+    record = AuditLogRecord(
+        audit_id=audit_id, tenant_id=context.tenant_id, case_id=case_id,
+        source_trace_id=context.trace_id, event_type="DRAFT_COPIED",
+        actor_id=identity.actor_id, actor_role=identity.business_role.value,
+        conversation_role=identity.conversation_role.value,
+        authorization_basis=identity.authorization_basis,
+        before_json={"draft_id": draft_id, "status": draft.status}, after_json=evidence,
+    )
+    db.add(record)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return replay(db.get(AuditLogRecord, audit_id))
+    return {"status": "copied", "delivery_claim": False,
+            "audit_id": audit_id, "idempotent_replay": False}
 
 
 def _order_confirmation_error(exc: OrderConfirmationError) -> HTTPException:

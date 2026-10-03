@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 
 
 def draft_type_from_notes(draft) -> str:
@@ -22,6 +23,7 @@ def serialize_draft(draft) -> dict:
         "target_peer_id": draft.target_peer_id,
         "target_role": draft.target_role,
         "message_text": draft.message_text,
+        "content_sha256": hashlib.sha256(draft.message_text.encode("utf-8")).hexdigest(),
         "message_type": draft.message_type,
         "attachments": draft.attachments_json or [],
         "status": draft.status,
