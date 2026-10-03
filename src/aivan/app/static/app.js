@@ -342,6 +342,27 @@ function eventRow(event) {
   return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
+async function showInquiryConversation(caseId, input, response) {
+  const stream = $('#conversation-stream');
+  const review = $('#outbound-review-content');
+  stream.replaceChildren();
+  for (const [className, text] of [['user-message', input], ['assistant-message', response]]) {
+    const message = document.createElement('p');
+    message.className = `conversation-message ${className}`;
+    message.textContent = text;
+    stream.append(message);
+  }
+  review.textContent = 'Loading saved drafts…';
+  try {
+    const detail = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
+    if (!Array.isArray(detail.drafts)) throw new Error('Invalid draft response');
+    if (detail.drafts.length) review.innerHTML = detail.drafts.map(draftRow).join('');
+    else review.textContent = 'No saved draft is available yet. Open the case for clarification or status.';
+  } catch (_) {
+    review.textContent = 'The input was accepted, but saved drafts could not be loaded. Reopen the case to retry. No message was sent by this view.';
+  }
+}
+
 function inquirySubmissionOutcome(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   if (payload.status !== 'ok' || typeof payload.project_id !== 'string') return null;
@@ -388,6 +409,7 @@ async function submitInquiry(event) {
       : (payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。'));
     result.textContent = `${t('案例')} ${outcome.projectId}\n${responseMessage}`;
     await loadCases(true);
+    if ($('#conversation-stream')) await showInquiryConversation(outcome.projectId, text, responseMessage);
     if (outcome.enteredApprovalFlow) {
       event.target.reset();
       toast(t('询盘草稿已生成，等待人工审批'), 'success');
@@ -537,6 +559,16 @@ document.addEventListener('submit', (event) => {
 });
 
 $('#logout-button').addEventListener('click', logout);
+$('#paste-inquiry')?.addEventListener('click', async () => {
+  const field = $('#inquiry-text');
+  try {
+    field.value += await navigator.clipboard.readText();
+    $('#input-status').textContent = 'Pasted into the input. Review before sending to Aivan.';
+  } catch (_) {
+    $('#input-status').textContent = 'Clipboard access is unavailable. Use Ctrl+V or Cmd+V in the input.';
+  }
+  field.focus();
+});
 $('#role-select').addEventListener('change', switchRole);
 $('#case-state-filter').addEventListener('change', () => loadCases(true));
 $('#refresh-cases').addEventListener('click', () => loadCases());

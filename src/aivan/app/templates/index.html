@@ -128,13 +128,23 @@
         </section>
 
         <section id="view-new-inquiry" class="view" aria-labelledby="new-inquiry-title">
-          <div class="page-heading"><div><p class="eyebrow">Human-in-the-loop</p><h1 id="new-inquiry-title">录入买家询盘</h1></div></div>
+          <div class="page-heading"><div><p class="eyebrow">Aivan digital trade assistant</p><h1 id="new-inquiry-title">Start a buyer inquiry</h1></div></div>
+          <section class="panel conversation-panel" aria-labelledby="conversation-title">
+            <h2 id="conversation-title">Conversation</h2>
+            <p class="muted">This view shows the current submission. Reopen a saved case to inspect its available database records.</p>
+            <div id="conversation-stream" class="conversation-stream" role="log" aria-live="polite" aria-relevant="additions"></div>
+          </section>
+          <section id="outbound-review" class="panel conversation-panel" aria-labelledby="outbound-review-title">
+            <h2 id="outbound-review-title">Outbound draft review</h2>
+            <p class="muted">Review recipients, prices, dates and commitments. Copying a draft does not send it.</p>
+            <div id="outbound-review-content" aria-live="polite">Submit an inquiry to load its saved drafts.</div>
+          </section>
           <form id="inquiry-form" class="panel form-grid">
-            <div><label for="buyer-id">买家标识</label><input id="buyer-id" required placeholder="buyer-001"></div>
-            <div><label for="buyer-name">买家名称</label><input id="buyer-name" placeholder="客户或公司名称"></div>
-            <div class="span-2"><label for="inquiry-text">询盘原文</label><textarea id="inquiry-text" rows="8" required placeholder="粘贴中文、英文或其他语言的原始询盘…"></textarea></div>
-            <div class="span-2 attachment-placeholder" aria-label="附件功能状态"><strong>附件 / 语音</strong><span>当前候选仅提供元数据占位；对象存储授权与恶意内容扫描未完成前禁止上传。</span></div>
-            <div class="span-2 form-actions"><button class="primary" type="submit">创建案例并生成待审批草稿</button></div>
+            <div><label for="buyer-id">Buyer reference</label><input id="buyer-id" required placeholder="buyer-001"></div>
+            <div><label for="buyer-name">Buyer name</label><input id="buyer-name" placeholder="Contact or company name"></div>
+            <div class="span-2"><label for="inquiry-text">Your inquiry</label><textarea id="inquiry-text" rows="6" required placeholder="Type or paste the buyer inquiry here."></textarea></div>
+            <div class="span-2 form-actions"><button class="secondary" id="paste-inquiry" type="button">Paste</button><button class="ghost" type="button" disabled title="Voice transcription is not available">Voice unavailable</button><button class="primary" type="submit">Send to Aivan</button></div>
+            <p class="span-2 muted" id="input-status" role="status">File and image upload are not connected in this candidate. Sending here does not send a message to a customer.</p>
           </form>
           <pre id="inquiry-result" class="result" aria-live="polite" hidden></pre>
         </section>

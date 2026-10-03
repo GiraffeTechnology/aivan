@@ -61,6 +61,11 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .content > .view { grid-column: 1 / -1; }
 .view { display: none; }
 .view.active { display: block; animation: reveal .2s ease; }
+.conversation-panel { margin-bottom: 1rem; }
+.conversation-stream { display: flex; flex-direction: column; gap: .75rem; max-height: 45vh; overflow-y: auto; }
+.conversation-message { max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; padding: .85rem; border: 1px solid var(--line); border-radius: 12px; }
+.user-message { align-self: flex-end; background: var(--green-soft); }
+.assistant-message { align-self: flex-start; background: var(--surface); }
 @keyframes reveal { from { opacity: 0; transform: translateY(4px); } }
 .page-heading, .case-hero, .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .page-heading { margin-bottom: 1.5rem; }
