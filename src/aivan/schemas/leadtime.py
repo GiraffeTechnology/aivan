@@ -26,7 +26,7 @@ class LeadTimeEstimate(BaseModel):
     category: str
     quantity: int | None = None
     destination: str | None = None
-    declared_lead_time_days: int | None = None
+    declared_lead_time_days: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     calculated_lead_time_days: float
     earliest_possible_days: float | None = None
     expected_days: float

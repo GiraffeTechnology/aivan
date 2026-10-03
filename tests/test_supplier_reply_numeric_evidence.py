@@ -1,0 +1,109 @@
+"""Supplier quotation parsing preserves explicit terms; fixtures are not live acceptance."""
+from __future__ import annotations
+
+import pytest
+
+from aivan.agents import supplier_response_agent as parser
+from aivan.execution.source_quote import source_quote_reference
+from aivan.schemas.response import SupplierReply
+from aivan.schemas.requirement import BuyerRequirement
+from aivan.integrations.gltg import GLTGClient
+
+
+@pytest.fixture
+def unavailable_parser_model(monkeypatch):
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("controlled parser model unavailable")
+    monkeypatch.setattr(parser, "llm_complete_json", unavailable)
+
+
+@pytest.mark.parametrize("days", [0.5, 8.5, 29.25])
+def test_fallback_preserves_fractional_supplier_lead_time(unavailable_parser_model, days):
+    result = parser.parse_supplier_reply(
+        f"Unit price: 12.50 GBP; MOQ 100; lead time {days} days.",
+        project_id="case-fixture", supplier_id="supplier-fixture",
+    )
+    assert result.lead_time_days == days
+    assert result.unit_price == 12.5
+    assert result.currency == "GBP"
+
+
+@pytest.mark.parametrize("text", ["GBP 12.50 per piece", "Unit price: 12.50 GBP"])
+def test_fallback_preserves_explicit_quote_currency(unavailable_parser_model, text):
+    result = parser.parse_supplier_reply(text, project_id="case-fixture")
+    assert result.unit_price == 12.5
+    assert result.currency == "GBP"
+
+
+def test_missing_currency_remains_missing_without_invented_usd(unavailable_parser_model):
+    result = parser.parse_supplier_reply("Unit price: 12.50; lead time 8.5 days", project_id="case-fixture")
+    assert result.unit_price == 12.5
+    assert result.currency == ""
+    assert "currency" in result.missing_info
+
+
+def test_model_fractional_lead_time_does_not_silently_drop_to_fallback(monkeypatch):
+    monkeypatch.setattr(parser, "llm_complete_json", lambda *_args: {
+        "unit_price": 12.5, "currency": "GBP", "lead_time_days": 8.5,
+        "confidence": 0.9, "source_event_id": "model-must-not-supply-identity",
+    })
+    result = parser.parse_supplier_reply("Unit price: 12.50 GBP; lead time 8.5 days", project_id="case-fixture")
+    assert result.lead_time_days == 8.5
+    assert result.currency == "GBP"
+    assert result.confidence == 0.9
+    assert result.source_event_id == ""
+
+
+def test_model_missing_currency_does_not_receive_schema_default(monkeypatch):
+    monkeypatch.setattr(parser, "llm_complete_json", lambda *_args: {"unit_price": 12.5, "confidence": 0.9})
+    result = parser.parse_supplier_reply("Unit price: 12.50", project_id="case-fixture")
+    assert result.currency == ""
+    assert "currency" in result.missing_info
+
+
+def test_legacy_integer_lead_time_keeps_existing_quote_fingerprint():
+    result = SupplierReply(
+        project_id="case-fixture", supplier_id="supplier-fixture",
+        raw_text="Unit price: 12.50 GBP; lead time 35 days",
+        unit_price=12.5, currency="GBP", lead_time_days=35,
+    )
+    assert source_quote_reference(result) == (
+        "aivan-source-quote-sha256-"
+        "448527f7e76cfa81b5bbf7d1ed8cbf53a4c6efb2bbe1f5c60d91191bd1fb6ee4"
+    )
+
+
+def test_fractional_and_message_revisions_have_distinct_fingerprints():
+    first = SupplierReply(project_id="case-fixture", supplier_id="supplier-fixture",
+        raw_text="Unit price: 12.50 GBP", unit_price=12.5, currency="GBP",
+        lead_time_days=8.5, source_event_id="actual-message-1")
+    revised_days = first.model_copy(update={"lead_time_days": 8.75})
+    revised_message = first.model_copy(update={"source_event_id": "actual-message-2"})
+    assert len({source_quote_reference(item) for item in (first, revised_days, revised_message)}) == 3
+
+
+@pytest.mark.parametrize("days", ["-8.5", "8,5"])
+def test_unsupported_duration_is_not_a_positive_tail_integer(unavailable_parser_model, days):
+    result = parser.parse_supplier_reply(f"Price 12.50 GBP; lead time {days} days", project_id="case-fixture")
+    assert result.lead_time_days is None
+
+
+def test_ambiguous_currency_requires_clarification(unavailable_parser_model):
+    result = parser.parse_supplier_reply("Price 12.50 GBP or USD 15.00", project_id="case-fixture")
+    assert result.currency == ""
+    assert "currency" in result.missing_info
+
+
+def test_fractional_supplier_declaration_survives_gltg_result_dto(monkeypatch):
+    # Controlled HTTP-result shape only; this does not test the external model.
+    monkeypatch.setattr(GLTGClient, "_estimate", lambda *_args, **_kwargs: {
+        "p50_days": 8.25, "p80_days": 9.75, "p90_days": 10.25,
+        "estimated_lead_time_days": 9.75, "risk_level": "low", "feasible": True,
+    })
+    result = GLTGClient().estimate_for_requirement(
+        BuyerRequirement(project_id="case-fixture", quantity=100, delivery_days=12),
+        supplier_reply=SupplierReply(project_id="case-fixture", raw_text="8.5 days", lead_time_days=8.5),
+    )
+    assert result.declared_lead_time_days == 8.5
+    assert (result.p50_days, result.p80_days, result.p90_days) == (8.25, 9.75, 10.25)
+    assert result.earliest_possible_days is None

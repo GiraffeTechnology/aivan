@@ -19,5 +19,8 @@ def source_quote_reference(reply: SupplierReply) -> str:
               "lead_time_days", "material_availability", "qc_commitment", "logistics_note",
               "incoterms", "payment_terms")
     evidence = {name: getattr(reply, name) for name in fields}
+    # A widened fractional DTO must not rotate existing integer-day revisions.
+    if reply.lead_time_days is not None and float(reply.lead_time_days).is_integer():
+        evidence["lead_time_days"] = int(reply.lead_time_days)
     encoded = json.dumps(evidence, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return "aivan-source-quote-sha256-" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()

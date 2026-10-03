@@ -12,7 +12,7 @@ class SupplierReply(BaseModel):
     moq: int | None = None
     capacity_per_day: int | None = None
     capacity_per_month: int | None = None
-    lead_time_days: int | None = None
+    lead_time_days: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     material_availability: str = ""
     qc_commitment: str = ""
     logistics_note: str = ""

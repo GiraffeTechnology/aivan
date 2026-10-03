@@ -410,6 +410,9 @@ def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_c
 
     project = api_client.get(f"/api/projects/{created['project_id']}").json()
     assert project["requirement"]["supplier_replies"][0]["unit_price"] == 4.5
+    assert project["requirement"]["supplier_replies"][0]["source_event_id"] == (
+        "openclaw:wechat::supplier_reply_thread_001:supplier_reply_msg_001"
+    )
     assert project["requirement"]["lead_time_estimates"][0]["expected_days"] > 0
     assert project["requirement"]["buyer_options"]
     assert project["selected_option"]["quote"]["buyer_unit_price"] > 0

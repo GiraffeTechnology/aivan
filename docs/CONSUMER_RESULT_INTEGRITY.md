@@ -36,6 +36,14 @@ These consumer checks do not establish CTYun MySQL compatibility, actual model
 success, the complete RFQ workflow, or public UI acceptance. Those results must
 come from their real service and application paths.
 
+Supplier-declared durations retain fractional days through parsing and the
+GLTG result DTO. They are supplier evidence, not authoritative GLTG estimates.
+The deterministic parser preserves explicit quotation currency; an omitted or
+ambiguous currency remains missing and requires clarification, not an invented
+USD value. Fractional model extraction must not silently become an integer
+fallback. Existing integer-day quotation fingerprints remain stable while
+changed fractional terms or source messages identify distinct revisions.
+
 ## Mandatory normalization at every intake
 
 RFQ API intake, the legacy CLI trade-agent entry, and text-attachment uploads
