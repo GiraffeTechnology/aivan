@@ -17,7 +17,7 @@ from aivan.domain.roles import BusinessRole
 from aivan.integrations.attachment_client import AttachmentClient, AttachmentError
 from aivan.integrations.language_skill import (
     LanguageNormalizationRequired, LanguageSkillUnavailable,
-    canonicalize_rfq, canonical_english_text, has_non_latin_text,
+    canonicalize_rfq, canonical_english_text,
 )
 
 router = APIRouter(tags=["attachments"])
@@ -99,10 +99,11 @@ def _input_content(body, context):
             packet = canonicalize_rfq(canonical, source_channel="myaivan", tenant_id=context.tenant_id)
         except LanguageSkillUnavailable as exc:
             raise LanguageNormalizationRequired() from exc
-        if packet:
-            canonical = canonical_english_text(packet)
-        elif has_non_latin_text(canonical):
+        # A Latin script is not evidence of English. Require the same language
+        # service contract as message intake, including English text attachments.
+        if packet is None:
             raise LanguageNormalizationRequired()
+        canonical = canonical_english_text(packet)
         content = canonical.encode("utf-8")
     elif body.content_type == "image/png":
         if (len(content) < 33 or not content.startswith(b"\x89PNG\r\n\x1a\n")

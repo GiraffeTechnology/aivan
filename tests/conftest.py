@@ -23,6 +23,23 @@ from tests.gpm_guidance_fake import mock_transport as _gpm_mock_transport
 
 
 @pytest.fixture(autouse=True)
+def _language_intake_api_mock(monkeypatch):
+    """Explicit synthetic contract for English-input unit tests, not live detection."""
+    from aivan.integrations import language_skill_client
+    from tests.language_skill_fake import mock_transport
+
+    if os.environ.get("RUN_LANGUAGE_SKILL_INTEGRATION_TESTS") == "1":
+        yield
+        return
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
+    language_skill_client.set_default_transport(mock_transport())
+    try:
+        yield
+    finally:
+        language_skill_client.set_default_transport(None)
+
+
+@pytest.fixture(autouse=True)
 def _gltg_api_mock():
     """Route all GLTG HTTP calls to an in-memory fake (no live server in unit tests).
 

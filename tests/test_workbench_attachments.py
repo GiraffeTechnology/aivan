@@ -39,7 +39,6 @@ def test_upload_readback_and_content_use_trusted_case_mapping(workbench, monkeyp
         return httpx.Response(200, json=metadata)
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://127.0.0.1:12345")
     monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "controlled-fixture-key")
-    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "false")
     monkeypatch.setattr(attachment_client, "_DEFAULT_TRANSPORT", httpx.MockTransport(handler))
     path = f"/api/workbench/cases/{case.project_id}/attachments"
     uploaded = client.post(path, headers={"X-AIVAN-CSRF": login["csrf_token"], "Idempotency-Key": "file-1"},

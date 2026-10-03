@@ -23,9 +23,8 @@ from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.integrations.gpm_guidance_client import GPMGuidanceUnavailableError
 from aivan.integrations.language_skill import (
     LanguageNormalizationRequired, LanguageSkillUnavailable,
-    canonical_english_text, canonicalize_rfq, english_provenance, has_non_latin_text,
+    canonical_english_text, canonicalize_rfq, english_provenance,
 )
-from aivan.integrations.language_skill_client import is_enabled as language_skill_enabled
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.policy import ExternalModelApiRequiresApprovalError, LocalModelUnavailableError
@@ -124,27 +123,24 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
             # Replay the stored result; create no new project/RFQ/draft/event.
             return RFQExecutionResult(**existing.result_json)
 
-    canonicalization = None
-    if language_skill_enabled():
-        try:
-            canonicalization = canonicalize_rfq(
-                event.message_text, source_channel=event.channel,
-                tenant_id=event.tenant_id, sender_role=event.business_role or "buyer",
-            )
-        except LanguageSkillUnavailable:
-            raise LanguageNormalizationRequired() from None
-        if canonicalization is None:
-            raise LanguageNormalizationRequired()
-        text = canonical_english_text(canonicalization)
-        # Keep caller-owned event immutable and its authenticated identity intact.
-        event = event.model_copy(update={"message_text": text})
-    elif has_non_latin_text(event.message_text):
-        raise LanguageNormalizationRequired()
-    event = event.model_copy(update={"attachments": english_provenance(event.attachments)})
+    # Script shape is not language identification: Latin input may be French,
+    # Spanish, German, or another language. The shared language service must
+    # normalize every business intake before classification or persistence.
+    try:
+        canonicalization = canonicalize_rfq(
+            event.message_text, source_channel=event.channel,
+            tenant_id=event.tenant_id, sender_role=event.business_role or "buyer",
+        )
+    except LanguageSkillUnavailable:
+        raise LanguageNormalizationRequired() from None
     if canonicalization is None:
-        result = _create_rfq_from_event_inner(event, db)
-    else:
-        result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
+        raise LanguageNormalizationRequired()
+    text = canonical_english_text(canonicalization)
+    # Keep caller-owned event immutable and its authenticated identity intact.
+    event = event.model_copy(update={
+        "message_text": text, "attachments": english_provenance(event.attachments),
+    })
+    result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
 
     if idem_key:
         repo.record(
