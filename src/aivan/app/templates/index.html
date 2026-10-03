@@ -81,7 +81,18 @@
         <div id="test-account-banner" class="notice warning test-account-banner" role="status" hidden>
           专用测试账号：已跳过常规登录并进入隔离测试租户。生产数据、询盘写入、审批和外发均不可用。
         </div>
-        <section id="view-dashboard" class="view active" aria-labelledby="dashboard-title">
+        <section id="view-welcome" class="view active" aria-labelledby="welcome-title">
+          <div class="panel">
+            <p class="eyebrow">Aivan · Your digital trade assistant</p>
+            <h1 id="welcome-title">Welcome back. What should your AIVAN handle today?</h1>
+            <p>Prepare an inquiry, review a draft, or continue an existing case. You stay in control of commercial decisions and external messages.</p>
+            <div class="row-actions">
+              <button class="primary test-account-restricted" data-open-view="new-inquiry" type="button">Start Working</button>
+              <button class="secondary" data-open-view="cases" type="button">Resume a case</button>
+            </div>
+          </div>
+        </section>
+        <section id="view-dashboard" class="view" aria-labelledby="dashboard-title">
           <div class="page-heading">
             <div><p class="eyebrow">今日业务</p><h1 id="dashboard-title">运营总览</h1></div>
             <button class="primary test-account-restricted" data-open-view="new-inquiry" type="button">录入新询盘</button>

@@ -146,8 +146,8 @@ async function establishSession() {
     await loadBootstrap();
     await Promise.all([loadCases(true), loadHealth()]);
     const requestedView = location.hash.slice(1);
-    const recoverableViews = ['dashboard', 'cases', 'new-inquiry', 'relay', 'health'];
-    setView(recoverableViews.includes(requestedView) ? requestedView : 'dashboard');
+    const recoverableViews = ['welcome', 'dashboard', 'cases', 'new-inquiry', 'relay', 'health'];
+    setView(recoverableViews.includes(requestedView) ? requestedView : 'welcome');
   } catch (error) {
     if (error.status === 401 || error.status === 403) showLogin();
     else showLogin(t('无法恢复会话，请重新登录。'));
@@ -175,7 +175,7 @@ async function login(event) {
     $('#test-account-banner').hidden = true;
     populateRoles(payload.allowed_roles, payload.role);
     await Promise.all([loadBootstrap(), loadCases(true), loadHealth()]);
-    setView('dashboard');
+    setView('welcome');
   } catch (error) {
     showLogin(error.message);
   } finally {
