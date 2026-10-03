@@ -67,6 +67,7 @@ def test_transaction_orderings(records, monkeypatch, first_lane):
     from aivan.schemas.response import SupplierReply
     from aivan.schemas.leadtime import LeadTimeEstimate
     from aivan.schemas.quote import BuyerOption
+    from aivan.schemas.rfq import FallbackTrigger, GLTGSimulation
     from aivan.openclaw import outbound_approval
     sessions, (pid, did) = records
     sends = []
@@ -80,7 +81,18 @@ def test_transaction_orderings(records, monkeypatch, first_lane):
     monkeypatch.setattr(w, 'calculate_leadtime_for_requirement', lambda *a, **k: lead)
     monkeypatch.setattr(w, 'generate_buyer_options', lambda *a: [BuyerOption(
         option_id='fixture', project_id=pid, option_label='test', option_type='test')])
-    monkeypatch.setattr(w.GLTGClient, 'simulate', lambda *a, **k: w._empty_gltg_simulation())
+    gltg = GLTGSimulation(
+        p50_days=1,
+        p80_days=2,
+        p90_days=3,
+        minimum_feasible_days=1,
+        supplier_set_feasibility='sufficient',
+        known_suppliers_first_feasibility='feasible',
+        public_bidding_time_cost_days=0,
+        fallback_trigger_recommendation=FallbackTrigger(),
+        selected_confidence_days=2,
+    )
+    monkeypatch.setattr(w.GLTGClient, 'simulate', lambda *a, **k: gltg)
     locked, attempted, done = Event(), Event(), Event()
     original = ProjectRepository.get_for_update
     def lock(repo, *a, **k):

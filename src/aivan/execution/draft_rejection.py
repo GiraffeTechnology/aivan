@@ -88,16 +88,12 @@ def reject_draft_atomically(
     if pending_customer_quotes:
         return DraftRejectionOutcome(status="rejected")
 
-    project.case_state = "supplier_replied"
-    project.source_trace_id = source_trace_id or project.source_trace_id
-    domain_repo.record_audit(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        event_type="CASE_STATE_TRANSITION",
+    project_repo.update_selected_option(project.project_id, None)
+    domain_repo.transition_case(
+        project=project,
+        after="supplier_replied",
         identity=identity,
         source_trace_id=source_trace_id,
-        before={"case_state": "awaiting_approval"},
-        after={"case_state": "supplier_replied"},
     )
     db.flush()
     return DraftRejectionOutcome(
