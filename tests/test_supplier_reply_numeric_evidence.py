@@ -107,3 +107,22 @@ def test_fractional_supplier_declaration_survives_gltg_result_dto(monkeypatch):
     assert result.declared_lead_time_days == 8.5
     assert (result.p50_days, result.p80_days, result.p90_days) == (8.25, 9.75, 10.25)
     assert result.earliest_possible_days is None
+
+
+@pytest.mark.parametrize("currency", ["GBP", ""])
+def test_buyer_quote_explanation_uses_selected_currency_without_default_usd(monkeypatch, currency):
+    from aivan.agents.buyer_option_agent import generate_buyer_options
+
+    monkeypatch.setenv("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "false")
+    reply = SupplierReply(project_id="case-fixture", supplier_id="supplier-fixture",
+        raw_text=f"Unit price: 12.50 {currency}", unit_price=12.5, currency=currency)
+    option = generate_buyer_options(
+        BuyerRequirement(project_id="case-fixture", quantity=100, quantity_unit="pcs"),
+        [reply], [], "case-fixture",
+    )[0]
+    assert option.quote.currency == currency
+    buyer_unit_trace = [line for line in option.quote.calculation_trace if line.startswith("Buyer unit price:")]
+    assert len(buyer_unit_trace) == 1
+    assert "USD" not in buyer_unit_trace[0]
+    if currency:
+        assert buyer_unit_trace[0].endswith(f" {currency}")

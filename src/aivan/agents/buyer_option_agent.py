@@ -111,6 +111,7 @@ def generate_buyer_options(
             quantity=requirement.quantity or 1000,
             moq=reply.moq or 0,
             margin_rate=margin_rate,
+            currency=reply.currency,
         )
         quote = QuoteCalculation(
             supplier_id=reply.supplier_id,
