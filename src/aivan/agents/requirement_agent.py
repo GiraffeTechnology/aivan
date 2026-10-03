@@ -51,23 +51,23 @@ def _coerce_field_shapes(data: dict, model: type[BaseModel]) -> dict:
     return result
 
 APPAREL_REQUIRED_FIELDS = [
-    ("quantity", "Order quantity", "订购数量是多少？"),
-    ("product_type", "Product type/description", "具体产品是什么？"),
-    ("fabric_material", "Fabric/material", "面料/材质是什么？"),
-    ("gsm", "Fabric weight (GSM)", "面料克重/GSM是多少？"),
-    ("color", "Color", "颜色是什么？"),
-    ("size_ratio", "Size ratio breakdown", "尺码比例是多少？"),
-    ("packaging", "Packaging type", "包装方式是什么？"),
-    ("destination", "Destination country/city", "目的地是哪里？"),
-    ("delivery_days", "Delivery deadline (days)", "需要多少天内交货？"),
+    ("quantity", "Order quantity", "What is the order quantity?"),
+    ("product_type", "Product type/description", "What is the product?"),
+    ("fabric_material", "Fabric/material", "What is the fabric or material?"),
+    ("gsm", "Fabric weight (GSM)", "What is the fabric weight in GSM?"),
+    ("color", "Color", "What is the color?"),
+    ("size_ratio", "Size ratio breakdown", "What is the size ratio?"),
+    ("packaging", "Packaging type", "What is the packaging type?"),
+    ("destination", "Destination country/city", "What is the destination?"),
+    ("delivery_days", "Delivery deadline (days)", "Within how many days is delivery required?"),
 ]
 
 CNC_REQUIRED_FIELDS = [
-    ("quantity", "Order quantity", "订购数量是多少？"),
-    ("material_spec", "Material specification", "材料规格是什么？"),
-    ("tolerance", "Tolerance requirements", "公差要求是多少？"),
-    ("destination", "Destination", "目的地是哪里？"),
-    ("delivery_days", "Delivery deadline", "需要多少天内交货？"),
+    ("quantity", "Order quantity", "What is the order quantity?"),
+    ("material_spec", "Material specification", "What is the material specification?"),
+    ("tolerance", "Tolerance requirements", "What are the tolerance requirements?"),
+    ("destination", "Destination", "What is the destination?"),
+    ("delivery_days", "Delivery deadline", "Within how many days is delivery required?"),
 ]
 
 def _deterministic_parse(raw_text: str) -> dict:
