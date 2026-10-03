@@ -334,7 +334,7 @@ function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
   const actions = draft.status === 'pending_approval' && canApprove
     ? `<button class="secondary compact" data-action="reject" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('拒绝')}</button><button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('审批')}</button>` : '';
-  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${ht('复制')}</button>${actions}</div></article>`;
+  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" data-copy-case-id="${escapeHtml(draft.case_id)}" data-draft-id="${escapeHtml(draft.draft_id)}" data-content-sha256="${escapeHtml(draft.content_sha256)}" type="button">${ht('复制')}</button>${actions}</div></article>`;
 }
 
 function eventRow(event) {
@@ -468,6 +468,41 @@ async function copyDraftText(text) {
   }
 }
 
+async function copyAndRecordDraft(button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  let clipboardCompleted = false;
+  try {
+    const text = button.dataset.copy || '';
+    if (!await copyDraftText(text)) return;
+    clipboardCompleted = true;
+    const { copyCaseId, draftId, contentSha256 } = button.dataset;
+    if (!copyCaseId || !draftId || !/^[a-f0-9]{64}$/.test(contentSha256 || '')) {
+      throw new Error('Copy audit identity unavailable');
+    }
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    const actual = Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('');
+    if (actual !== contentSha256) throw new Error('Copy content changed');
+    button.dataset.copyKey ||= requestId('copy');
+    const result = await api(`/api/workbench/cases/${encodeURIComponent(copyCaseId)}/drafts/${encodeURIComponent(draftId)}/copy`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': button.dataset.copyKey },
+      body: JSON.stringify({ content_sha256: contentSha256 }),
+    });
+    if (result.status !== 'copied' || result.delivery_claim !== false || !result.audit_id) {
+      throw new Error('Copy audit not confirmed');
+    }
+    delete button.dataset.copyKey;
+    toast('Copied and recorded. No message was sent.', 'success');
+  } catch (_) {
+    toast(clipboardCompleted
+      ? 'Copied to clipboard, but the copy audit was not confirmed. Retry or reopen the case. No delivery is claimed.'
+      : 'Copy could not be confirmed. Select the draft text and copy it manually. No delivery is claimed.', 'info');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function showImpact(eventId) {
   try {
     const payload = await api(`/api/events/${encodeURIComponent(eventId)}/impact`);
@@ -495,7 +530,7 @@ async function loadRelay() {
     list.innerHTML = payload.outbox.length ? payload.outbox.map((item) => `<article class="relay-card">
       <div><span class="status-pill">${escapeHtml(item.channel)}</span><code>${escapeHtml(item.draft_id)}</code></div>
       <p>${escapeHtml(item.message_text)}</p>
-      <button class="secondary" data-action="copy" data-copy="${escapeHtml(item.message_text)}" type="button">${ht('复制内容')}</button>
+      <button class="secondary" data-action="copy" data-copy="${escapeHtml(item.message_text)}" data-copy-case-id="${escapeHtml(item.project_id)}" data-draft-id="${escapeHtml(item.draft_id)}" data-content-sha256="${escapeHtml(item.content_sha256)}" type="button">${ht('复制内容')}</button>
       <form class="relay-confirm" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
     </article>`).join('') : emptyHtml();
   } catch (error) { list.innerHTML = `<p class="error">${ht('读取转发队列失败：')}${escapeHtml(error.message)}</p>`; }
@@ -538,7 +573,7 @@ document.addEventListener('click', async (event) => {
   const action = event.target.closest('[data-action]');
   if (!action) return;
   if (action.dataset.action === 'copy') {
-    await copyDraftText(action.dataset.copy || '');
+    await copyAndRecordDraft(action);
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
   if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
