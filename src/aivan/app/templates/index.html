@@ -144,7 +144,7 @@
             <div><label for="buyer-name">Buyer name</label><input id="buyer-name" placeholder="Contact or company name"></div>
             <div class="span-2"><label for="inquiry-text">Your inquiry</label><textarea id="inquiry-text" rows="6" required placeholder="Type or paste the buyer inquiry here."></textarea></div>
             <div class="span-2 form-actions"><button class="secondary" id="paste-inquiry" type="button">Paste</button><button class="ghost" type="button" disabled title="Voice transcription is not available">Voice unavailable</button><button class="primary" type="submit">Send to Aivan</button></div>
-            <p class="span-2 muted" id="input-status" role="status">File and image upload are not connected in this candidate. Sending here does not send a message to a customer.</p>
+            <p class="span-2 muted" id="input-status" role="status">To upload a TXT file or PNG/JPEG image, first save a complete inquiry and open its case. Sending here does not send a message to a customer.</p>
           </form>
           <pre id="inquiry-result" class="result" aria-live="polite" hidden></pre>
         </section>
@@ -173,6 +173,7 @@
     <form method="dialog"><button class="secondary" type="submit">Close</button></form>
   </dialog>
   <script src="/static/i18n.js" defer></script>
+  <script src="/static/attachments.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

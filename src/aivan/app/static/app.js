@@ -96,6 +96,7 @@ function showApp() {
 }
 
 function setView(name) {
+  window.myAivanAttachments?.dispose();
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
   history.replaceState(null, '', `#${name}`);
@@ -329,6 +330,7 @@ async function openCase(caseId) {
       <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${ht('导出审计')}</a>` : ''}</div>
     </section>
     ${section('Saved conversation', payload.messages, savedMessageRow)}
+    <section class="panel" id="case-attachments"></section>
     <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
     ${recommendation}
@@ -339,6 +341,7 @@ async function openCase(caseId) {
     ${section(t('回执'), payload.receipts, (r) => `<article><strong>${escapeHtml(r.channel)} · ${escapeHtml(r.receipt_id)}</strong><span>${escapeHtml(r.receipt_reference || r.external_message_id || t('摘要回执'))}</span><time>${escapeHtml(formatTime(r.confirmed_at))}</time></article>`)}
     ${section(t('事件时间线'), payload.events, eventRow)}
     ${section(t('审计记录'), payload.audit, (a) => `<article><strong>${escapeHtml(a.event_type)}</strong><span>${escapeHtml(a.actor_role)} · ${escapeHtml(a.actor_id)}</span><code>${escapeHtml(a.source_trace_id)}</code><time>${escapeHtml(formatTime(a.created_at))}</time></article>`)}`;
+    window.myAivanAttachments?.mount($('#case-attachments'), item.case_id, api);
   } catch (error) {
     $('#case-detail').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
