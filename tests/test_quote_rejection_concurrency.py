@@ -66,7 +66,7 @@ def test_transaction_orderings(records, monkeypatch, first_lane):
     from aivan.schemas.rfq import EventClassification
     from aivan.schemas.response import SupplierReply
     from aivan.schemas.leadtime import LeadTimeEstimate
-    from aivan.schemas.quote import BuyerOption
+    from aivan.schemas.quote import BuyerOption, QuoteCalculation
     from aivan.schemas.rfq import FallbackTrigger, GLTGSimulation
     from aivan.openclaw import outbound_approval
     sessions, (pid, did) = records
@@ -80,7 +80,11 @@ def test_transaction_orderings(records, monkeypatch, first_lane):
         conservative_days=3, p50_days=1, p80_days=2, p90_days=3, risk_buffer_days=0)
     monkeypatch.setattr(w, 'calculate_leadtime_for_requirement', lambda *a, **k: lead)
     monkeypatch.setattr(w, 'generate_buyer_options', lambda *a: [BuyerOption(
-        option_id='fixture', project_id=pid, option_label='test', option_type='test')])
+        option_id='fixture', project_id=pid, supplier_id='supplier',
+        option_label='test', option_type='test', quote=QuoteCalculation(
+            supplier_id='supplier', unit_price=1, quantity=10, supplier_total=10,
+            buyer_unit_price=1.15, buyer_total=11.5, currency='USD', margin_rate=0.15,
+        ))])
     gltg = GLTGSimulation(
         p50_days=1,
         p80_days=2,

@@ -31,7 +31,7 @@ def _event(message_id="msg_1", conversation_id="conv_1", **kw) -> OpenClawEvent:
         source="openclaw", channel="wechat", channel_account_id="acct_1",
         conversation_id=conversation_id, message_id=message_id,
         sender_id="user_001", sender_display_name="Operator",
-        message_text="帮我询价 5000 件格子衬衫，45 天内交东京。",
+        message_text="Please request a quote for 5000 plaid shirts to Tokyo within 45 days.",
         role_context="user", mode="command",
     )
     base.update(kw)

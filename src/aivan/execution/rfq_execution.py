@@ -21,6 +21,11 @@ from aivan.integrations.giraffe_db import (
 from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
 from aivan.integrations.gpm_guidance_client import GPMGuidanceUnavailableError
+from aivan.integrations.language_skill import (
+    LanguageNormalizationRequired, LanguageSkillUnavailable,
+    canonical_english_text, canonicalize_rfq, english_provenance, has_non_latin_text,
+)
+from aivan.integrations.language_skill_client import is_enabled as language_skill_enabled
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.policy import ExternalModelApiRequiresApprovalError, LocalModelUnavailableError
@@ -30,7 +35,7 @@ from aivan.execution.safety import (
     evaluate_supplier_readiness,
 )
 from aivan.rfq.dependency_policy import classify_exception
-from aivan.rfq.operator_reply import render_operator_reply
+from aivan.rfq.operator_reply import render_canonical_operator_reply
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.contracts import OpenClawEvent
 from aivan.schemas.requirement import BuyerRequirement
@@ -118,7 +123,27 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
             # Replay the stored result; create no new project/RFQ/draft/event.
             return RFQExecutionResult(**existing.result_json)
 
-    result = _create_rfq_from_event_inner(event, db)
+    canonicalization = None
+    if language_skill_enabled():
+        try:
+            canonicalization = canonicalize_rfq(
+                event.message_text, source_channel=event.channel,
+                tenant_id=event.tenant_id, sender_role=event.business_role or "buyer",
+            )
+        except LanguageSkillUnavailable:
+            raise LanguageNormalizationRequired() from None
+        if canonicalization is None:
+            raise LanguageNormalizationRequired()
+        text = canonical_english_text(canonicalization)
+        # Keep caller-owned event immutable and its authenticated identity intact.
+        event = event.model_copy(update={"message_text": text})
+    elif has_non_latin_text(event.message_text):
+        raise LanguageNormalizationRequired()
+    event = event.model_copy(update={"attachments": english_provenance(event.attachments)})
+    if canonicalization is None:
+        result = _create_rfq_from_event_inner(event, db)
+    else:
+        result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
 
     if idem_key:
         repo.record(
@@ -132,7 +157,9 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     return result
 
 
-def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
+def _create_rfq_from_event_inner(
+    event: OpenClawEvent, db: Session, *, canonicalization: dict | None = None,
+) -> RFQExecutionResult:
     classification = classify_event(event, db)
     if classification.event_type == "supplier_reply":
         return _handle_supplier_reply_event(event, classification, db)
@@ -161,12 +188,14 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
 
     project = _get_or_create_project(event, classification, db)
     existing_requirement = _load_requirement(project.requirement_json)
+    language_kwargs = {"canonicalization": canonicalization} if canonicalization else {}
     requirement = structure_customer_requirement_with_llm(
         raw_text=event.message_text,
         attachments=event.attachments,
         existing_requirement=existing_requirement,
         project_id=project.project_id,
         source_channel=event.channel,
+        **language_kwargs,
     )
 
     # ---- Execution readiness gate ------------------------------------- #
@@ -317,7 +346,7 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
         drafts_created=drafts_created,
     )
     # Deterministic, language-matched operator reply (no debug fields / raw ids).
-    user_message = render_operator_reply(result, requirement.language)
+    user_message = render_canonical_operator_reply(result)
     result.user_control_message = user_message
     user_notification = _send_user_control_notification(project.project_id, event, user_message, db)
     event_repo.append(

@@ -170,7 +170,9 @@ def build_confirmation_message(
     requirement: BuyerRequirement, gate: ExecutionGateResult
 ) -> str:
     """Render a deterministic, user-facing confirmation prompt for a blocked RFQ."""
-    zh = _is_chinese(requirement)
+    # This prompt is persisted as workflow/audit state. Recipient translation
+    # belongs at the presentation boundary, never in the stored business text.
+    zh = False
     qty = requirement.quantity
     unit = requirement.quantity_unit
     days = requirement.delivery_days

@@ -36,6 +36,7 @@ from aivan.api.request_context import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.observability.metrics import record_request_metrics, router as _metrics_router
 from aivan.observability.readiness import router as _readiness_router
+from aivan.integrations.language_skill import LanguageNormalizationRequired
 
 logger = logging.getLogger("aivan.api")
 
@@ -145,6 +146,17 @@ SKILL_INVOKE_PATHS = frozenset(
 # WeChat-visible degraded reply when the backend pipeline fails. Must be
 # human-readable and must never leak a traceback or raw exception text.
 ERROR_REPLY_TEXT = "AIVAN encountered a backend dependency error while processing your request. Please try again later."
+
+
+@app.exception_handler(LanguageNormalizationRequired)
+async def language_normalization_required(request: Request, exc: LanguageNormalizationRequired) -> JSONResponse:
+    """Reject unnormalized intake without persisting or echoing its source."""
+    context = getattr(request.state, "aivan_context", None)
+    trace_id = context.trace_id if context else uuid.uuid4().hex
+    return JSONResponse(status_code=503, content={"detail": {
+        "code": "LANGUAGE_NORMALIZATION_REQUIRED", "trace_id": trace_id,
+        "message": "Canonical English normalization is unavailable. Retry when the language service is ready.",
+    }})
 
 
 @app.exception_handler(Exception)

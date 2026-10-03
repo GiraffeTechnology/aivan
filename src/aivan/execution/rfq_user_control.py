@@ -179,9 +179,9 @@ def draft_supplier_email(
 
 
 def _should_use_chinese_user_message(requirement: BuyerRequirement) -> bool:
-    return requirement.language == "zh" or any(
-        "\u4e00" <= char <= "\u9fff" for char in requirement.raw_text
-    )
+    # Kept for existing consumers. Workflow drafts/audit are canonical English;
+    # a recipient's requested language is rendered by the language service.
+    return False
 
 
 def _risk_label_for_user(risk_level: str) -> str:

@@ -70,7 +70,13 @@ def test_invoke_openclaw_standard_payload(client):
     _assert_skill_envelope(resp)
 
 
-def test_invoke_wechat_webhook_payload(client):
+def test_invoke_wechat_webhook_payload(client, monkeypatch):
+    from aivan.execution import rfq_execution
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
+    monkeypatch.setattr(rfq_execution, "canonicalize_rfq", lambda *a, **k: {
+        "normalize": {"canonical_language": "en", "canonical_text": "Request a quotation for 1000 T-shirts."},
+        "structure": None,
+    })
     resp = client.post(
         "/invoke",
         json={

@@ -18,6 +18,17 @@ from aivan.openclaw.contracts import OpenClawEvent
 from aivan.schemas.requirement import BuyerRequirement
 
 
+@pytest.fixture(autouse=True)
+def _canonical_intake_fixture(monkeypatch):
+    """Execution unit fixture, not live language-service or full E2E proof."""
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
+    def canon(text, **kwargs):
+        canonical = ("Inquiry for 5000 high-quality plaid shirts, delivery to Tokyo within 45 days."
+                     if any("\u4e00" <= char <= "\u9fff" for char in text) else text)
+        return {"normalize": {"canonical_language": "en", "canonical_text": canonical}, "structure": None}
+    monkeypatch.setattr(rfq_execution, "canonicalize_rfq", canon)
+
+
 def _event(text: str, lang_zh: bool = True) -> OpenClawEvent:
     return OpenClawEvent(
         source="openclaw",
@@ -35,7 +46,7 @@ def _event(text: str, lang_zh: bool = True) -> OpenClawEvent:
 def _authoritative_req(**overrides) -> BuyerRequirement:
     req = BuyerRequirement(
         project_id="",
-        raw_text=overrides.pop("raw_text", "询价 5000 件格子衬衫，45天交东京，高品质"),
+        raw_text=overrides.pop("raw_text", "Inquiry for 5000 high-quality plaid shirts to Tokyo in 45 days."),
         language=overrides.pop("language", "zh"),
         category="apparel",
         product_type="plaid shirt",
@@ -52,7 +63,7 @@ def _authoritative_req(**overrides) -> BuyerRequirement:
 
 def _unresolved_dest_req() -> BuyerRequirement:
     req = BuyerRequirement(
-        raw_text="询价 5000 件格子衬衫，45天交东京，高品质",
+        raw_text="Inquiry for 5000 high-quality plaid shirts to Tokyo in 45 days.",
         language="zh",
         category="apparel",
         product_type="plaid shirt",
@@ -61,7 +72,7 @@ def _unresolved_dest_req() -> BuyerRequirement:
         delivery_days=45,
     )
     req.extra["field_sources"] = {"product_type": "language_skill", "destination": "raw_text_only"}
-    req.extra["destination_raw"] = "东京"
+    req.extra["destination_raw"] = "Tokyo"
     return req
 
 
@@ -87,8 +98,9 @@ def test_chinese_rfq_does_not_reply_tbd_or_english_debug_text(db_session, monkey
     assert "Strategy=" not in reply
     assert "draft_" not in reply
     assert "GLTG P50" not in reply
-    assert "RFQ 已创建" in reply or "RFQ 已记录" in reply
-    assert "仍需人工审批" in reply or "等待人工审批" in reply
+    assert "RFQ created" in reply or "RFQ recorded" in reply
+    assert "human approval" in reply
+    assert not any("\u4e00" <= char <= "\u9fff" for char in reply)
 
 
 def test_chinese_rfq_unresolved_destination_blocks_gltg_and_drafts(db_session, monkeypatch):
@@ -106,8 +118,8 @@ def test_chinese_rfq_unresolved_destination_blocks_gltg_and_drafts(db_session, m
     assert result.drafts_created == []
     assert result.gltg_simulation is None
     reply = result.user_control_message
-    assert "东京" in reply
-    assert "目的地" in reply
+    assert "Tokyo" in reply
+    assert "destination" in reply
     assert "TBD" not in reply
 
 

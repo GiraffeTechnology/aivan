@@ -31,10 +31,12 @@ def _language_skill_resolves_canonical_fields(monkeypatch):
     from aivan.agents import requirement_agent
 
     real = rfqe.structure_customer_requirement_with_llm
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
 
     def canonicalize(raw_text: str, **kwargs):
         if "白色纯棉衬衣" not in raw_text and "温哥华" not in raw_text:
-            return None
+            return {"normalize": {"raw_text": raw_text, "canonical_language": "en",
+                                  "canonical_text": raw_text}, "structure": None}
         return {
             "normalize": {
                 "raw_text": raw_text,
@@ -86,6 +88,7 @@ def _language_skill_resolves_canonical_fields(monkeypatch):
         return req
 
     monkeypatch.setattr(requirement_agent, "canonicalize_rfq", canonicalize)
+    monkeypatch.setattr(rfqe, "canonicalize_rfq", canonicalize)
     monkeypatch.setattr(rfqe, "structure_customer_requirement_with_llm", wrapped)
     yield
 
@@ -186,12 +189,10 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert payload["strategy"]["priority"] == "speed"
     assert payload["gltg_simulation"]["p80_days"] > 0
     assert payload["drafts_created"]
-    # The user command is Chinese, so the operator summary is rendered in Chinese.
+    # Persisted workflow text is English; recipient rendering is separate.
     user_control_message = payload["user_control_message"]
     assert (
-        "pending approval" in user_control_message.lower()
-        or "等待人工审批" in user_control_message
-        or "仍需人工审批" in user_control_message
+        "pending human approval" in user_control_message.lower()
     )
 
     drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
@@ -207,7 +208,7 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert "outbound_authorization=required" in user_notifications[0]["notes"]
 
 
-def test_chinese_user_control_message_is_localized_and_pending_approval():
+def test_source_language_does_not_localize_persisted_approval_summary():
     import types
 
     from aivan.execution.rfq_execution import _build_user_control_message
@@ -230,9 +231,9 @@ def test_chinese_user_control_message_is_localized_and_pending_approval():
         requirement, strategy, gltg, routing, ["draft_1", "draft_2"]
     )
 
-    # Chinese operator summary must still signal that the outbound drafts are
-    # blocked on human approval.
-    assert "等待人工审批" in message or "仍需人工审批" in message
+    # Persisted work text stays English even for a Chinese recipient.
+    assert "pending approval" in message
+    assert not any("\u4e00" <= char <= "\u9fff" for char in message)
     assert "Tokyo" in message
 
 
