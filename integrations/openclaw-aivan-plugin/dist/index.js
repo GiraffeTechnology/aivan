@@ -553,6 +553,7 @@ export function register(api) {
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             async runAttempt(params) {
+                let matchedTrade = false;
                 try {
                     const prompt = extractPrompt(params);
                     if (!prompt) {
@@ -563,6 +564,7 @@ export function register(api) {
                         process.stderr.write("[aivan] runAttempt: outside trade-sourcing boundary, returning pass-through\n");
                         return buildPassThroughResult(params);
                     }
+                    matchedTrade = true;
                     const ctx = extractSessionContext(params);
                     const stableMessageId = ctx.message_id ??
                         `ocmsg_${createHash("sha256")
@@ -597,14 +599,11 @@ export function register(api) {
                     }
                     catch (fetchErr) {
                         process.stderr.write(`[aivan] AIVAN fetch error: ${String(fetchErr)}\n`);
-                        return buildPassThroughResult(params);
+                        return buildNoOutboundResult(params);
                     }
                     if (!result.accepted) {
                         process.stderr.write(`[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`);
-                        if (result.reply_text) {
-                            return buildNoOutboundResult(params);
-                        }
-                        return buildPassThroughResult(params);
+                        return buildNoOutboundResult(params);
                     }
                     const replyText = result.reply_text ??
                         (result.project_id
@@ -615,7 +614,9 @@ export function register(api) {
                 }
                 catch (err) {
                     process.stderr.write(`[aivan] runAttempt unexpected error: ${String(err)}\n`);
-                    return buildPassThroughResult(params);
+                    return matchedTrade
+                        ? buildNoOutboundResult(params)
+                        : buildPassThroughResult(params);
                 }
             },
         });
