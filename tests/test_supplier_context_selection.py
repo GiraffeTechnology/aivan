@@ -164,3 +164,35 @@ def test_empty_catalog_completes_without_extra_requests(monkeypatch, db_session)
     client = _remote_client(monkeypatch, db_session, handler)
     assert client.query_suppliers(BuyerRequirement(category="apparel")) == []
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("criteria, expected", [
+    ({"category": "textile"}, ["known_sup_guangzhou_textile"]),
+    ({"fabric_material": "cotton"}, ["known_sup_shenzhen_apparel", "known_sup_guangzhou_textile"]),
+    ({"category": "hardware"}, []),
+    ({"fabric_material": "steel"}, []),
+    ({}, ["known_sup_shenzhen_apparel", "known_sup_guangzhou_textile"]),
+])
+def test_local_demo_fallback_uses_the_same_requirement_filter(monkeypatch, db_session, criteria, expected):
+    from aivan.sourcing import supplier_registry
+
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    monkeypatch.setenv("AIVAN_ALLOW_STUB_SUPPLIERS", "true")
+    monkeypatch.delenv("GIRAFFE_DB_BASE_URL", raising=False)
+    monkeypatch.setattr(supplier_registry, "list_active", lambda **kwargs: [])
+    found = GiraffeDBClient(db_session, tenant_id="tenant-a").query_suppliers(BuyerRequirement(**criteria))
+    assert [supplier.supplier_id for supplier in found] == expected
+
+
+def test_unmatched_registry_does_not_enable_unrelated_demo_suppliers(monkeypatch, db_session):
+    from aivan.sourcing import supplier_registry
+    from aivan.sourcing.supplier_models import SupplierProfile
+
+    monkeypatch.setenv("AIVAN_ENV", "local")
+    monkeypatch.setenv("AIVAN_ALLOW_STUB_SUPPLIERS", "true")
+    monkeypatch.delenv("GIRAFFE_DB_BASE_URL", raising=False)
+    registered = SupplierProfile(supplier_id="local-registry", name="Registered mill", categories=["apparel"])
+    monkeypatch.setattr(supplier_registry, "list_active", lambda **kwargs: [registered])
+    client = GiraffeDBClient(db_session, tenant_id="tenant-a")
+    assert client.query_suppliers(BuyerRequirement(category="hardware")) == []
+    assert client.query_suppliers(BuyerRequirement(category="apparel")) == [registered]

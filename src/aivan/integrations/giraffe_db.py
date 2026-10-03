@@ -141,7 +141,7 @@ class GiraffeDBClient:
 
         registry_suppliers = list_active(tenant_id=self.tenant_id)
         candidates = _filter_supplier_profiles(registry_suppliers, requirement)
-        return candidates or _default_known_suppliers()
+        return candidates or _filter_supplier_profiles(_default_known_suppliers(), requirement)
 
     def _all_remote_suppliers(self) -> list[SupplierProfile]:
         """Read the complete tenant catalog, or fail without partial candidates."""
