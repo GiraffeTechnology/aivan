@@ -15,7 +15,7 @@ window.myAivanAttachments = (() => {
   }
 
   async function fileBody(file) {
-    if (!file || !types.has(file.type) || file.size < 1 || file.size > maxBytes) throw Error('INVALID_FILE');
+    if (!file || !types.has(file.type) || file.size < 1 || file.size > maxBytes || (file.type === 'text/plain' && file.size > 64 * 1024)) throw Error('INVALID_FILE');
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.byteLength !== file.size) throw Error('INVALID_FILE');
     let binary = '';
@@ -35,7 +35,7 @@ window.myAivanAttachments = (() => {
     root.append(node('h2', 'Files and images'));
     if (!caseId) { root.append(node('p', 'Save a complete inquiry and open its case before uploading.')); return; }
     const form = node('form');
-    const label = node('label', 'Upload a TXT, PNG or JPEG file (maximum 10 MiB)');
+    const label = node('label', 'Upload a UTF-8 TXT (maximum 64 KiB) or PNG/JPEG image (maximum 10 MiB)');
     const input = node('input');
     input.type = 'file'; input.accept = '.txt,.png,.jpg,.jpeg,text/plain,image/png,image/jpeg'; input.required = true;
     label.append(input);
@@ -111,7 +111,7 @@ window.myAivanAttachments = (() => {
         await refresh();
       } catch (error) {
         if (alive) status.textContent = persisted ? 'File saved, but the attachment list could not be refreshed. Reopen the case to verify.'
-          : error.message === 'INVALID_FILE' ? 'Choose a non-empty TXT, PNG or JPEG file no larger than 10 MiB.'
+          : error.message === 'INVALID_FILE' ? 'Choose a non-empty UTF-8 TXT up to 64 KiB, or PNG/JPEG image up to 10 MiB.'
           : error.status === 409 ? 'Upload conflict: ensure the case is saved and review its current state before retrying.'
           : [401, 403].includes(error.status) ? 'Upload not authorized. Check your session and case permissions.'
           : 'Upload could not be verified. Reopen the case to check; retrying the same file uses the same request key in this view.';

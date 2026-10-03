@@ -179,6 +179,7 @@ jobs:
           node ../../tests/myaivan-conversation-runtime.test.mjs
           node ../../tests/myaivan-copy-audit-runtime.test.mjs
           node ../../tests/myaivan-message-readback-runtime.test.mjs
+          node ../../tests/myaivan-attachments-runtime.test.mjs
 
       - name: Install dependencies
         run: npm ci
@@ -237,6 +238,8 @@ jobs:
           src/aivan/api/session_auth.py
           src/aivan/api/session_routes.py
           src/aivan/api/workbench_routes.py
+          src/aivan/api/attachment_routes.py
+          src/aivan/integrations/attachment_client.py
           src/aivan/api/ui_catalog_routes.py
           src/aivan/app/ui_catalog.py
           src/aivan/integrations/outbound_translation.py

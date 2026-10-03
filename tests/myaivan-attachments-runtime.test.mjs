@@ -30,7 +30,7 @@ vm.runInContext(source, context);
 const ui = context.window.myAivanAttachments;
 const file = {name:'test.png', type:'image/png', size:4, arrayBuffer:async()=>imageBytes.buffer};
 assert.equal((await ui.fileBody(file)).sha256, sha);
-for (const change of [{size:0}, {size:10485761}, {type:'text/html'}]) await assert.rejects(ui.fileBody({...file,...change}), /INVALID_FILE/);
+for (const change of [{size:0}, {size:10485761}, {type:'text/html'}, {type:'text/plain',size:65537}]) await assert.rejects(ui.fileBody({...file,...change}), /INVALID_FILE/);
 assert.throws(()=>ui.contentPath('c1',{attachment_id:'a1',download_path:'https://evil.test/a'}), /INVALID_DOWNLOAD_PATH/);
 const item = {attachment_id:'a1',file_name:'<script>not markup</script>',download_path:'/api/workbench/cases/c1/attachments/a1/content',content_type:'image/png',size_bytes:4,sha256:sha};
 const requests = [];

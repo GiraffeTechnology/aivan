@@ -160,7 +160,7 @@ def bootstrap(context: RequestContext = Depends(_context)):
             "guided_relay": True,
             "event_correction": True,
             "audit_export": Capability.VIEW_AUDIT in ROLE_CAPABILITIES[identity.business_role],
-            "attachments": "metadata_only",
+            "attachments": "db_backed_selected_case" if os.environ.get("GIRAFFE_DB_BASE_URL") else "unavailable",
         },
     }
 
@@ -645,13 +645,14 @@ def _markdown_export(payload: dict) -> str:
         ("Conversations", "conversations"),
         ("Participants", "participants"),
         ("Messages (canonical English and source references)", "messages"),
+        ("Attachments (provider-verified references)", "attachments"),
         ("Drafts", "drafts"),
         ("Approvals", "approvals"),
         ("Receipts", "receipts"),
         ("Events", "events"),
         ("Audit", "audit"),
     ):
-        lines.extend([f"## {title}", "", "```json", json.dumps(payload[key], ensure_ascii=False, indent=2), "```", ""])
+        lines.extend([f"## {title}", "", "```json", json.dumps(payload.get(key, []), ensure_ascii=False, indent=2), "```", ""])
     return "\n".join(lines)
 
 
@@ -668,6 +669,8 @@ def export_case(
     except Exception as exc:
         raise HTTPException(status_code=403, detail={"error": "AUDIT_EXPORT_FORBIDDEN"}) from exc
     payload = get_case_detail(case_id, db, context)
+    from aivan.api.attachment_routes import export_attachment_metadata
+    payload["attachments"] = export_attachment_metadata(db, context, case_id)
     candidate = os.environ.get("AIVAN_CANDIDATE_SHA", "").strip() or None
     if format == "json":
         return {"candidate_sha": candidate, "api_version": "0.3.0", **payload}
@@ -676,3 +679,12 @@ def export_case(
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="aivan-case-{case_id}.md"'},
     )
+
+
+def _register_attachment_routes():
+    # Register after case authorization helpers exist; share them, not a second ACL.
+    from aivan.api.attachment_routes import router as attachment_router
+    router.include_router(attachment_router)
+
+
+_register_attachment_routes()
