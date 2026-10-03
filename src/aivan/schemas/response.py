@@ -4,6 +4,7 @@ class SupplierReply(BaseModel):
     project_id: str
     supplier_id: str = ""
     candidate_id: str = ""
+    source_event_id: str = ""
     raw_text: str
     channel: str = ""
     unit_price: float | None = None

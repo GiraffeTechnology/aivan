@@ -55,7 +55,7 @@ def check_version(tool: str, report_dir: Path) -> None:
 
 
 def normalized(path: str) -> str:
-    return os.path.relpath(Path(path).resolve(), Path.cwd())
+    return os.path.relpath(Path(path).resolve(), Path.cwd()).replace(os.sep, "/")
 
 
 def verify_rules() -> dict:
@@ -66,7 +66,7 @@ def verify_rules() -> dict:
     require(len(files) == 79 and manifest["rules_per_language"] == {"python": 69, "javascript": 10, "typescript": 9},
             "Unexpected rule inventory; review rule updates and their coverage explicitly")
     expected = {item["path"] for item in files}
-    actual = {str(p.relative_to(directory)) for p in directory.rglob("*") if p.suffix in {".yaml", ".yml"}}
+    actual = {p.relative_to(directory).as_posix() for p in directory.rglob("*") if p.suffix in {".yaml", ".yml"}}
     require(actual == expected, "Rules missing or unmanifested rule files present")
     for item in files:
         require(hashlib.sha256((directory / item["path"]).read_bytes()).hexdigest() == item["sha256"],

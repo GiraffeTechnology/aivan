@@ -10,6 +10,7 @@ from aivan.openclaw.contracts import OpenClawEvent
 from aivan.schemas.quote import BuyerOption, QuoteCalculation
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
+from aivan.execution.source_quote import source_quote_reference
 
 
 def test_selected_buyer_quote_identity_actor_and_gltg_lineage_reach_gpm(monkeypatch):
@@ -40,7 +41,7 @@ def test_selected_buyer_quote_identity_actor_and_gltg_lineage_reach_gpm(monkeypa
     requirement = BuyerRequirement(
         product_type="shirt",
         quantity=1000,
-        target_currency="USD",
+        target_currency="EUR",
     )
     quote = QuoteCalculation(
         supplier_id="supplier-1",
@@ -66,7 +67,7 @@ def test_selected_buyer_quote_identity_actor_and_gltg_lineage_reach_gpm(monkeypa
             supplier_id="supplier-1",
             raw_text="USD 12.50",
             unit_price=12.5,
-            currency="EUR",
+            currency="USD",
         )
     ]
     gltg = SimpleNamespace(gltg_run_id="gltg-run-1", source_api_version="v2")
@@ -84,7 +85,8 @@ def test_selected_buyer_quote_identity_actor_and_gltg_lineage_reach_gpm(monkeypa
     assert captured["actor_id"] == "sales-1"
     assert captured["actor_role"] == "sales"
     assert captured["case_id"] == "case-1"
-    assert captured["quote_id"] == "quote-1"
+    assert captured["quote_id"] == source_quote_reference(replies[0])
+    assert captured["quote_id"] != option.option_id
     assert captured["supplier_quote"] == 12.5
     assert captured["currency"] == "USD"
     assert captured["buyer_unit_price"] == 15.0

@@ -689,6 +689,10 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         supplier_id=event.sender_id or "",
         channel=event.channel,
     )
+    # A model cannot supply this identity. Bind the actual inbound message,
+    # already authenticated and case-bound, to the persisted parsed revision.
+    reply.source_event_id = ":".join((event.source or "", event.channel or "",
+        event.channel_account_id or "", event.conversation_id or "", event.message_id or ""))
     event_repo.append(
         project.project_id,
         "SUPPLIER_REPLY_PARSED",

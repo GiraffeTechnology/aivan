@@ -143,7 +143,37 @@ class LanguageSkillClient:
             payload["source_channel"] = source_channel
         if conversation_context:
             payload["conversation_context"] = conversation_context
-        return self._request("POST", "/v1/inbound/normalize", json=payload)
+        result = self._request("POST", "/v1/inbound/normalize", json=payload)
+        if not result.ok:
+            return result
+        # A successful transport is not a successful translation. Reuse the
+        # intake residual-script guard; do not impose ASCII-only business text.
+        from aivan.integrations.language_skill import has_non_latin_text
+
+        data = result.data
+        text = data.get("canonical_text") if isinstance(data, dict) else None
+        translation = data.get("translation") if isinstance(data, dict) else None
+        warnings = data.get("warnings") if isinstance(data, dict) else None
+        model_unavailable = (
+            isinstance(translation, dict) and translation.get("model") == "unavailable"
+        )
+        model_missing = isinstance(warnings, list) and any(
+            isinstance(warning, dict) and warning.get("code") == "TRANSLATION_MODEL_MISSING"
+            for warning in warnings
+        )
+        if (
+            not isinstance(data, dict)
+            or data.get("canonical_language") != canonical_language
+            or not isinstance(text, str)
+            or not text.strip()
+            or (canonical_language == "en" and has_non_latin_text(text))
+            or model_unavailable
+            or model_missing
+        ):
+            return LanguageSkillResult(
+                False, None, "language-skill returned invalid canonical result", result.status_code
+            )
+        return result
 
     def structure_rfq(
         self,

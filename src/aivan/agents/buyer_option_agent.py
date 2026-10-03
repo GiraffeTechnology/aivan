@@ -9,6 +9,7 @@ from aivan.llm.prompts import BUYER_OPTION_SYSTEM
 from aivan.pricing.quote_calculator import calculate_buyer_quote
 from aivan.pricing.margin import should_hide_supplier_identity, should_hide_supplier_price, get_default_margin_rate
 from aivan.utils.ids import new_id
+from aivan.execution.source_quote import source_quote_reference
 
 def generate_buyer_options(
     requirement: BuyerRequirement,
@@ -149,6 +150,7 @@ def generate_buyer_options(
             supplier_id=reply.supplier_id,
             candidate_id=reply.candidate_id,
             supplier_display_name=sup_display,
+            source_quote_reference=source_quote_reference(reply),
             lead_time_estimate=lt,
             quote=quote,
             risk_level="low" if not reply.risks else "medium",

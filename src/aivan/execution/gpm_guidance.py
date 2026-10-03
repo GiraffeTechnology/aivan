@@ -13,6 +13,7 @@ from aivan.integrations.gpm_guidance_client import (
 from aivan.openclaw.contracts import OpenClawEvent
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
+from aivan.execution.source_quote import source_quote_reference
 
 
 def _gltg_reference(gltg_result) -> str:
@@ -68,44 +69,42 @@ def create_stage1_gpm_guidance(
     selected_reply = next(
         (
             item
-            for item in replies
-            if (selected_option.supplier_id and item.supplier_id == selected_option.supplier_id)
-            or (
-                selected_option.candidate_id
+            for item in reversed(replies)
+            if (
+                item.supplier_id == selected_option.supplier_id
+                if selected_option.supplier_id
+                else bool(selected_option.candidate_id)
                 and item.candidate_id == selected_option.candidate_id
             )
         ),
         None,
     )
-    if selected_reply is None and len(replies) == 1:
-        selected_reply = replies[0]
     quote = selected_option.quote
     if selected_reply is None or selected_reply.unit_price is None or quote is None:
         raise GPMGuidanceUnavailableError("GPM_SOURCE_QUOTE_MISSING")
+    quote_reference = source_quote_reference(selected_reply)
+    bound_reference = selected_option.source_quote_reference
+    if bound_reference and bound_reference != quote_reference:
+        raise GPMGuidanceUnavailableError("GPM_SOURCE_QUOTE_SUPERSEDED")
+    if ((quote.currency or "").strip().upper() != (selected_reply.currency or "").strip().upper()
+            or (not bound_reference and quote.unit_price != selected_reply.unit_price)):
+        raise GPMGuidanceUnavailableError("GPM_SOURCE_QUOTE_MISMATCH")
     tenant_id = project.tenant_id or event.tenant_id or "legacy"
     trace_seed = event.source_trace_id or event.message_id or project.project_id
     trace_id = event.source_trace_id or (
         "trace_" + hashlib.sha256(trace_seed.encode("utf-8")).hexdigest()[:24]
     )
-    idempotency_material = (
-        f"{tenant_id}:{project.project_id}:{event.message_id}:"
-        f"{selected_option.option_id}:gpm-guidance"
-    )
-    idempotency_key = (
-        "gpm_" + hashlib.sha256(idempotency_material.encode("utf-8")).hexdigest()[:32]
-    )
     actor_id, actor_role = _gpm_actor(event)
-    packet = GPMGuidanceClient().create_guidance(
+    request = dict(
         tenant_id=tenant_id,
         actor_id=actor_id,
         actor_role=actor_role,
         trace_id=trace_id,
-        idempotency_key=idempotency_key,
         case_id=project.project_id,
-        quote_id=selected_option.option_id,
+        quote_id=quote_reference,
         sku=(requirement.product_type or requirement.category or "apparel"),
         supplier_id=selected_reply.supplier_id or None,
-        supplier_quote=float(quote.unit_price),
+        supplier_quote=float(selected_reply.unit_price),
         currency=quote.currency,
         quantity=requirement.quantity,
         buyer_unit_price=float(quote.buyer_unit_price),
@@ -114,8 +113,13 @@ def create_stage1_gpm_guidance(
         margin_rate=float(quote.margin_rate),
         gltg_run_id=_gltg_reference(gltg_result),
         gltg_api_version=getattr(gltg_result, "source_api_version", ""),
-        notes=f"case={project.project_id};option={selected_option.option_id}",
+        notes=f"case={project.project_id};source_quote={quote_reference}",
     )
+    # Exact request identity includes tenant/actor/trace, selected terms and GLTG
+    # lineage. Regenerating only a UI option ID does not mint a new decision.
+    canonical = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    idempotency_key = "gpm_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    packet = GPMGuidanceClient().create_guidance(idempotency_key=idempotency_key, **request)
     return {
         "packet_id": packet["packet_id"],
         "recommendation": packet["recommendation"],
@@ -123,4 +127,5 @@ def create_stage1_gpm_guidance(
         "human_approval_required": True,
         "approval_status": "pending",
         "dispatched": False,
+        "quote_id": quote_reference,
     }

@@ -22,7 +22,7 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     try:
         result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
         if result.get("confidence", 0) > 0.4:
-            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text")}
+            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id")}
             return SupplierReply(
                 project_id=project_id,
                 supplier_id=supplier_id,
