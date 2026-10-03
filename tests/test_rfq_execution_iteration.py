@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,25 @@ from aivan.execution.rfq_execution import interpret_strategy
 from aivan.openclaw.outbound_approval import send_if_approved
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.rfq import RFQStrategy
+
+
+@pytest.fixture(autouse=True)
+def _explicit_unit_supplier_dataset(monkeypatch):
+    """Bind test-only demo inputs independently of source vs wheel layout.
+
+    Production packages deliberately omit demo suppliers. This fixture does not
+    enable production stubs or claim a real private-data service acceptance.
+    """
+    from aivan.integrations import giraffe_db
+
+    fixture_path = Path(__file__).resolve().parents[1] / "data/demo/stub_suppliers.json"
+    assert fixture_path.is_file()
+    monkeypatch.setattr(giraffe_db, "_STUB_SUPPLIERS_PATH", fixture_path)
+    giraffe_db._load_stub_supplier_data.cache_clear()
+    try:
+        yield
+    finally:
+        giraffe_db._load_stub_supplier_data.cache_clear()
 
 
 @pytest.fixture(autouse=True)
