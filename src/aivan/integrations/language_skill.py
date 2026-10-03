@@ -52,7 +52,7 @@ def has_non_latin_text(text: str) -> bool:
 def english_provenance(value: Any) -> Any:
     """Keep canonical metadata and hash original spans at every nesting level."""
     if isinstance(value, dict):
-        result = {}
+        result: dict[str, Any] = {}
         for key, item in value.items():
             key = str(key)
             if key in {"raw", "raw_text", "source_text", "span", "original_text"}:

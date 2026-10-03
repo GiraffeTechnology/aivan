@@ -171,7 +171,14 @@ jobs:
           node-version: "22"
 
       - name: myAIVAN catalog browser-runtime contract
-        run: node ../../tests/myaivan-i18n-runtime.test.mjs
+        run: |
+          node ../../tests/myaivan-i18n-runtime.test.mjs
+          node ../../tests/myaivan-welcome-runtime.test.mjs
+          node ../../tests/myaivan-inquiry-runtime.test.mjs
+          node ../../tests/myaivan-clipboard-runtime.test.mjs
+          node ../../tests/myaivan-conversation-runtime.test.mjs
+          node ../../tests/myaivan-copy-audit-runtime.test.mjs
+          node ../../tests/myaivan-message-readback-runtime.test.mjs
 
       - name: Install dependencies
         run: npm ci
