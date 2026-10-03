@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from aivan.gpm.auth import require_auth
 from aivan.gpm.giraffe_db_client import GPM_PACKET_API_VERSION
@@ -66,11 +66,29 @@ async def require_gpm_tenant(request: Request) -> str:
 
 
 class QuoteGuidanceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    case_id: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+    quote_id: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
     sku: str
     supplier_id: Optional[str] = None
-    supplier_quote: float
-    currency: str = "USD"
-    quantity: Optional[int] = None
+    supplier_quote: float = Field(ge=0)
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    quantity: Optional[int] = Field(default=None, ge=1)
+    buyer_unit_price: float = Field(ge=0)
+    buyer_total: float = Field(ge=0)
+    supplier_total: float = Field(ge=0)
+    margin_rate: float = Field(ge=0, lt=1)
+    gltg_run_id: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+    )
+    gltg_api_version: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+    )
     evidence_ids: Optional[list[str]] = None
     notes: Optional[str] = None
 
@@ -96,20 +114,11 @@ async def create_quote_guidance(
         if id_error is not None:
             return JSONResponse(status_code=422, content=id_error)
 
-    runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
-    if runtime_mode == "mock":
-        analysis = mock_quote_analysis(body.sku, body.supplier_quote)
-    else:
-        analysis = analyze_quote(
-            sku=body.sku,
-            supplier_quote=body.supplier_quote,
-            currency=body.currency,
-            quantity=body.quantity,
-        )
-
     headers = request.headers if request is not None else {}
     idempotency_key = headers.get("Idempotency-Key", "").strip()
     correlation_id = headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    actor_id = headers.get("X-AIVAN-Actor-ID", "").strip() or None
+    actor_role = headers.get("X-AIVAN-Role", "").strip() or None
     if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
         if not idempotency_key:
             raise HTTPException(
@@ -121,10 +130,39 @@ async def create_quote_guidance(
                 status_code=400,
                 detail={"error": "GPM_IDEMPOTENCY_KEY_INVALID"},
             )
+        if (
+            not actor_id
+            or not actor_role
+            or not _SAFE_REQUEST_TOKEN.fullmatch(actor_id)
+            or not _SAFE_REQUEST_TOKEN.fullmatch(actor_role)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "GPM_ACTOR_CONTEXT_REQUIRED"},
+            )
     if correlation_id and not _SAFE_REQUEST_TOKEN.fullmatch(correlation_id):
         raise HTTPException(
             status_code=400,
             detail={"error": "GPM_CORRELATION_ID_INVALID"},
+        )
+
+    runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
+    if runtime_mode == "mock":
+        analysis = mock_quote_analysis(body.sku, body.supplier_quote)
+    else:
+        analysis = analyze_quote(
+            sku=body.sku,
+            supplier_quote=body.supplier_quote,
+            currency=body.currency,
+            quantity=body.quantity,
+        )
+    if analysis.get("runtime_status") == "unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "GPM_MODEL_UNAVAILABLE",
+                "reason": analysis.get("reason", "provider_error"),
+            },
         )
 
     if idempotency_key:
@@ -138,14 +176,33 @@ async def create_quote_guidance(
     packet: dict = {
         "packet_id": packet_id,
         "tenant_id": tenant_id,
+        "case_id": body.case_id,
+        "quote_id": body.quote_id,
+        "actor_id": actor_id,
+        "actor_role": actor_role,
         "sku": body.sku,
         "supplier_id": body.supplier_id,
         "supplier_quote": body.supplier_quote,
         "currency": body.currency,
         "quantity": body.quantity,
+        "buyer_unit_price": body.buyer_unit_price,
+        "buyer_total": body.buyer_total,
+        "supplier_total": body.supplier_total,
+        "margin_rate": body.margin_rate,
+        "gltg_run_id": body.gltg_run_id,
+        "gltg_api_version": body.gltg_api_version,
         "quote_position": analysis.get("quote_position"),
         "recommendation": analysis.get("recommendation"),
         "confidence": analysis.get("confidence"),
+        "model_result": analysis,
+        "lineage": {
+            "source_trace_id": correlation_id,
+            "case_id": body.case_id,
+            "quote_id": body.quote_id,
+            "supplier_id": body.supplier_id,
+            "gltg_run_id": body.gltg_run_id,
+            "gltg_api_version": body.gltg_api_version,
+        },
         "human_approval_required": True,
         "approval_status": "pending",
         "dispatched": False,
@@ -165,9 +222,20 @@ async def create_quote_guidance(
 @router.get("/quote-guidance/{packet_id}")
 async def get_quote_guidance(
     packet_id: str,
+    request: Request,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
-    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
+    correlation_id = request.headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    if correlation_id and not _SAFE_REQUEST_TOKEN.fullmatch(correlation_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "GPM_CORRELATION_ID_INVALID"},
+        )
+    packet = _packet_store.get(
+        packet_id,
+        tenant_id=tenant_id,
+        correlation_id=correlation_id,
+    )
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
     if packet.get("tenant_id") != tenant_id:

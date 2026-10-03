@@ -760,6 +760,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
                 requirement=requirement,
                 selected_option=buyer_options[0],
                 replies=all_replies,
+                gltg_result=gltg,
             )
         except GPMGuidanceUnavailableError as exc:
             error_code = str(exc) or "GPM_GUIDANCE_UNAVAILABLE"

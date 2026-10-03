@@ -35,7 +35,18 @@ def client():
 
 
 def _post(client, supplier_id):
-    body = {"sku": "SKU-1", "supplier_quote": 4.5}
+    body = {
+        "case_id": "case-record-id",
+        "quote_id": "quote-record-id",
+        "sku": "SKU-1",
+        "supplier_quote": 4.5,
+        "buyer_unit_price": 5.5,
+        "buyer_total": 55.0,
+        "supplier_total": 45.0,
+        "margin_rate": 0.1818,
+        "gltg_run_id": "gltg-record-id",
+        "gltg_api_version": "v2",
+    }
     if supplier_id is not None:
         body["supplier_id"] = supplier_id
     return client.post(QUOTE_GUIDANCE_URL, json=body)

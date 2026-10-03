@@ -28,6 +28,7 @@ def mock_db():
             "create_packet": True,
             "read_packet": True,
             "idempotent_create": True,
+            "quote_lineage": True,
         },
     }
     db.get_packet.return_value = SAMPLE

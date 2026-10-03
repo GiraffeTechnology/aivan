@@ -17,11 +17,19 @@ def _response(**overrides):
     value = {
         "packet_id": "gpm_pkt_stage1",
         "tenant_id": "tenant-alpha",
+        "case_id": "case-1",
+        "quote_id": "quote-1",
+        "actor_id": "sales-1",
+        "actor_role": "sales",
         "sku": "shirt",
         "supplier_id": "supplier-1",
         "supplier_quote": 12.5,
         "currency": "USD",
         "quantity": 1000,
+        "buyer_unit_price": 15.0,
+        "buyer_total": 15000.0,
+        "supplier_total": 12500.0,
+        "margin_rate": 0.1667,
         "quote_position": "within_mid_range",
         "recommendation": "negotiate",
         "confidence": "low",
@@ -31,6 +39,22 @@ def _response(**overrides):
         "llm_reasoning": "{}",
         "evidence_ids": "[]",
         "notes": "case=case-1",
+        "gltg_run_id": "gltg-run-1",
+        "gltg_api_version": "v2",
+        "model_result": {
+            "recommendation": "negotiate",
+            "quote_position": "within_mid_range",
+            "confidence": "low",
+            "runtime_status": "available",
+        },
+        "lineage": {
+            "source_trace_id": "trace-stage1",
+            "case_id": "case-1",
+            "quote_id": "quote-1",
+            "supplier_id": "supplier-1",
+            "gltg_run_id": "gltg-run-1",
+            "gltg_api_version": "v2",
+        },
     }
     value.update(overrides)
     return value
@@ -66,13 +90,23 @@ def test_create_guidance_sends_tenant_auth_trace_and_idempotency(monkeypatch):
 
     result = _client(monkeypatch, handler).create_guidance(
         tenant_id="tenant-alpha",
+        actor_id="sales-1",
+        actor_role="sales",
         trace_id="trace-stage1",
         idempotency_key="gpm-case-1-option-1",
+        case_id="case-1",
+        quote_id="quote-1",
         sku="shirt",
         supplier_id="supplier-1",
         supplier_quote=12.5,
         currency="USD",
         quantity=1000,
+        buyer_unit_price=15.0,
+        buyer_total=15000.0,
+        supplier_total=12500.0,
+        margin_rate=0.1667,
+        gltg_run_id="gltg-run-1",
+        gltg_api_version="v2",
         notes="case=case-1",
     )
 
@@ -80,14 +114,24 @@ def test_create_guidance_sends_tenant_auth_trace_and_idempotency(monkeypatch):
     assert request.url.path == "/api/gpm/quote-guidance"
     assert request.headers["X-AIVAN-API-Key"] == "gpm-service-key"
     assert request.headers["X-AIVAN-Tenant-ID"] == "tenant-alpha"
+    assert request.headers["X-AIVAN-Actor-ID"] == "sales-1"
+    assert request.headers["X-AIVAN-Role"] == "sales"
     assert request.headers["X-AIVAN-Trace-ID"] == "trace-stage1"
     assert request.headers["Idempotency-Key"] == "gpm-case-1-option-1"
     assert captured["payload"] == {
+        "case_id": "case-1",
+        "quote_id": "quote-1",
         "sku": "shirt",
         "supplier_id": "supplier-1",
         "supplier_quote": 12.5,
         "currency": "USD",
         "quantity": 1000,
+        "buyer_unit_price": 15.0,
+        "buyer_total": 15000.0,
+        "supplier_total": 12500.0,
+        "margin_rate": 0.1667,
+        "gltg_run_id": "gltg-run-1",
+        "gltg_api_version": "v2",
         "evidence_ids": None,
         "notes": "case=case-1",
     }
@@ -111,14 +155,67 @@ def test_missing_api_key_fails_before_network(monkeypatch):
     with pytest.raises(GPMGuidanceUnavailableError, match="GPM_TRUSTED_PROFILE_MISSING"):
         client.create_guidance(
             tenant_id="tenant-alpha",
+            actor_id="sales-1",
+            actor_role="sales",
             trace_id="trace-stage1",
             idempotency_key="gpm-case-1-option-1",
+            case_id="case-1",
+            quote_id="quote-1",
             sku="shirt",
             supplier_id="supplier-1",
             supplier_quote=12.5,
             currency="USD",
             quantity=1000,
+            buyer_unit_price=15.0,
+            buyer_total=15000.0,
+            supplier_total=12500.0,
+            margin_rate=0.1667,
+            gltg_run_id="gltg-run-1",
+            gltg_api_version="v2",
         )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"currency": "usd"},
+        {"buyer_total": -1.0},
+        {"margin_rate": 1.0},
+        {"quote_id": "../quote"},
+    ],
+)
+def test_invalid_pricing_identity_fails_before_network(monkeypatch, override):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(201, json=_response())
+
+    values = {
+        "tenant_id": "tenant-alpha",
+        "actor_id": "sales-1",
+        "actor_role": "sales",
+        "trace_id": "trace-stage1",
+        "idempotency_key": "gpm-case-1-option-1",
+        "case_id": "case-1",
+        "quote_id": "quote-1",
+        "sku": "shirt",
+        "supplier_id": "supplier-1",
+        "supplier_quote": 12.5,
+        "currency": "USD",
+        "quantity": 1000,
+        "buyer_unit_price": 15.0,
+        "buyer_total": 15000.0,
+        "supplier_total": 12500.0,
+        "margin_rate": 0.1667,
+        "gltg_run_id": "gltg-run-1",
+        "gltg_api_version": "v2",
+    }
+    values.update(override)
+
+    with pytest.raises(GPMGuidanceUnavailableError, match="GPM_REQUEST_INVALID"):
+        _client(monkeypatch, handler).create_guidance(**values)
     assert calls == []
 
 
@@ -133,13 +230,23 @@ def test_non_201_is_never_accepted(monkeypatch, status, code):
     with pytest.raises(GPMGuidanceUnavailableError, match=code):
         _client(monkeypatch, handler).create_guidance(
             tenant_id="tenant-alpha",
+            actor_id="sales-1",
+            actor_role="sales",
             trace_id="trace-stage1",
             idempotency_key="gpm-case-1-option-1",
+            case_id="case-1",
+            quote_id="quote-1",
             sku="shirt",
             supplier_id="supplier-1",
             supplier_quote=12.5,
             currency="USD",
             quantity=1000,
+            buyer_unit_price=15.0,
+            buyer_total=15000.0,
+            supplier_total=12500.0,
+            margin_rate=0.1667,
+            gltg_run_id="gltg-run-1",
+            gltg_api_version="v2",
         )
 
 
@@ -151,6 +258,10 @@ def test_non_201_is_never_accepted(monkeypatch, status, code):
         _response(approval_status="approved"),
         _response(human_approval_required=False),
         _response(packet_id="../packet"),
+        _response(quote_id="quote-other"),
+        _response(currency="EUR"),
+        _response(buyer_total=999.0),
+        _response(model_result={"recommendation": "accept", "confidence": "low"}),
     ],
 )
 def test_invalid_or_unsafe_response_fails_closed(monkeypatch, response):
@@ -160,11 +271,21 @@ def test_invalid_or_unsafe_response_fails_closed(monkeypatch, response):
     with pytest.raises(GPMGuidanceUnavailableError, match="GPM_RESPONSE_INVALID"):
         _client(monkeypatch, handler).create_guidance(
             tenant_id="tenant-alpha",
+            actor_id="sales-1",
+            actor_role="sales",
             trace_id="trace-stage1",
             idempotency_key="gpm-case-1-option-1",
+            case_id="case-1",
+            quote_id="quote-1",
             sku="shirt",
             supplier_id="supplier-1",
             supplier_quote=12.5,
             currency="USD",
             quantity=1000,
+            buyer_unit_price=15.0,
+            buyer_total=15000.0,
+            supplier_total=12500.0,
+            margin_rate=0.1667,
+            gltg_run_id="gltg-run-1",
+            gltg_api_version="v2",
         )

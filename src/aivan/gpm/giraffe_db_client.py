@@ -15,6 +15,7 @@ REQUIRED_PACKET_CAPABILITIES = (
     "create_packet",
     "read_packet",
     "idempotent_create",
+    "quote_lineage",
 )
 _SAFE_OUTBOUND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 

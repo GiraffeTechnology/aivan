@@ -6,6 +6,7 @@ GPM-005: Qwen output validated against required keys; retries on schema failure.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,21 @@ def _validate_output(result: dict) -> dict:
     return result
 
 
+def _model_name(provider_name: str) -> str | None:
+    env_name = {
+        "ollama": "OLLAMA_MODEL",
+        "openai": "OPENAI_MODEL",
+        "chatgpt": "OPENAI_MODEL",
+        "openai_compatible": "OPENAI_MODEL",
+        "anthropic": "ANTHROPIC_MODEL",
+        "claude": "ANTHROPIC_MODEL",
+        "qwen": "QWEN_MODEL",
+    }.get(provider_name)
+    if env_name is None:
+        return None
+    return os.environ.get(env_name, "").strip() or None
+
+
 def analyze_quote(
     sku: str,
     supplier_quote: float,
@@ -119,7 +135,10 @@ def analyze_quote(
     max_retries: int = 2,
 ) -> dict:
     """Run LLM quote analysis. Returns validated dict or unavailable response."""
+    from aivan.llm.config import get_llm_provider_name
     from aivan.llm.gateway import get_provider
+
+    provider_name = get_llm_provider_name()
 
     system_prompt = (
         "You are a GPM (Guided Pricing Module) assistant. "
@@ -144,7 +163,15 @@ def analyze_quote(
                 },
                 temperature=0.0,
             )
-            return _validate_output(result)
+            validated = _validate_output(result)
+            actual_provider = getattr(provider, "provider_name", provider_name)
+            actual_model = getattr(provider, "model", None) or _model_name(actual_provider)
+            return {
+                **validated,
+                "runtime_status": "available",
+                "model_provider": actual_provider,
+                "model_name": actual_model,
+            }
         except QwenOutputValidationError as exc:
             last_exc = exc
             if attempt < max_retries:
@@ -190,4 +217,6 @@ def mock_quote_analysis(sku: str, supplier_quote: float) -> dict:
         "confidence": "medium",
         "reasoning": f"Mock analysis for {sku} at {supplier_quote}",
         "runtime_status": "mock",
+        "model_provider": "mock",
+        "model_name": None,
     }

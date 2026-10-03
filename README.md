@@ -163,3 +163,22 @@ For any completion report, identify the exact candidate, tested scope, DB source
 ## License
 
 See `LICENSE`.
+
+## GPM quote guidance and persistence
+
+Aivan sends the selected quote, currency, authenticated actor, and GLTG result reference to the independently served GPM API. The selected provider must preserve these fields and return them on readback before the result is accepted. Provider discovery is compatibility evidence; a capability label alone does not prove persistence.
+
+Start the standalone service with deployment-managed authentication, model, and provider settings:
+
+```sh
+uv run python -m aivan.gpm.server --host 127.0.0.1 --port 8080
+```
+
+The controlled HTTP acceptance runner uses isolated synthetic inputs and does not start services, apply migrations, or print secrets:
+
+```sh
+uv run python scripts/run_gpm_giraffe_db_http_acceptance.py --phase full
+uv run python scripts/run_gpm_giraffe_db_http_acceptance.py --phase readback --packet-id <saved-packet-id>
+```
+
+It verifies trusted tenant/actor headers, quote and currency identity, model results, GLTG lineage, provider readback, replay/conflict, cross-tenant denial, and restart recovery. Supply the configured service endpoints and secrets through the authorized environment. See `.env.example` and the runner's argument help. Mock-model checks are local contract evidence and do not establish a live model or database run.
