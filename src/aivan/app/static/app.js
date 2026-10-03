@@ -585,7 +585,7 @@ document.addEventListener('click', async (event) => {
   if (open) return setView(open.dataset.openView);
   const nav = event.target.closest('[data-view]');
   if (nav) return setView(nav.dataset.view);
-  const card = event.target.closest('[data-case-id]');
+  const card = event.target.closest('.case-card[data-case-id]');
   if (card) return openCase(card.dataset.caseId);
   const action = event.target.closest('[data-action]');
   if (!action) return;
@@ -600,7 +600,7 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  const card = event.target.closest?.('[data-case-id]');
+  const card = event.target.closest?.('.case-card[data-case-id]');
   if (card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openCase(card.dataset.caseId); }
 });
 
