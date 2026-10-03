@@ -168,7 +168,8 @@ def test_workbench_paginates_and_projects_cases_by_server_authorized_role(workbe
     assert detail["messages"][0]["payload_digest"]
     assert detail["messages"][0]["content_version"] == 1
     assert detail["messages"][0]["content_reference"].startswith("aivan://message-evidence/")
-    assert "message_text" not in detail["messages"][0]
+    assert detail["messages"][0]["message_text"] is None
+    assert detail["messages"][0]["body_resolution"] == "missing_legacy_content"
     assert client.get(f"/api/workbench/cases/{own.project_id}/export").status_code == 403
     assert switched["role"] == "buyer"
 
@@ -183,7 +184,8 @@ def test_admin_export_includes_frozen_candidate_and_digest_only_messages(workben
     payload = response.json()
     assert payload["candidate_sha"] == "a" * 40
     assert payload["messages"][0]["payload_digest"]
-    assert "message_text" not in payload["messages"][0]
+    assert payload["messages"][0]["message_text"] is None
+    assert payload["messages"][0]["body_resolution"] == "missing_legacy_content"
 
 
 def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workbench):

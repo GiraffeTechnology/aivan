@@ -38,6 +38,7 @@ from aivan.domain.roles import (
     require_capability,
 )
 from aivan.app.ui_catalog import catalog_version, ready_locales
+from aivan.execution.conversation_history import resolve_canonical_message
 from aivan.integrations.order_confirmation import (
     GiraffeDBOrderConfirmationClient,
     OrderConfirmationError,
@@ -300,6 +301,7 @@ def get_case_detail(
                 "payload_digest": item.payload_digest,
                 "content_reference": f"aivan://message-evidence/{item.message_record_id}/v1",
                 "content_version": 1,
+                **resolve_canonical_message(item, events),
                 "source_trace_id": item.source_trace_id,
                 "created_at": _iso(item.created_at),
             }
@@ -396,7 +398,9 @@ def record_draft_copy(
     def replay(record):
         if (record is None or record.tenant_id != context.tenant_id
                 or record.case_id != case_id or record.actor_id != identity.actor_id
-                or record.event_type != "DRAFT_COPIED" or record.after_json != evidence):
+                or record.event_type != "DRAFT_COPIED"
+                or any(record.after_json.get(key) != evidence[key]
+                       for key in ("draft_id", "content_sha256", "action", "delivery_claim"))):
             raise HTTPException(status_code=409, detail={"error": "COPY_IDEMPOTENCY_CONFLICT"})
         return {"status": "copied", "delivery_claim": False,
                 "audit_id": audit_id, "idempotent_replay": True}
@@ -640,7 +644,7 @@ def _markdown_export(payload: dict) -> str:
     for title, key in (
         ("Conversations", "conversations"),
         ("Participants", "participants"),
-        ("Messages (digest-only)", "messages"),
+        ("Messages (canonical English and source references)", "messages"),
         ("Drafts", "drafts"),
         ("Approvals", "approvals"),
         ("Receipts", "receipts"),

@@ -37,6 +37,7 @@ from aivan.observability.safe_logging import log_exception_safely
 from aivan.observability.metrics import record_request_metrics, router as _metrics_router
 from aivan.observability.readiness import router as _readiness_router
 from aivan.integrations.language_skill import LanguageNormalizationRequired
+from aivan.integrations.skill_reply import render_skill_reply
 
 logger = logging.getLogger("aivan.api")
 
@@ -215,6 +216,7 @@ def _skill_response(result) -> dict:
         data.get("message"),
         "Your request has been received.",
     )
+    reply_text = render_skill_reply(data, reply_text)
     return {**data, "status": "ok", "output": reply_text, "reply_text": reply_text}
 
 

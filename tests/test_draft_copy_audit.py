@@ -68,3 +68,16 @@ def test_copy_requires_csrf_and_explicit_idempotency(workbench):
     client, _, draft, headers = seed(workbench)
     assert copy(client, draft, {"Idempotency-Key": "copy-1"}).status_code == 403
     assert copy(client, draft, {"X-AIVAN-CSRF": headers["X-AIVAN-CSRF"]}).status_code == 400
+
+
+def test_copy_retry_survives_later_draft_status_without_rewriting_history(workbench):
+    client, db, draft, headers = seed(workbench)
+    original = copy(client, draft, headers)
+    assert original.status_code == 200
+    draft.status = "approved"
+    db.commit()
+    repeated = copy(client, draft, headers)
+    assert repeated.status_code == 200
+    assert repeated.json()["audit_id"] == original.json()["audit_id"]
+    assert repeated.json()["idempotent_replay"] is True
+    assert db.query(AuditLogRecord).filter_by(event_type="DRAFT_COPIED").count() == 1

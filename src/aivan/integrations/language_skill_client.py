@@ -11,8 +11,9 @@ business facts (quantity, destination, lead time, product) are never lost to a
 small local LLM.
 
 This client is the ONLY way AIVAN talks to the language skill. It never parses
-locally as a substitute; failures are surfaced as structured results so callers
-can fail soft (preserve the raw message, do not hallucinate missing fields).
+locally as a substitute. Failures return stable, sanitized results; canonical
+intake rejects unavailable translation before workflow or business persistence.
+Raw non-English input is not retained as a fallback business record.
 
 Configuration (environment):
     AIVAN_LANGUAGE_SKILL_ENABLED          default false
@@ -33,9 +34,8 @@ from aivan.utils.env import env_bool
 DEFAULT_BASE_URL = "http://127.0.0.1:8788"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-# Process-wide transport override. Tests install an httpx.MockTransport here so
-# the whole app talks to a faithful in-memory language-skill without a live
-# server.
+# Explicit test transport injection isolates unit branches; it is not evidence
+# of a live language-skill integration or a production fallback.
 _DEFAULT_TRANSPORT: "httpx.BaseTransport | None" = None
 
 
@@ -51,7 +51,7 @@ def is_enabled() -> bool:
 
 
 def is_fail_soft() -> bool:
-    """True when language-skill failures must be swallowed (the safe default)."""
+    """Legacy setting; canonical intake still requires validated English output."""
     return env_bool("AIVAN_LANGUAGE_SKILL_FAIL_SOFT", True)
 
 
@@ -93,25 +93,25 @@ class LanguageSkillClient:
     def _request(self, method: str, path: str, json: dict | None = None) -> LanguageSkillResult:
         url = f"{self.base_url}{path}"
         try:
-            with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
+            with httpx.Client(timeout=self.timeout, transport=self._transport, follow_redirects=False) as client:
                 resp = client.request(method, url, json=json)
-        except httpx.TimeoutException as exc:
-            return LanguageSkillResult(False, None, f"language-skill request timed out: {exc}", None)
-        except httpx.HTTPError as exc:
-            return LanguageSkillResult(False, None, f"language-skill connection error: {exc}", None)
+        except httpx.TimeoutException:
+            return LanguageSkillResult(False, None, "language-skill request timed out", None)
+        except httpx.HTTPError:
+            return LanguageSkillResult(False, None, "language-skill connection error", None)
 
-        if resp.status_code >= 400:
+        if resp.status_code != 200:
             return LanguageSkillResult(
                 False,
                 None,
-                f"language-skill returned HTTP {resp.status_code}: {resp.text[:500]}",
+                f"language-skill returned HTTP {resp.status_code}",
                 resp.status_code,
             )
         try:
             return LanguageSkillResult(True, resp.json(), None, resp.status_code)
-        except ValueError as exc:
+        except ValueError:
             return LanguageSkillResult(
-                False, None, f"language-skill returned invalid JSON: {exc}", resp.status_code
+                False, None, "language-skill returned invalid JSON", resp.status_code
             )
 
     # ------------------------------------------------------------------ #

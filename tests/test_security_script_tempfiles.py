@@ -30,7 +30,10 @@ directories = [Path(ns['_TEMP_DIRECTORY'].name) for ns in namespaces]
 assert directories[0] != directories[1]
 for ns, directory in zip(namespaces, directories):
     assert directory.parent == Path(os.environ['TMPDIR'])
-    assert directory.stat().st_mode & 0o777 == 0o700
+    # Windows uses ACLs, not POSIX mode bits; do not assert fictitious POSIX
+    # permission semantics. Unique paths/symlink preservation still run there.
+    if os.name != 'nt':
+        assert directory.stat().st_mode & 0o777 == 0o700
     assert Path(ns['DB_PATH']).parent == directory
     if 'OUTBOX_PATH' in ns:
         assert Path(ns['OUTBOX_PATH']).parent == directory
@@ -38,7 +41,8 @@ for ns, directory in zip(namespaces, directories):
     assert not directory.exists()
 """
     environment = os.environ.copy()
-    environment.update(TMPDIR=str(tmp_path), PYTHONPATH=os.pathsep.join([str(root / "src"), str(root)]))
+    environment.update(TMPDIR=str(tmp_path), TEMP=str(tmp_path), TMP=str(tmp_path),
+                       PYTHONPATH=os.pathsep.join([str(root / "src"), str(root)]))
     result = subprocess.run(
         [sys.executable, "-c", code, str(root / "scripts" / script)],
         env=environment, capture_output=True, text=True, timeout=30,

@@ -66,6 +66,7 @@ from aivan.execution.supplier_routing import (
     select_suppliers as _select_suppliers,
 )
 from aivan.observability.safe_logging import log_exception_safely
+from aivan.execution.conversation_history import persist_canonical_message
 from aivan.domain.roles import (
     BusinessRole,
     Capability,
@@ -595,6 +596,7 @@ def _bind_event_to_case(project, event: OpenClawEvent, db: Session):
     conversation, participant, message, _created = CaseDomainRepository(
         db
     ).bind_inbound_event(project.project_id, event)
+    persist_canonical_message(db, project=project, event=event, message=message)
     db.flush()
     return conversation, participant, message
 

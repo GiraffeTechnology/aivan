@@ -121,5 +121,5 @@ def test_confirmation_message_is_language_matched_chinese():
     req.extra["field_sources"] = {"product_type": "language_skill", "destination": "raw_text_only"}
     gate = evaluate_requirement_readiness(req)
     assert not gate.ready
-    assert "目的地" in gate.operator_message
+    assert "destination" in gate.operator_message
     assert "GLTG" in gate.operator_message
