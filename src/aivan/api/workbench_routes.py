@@ -215,8 +215,17 @@ def get_case_detail(
         CaseConversationRecord.case_id == case_id,
     )
     if visible_roles is not None:
+        identity = _identity(context)
+        participant_conversations = db.query(CaseParticipantRecord.conversation_record_id).filter(
+            CaseParticipantRecord.tenant_id == context.tenant_id,
+            CaseParticipantRecord.case_id == case_id,
+            CaseParticipantRecord.actor_id == identity.actor_id,
+            CaseParticipantRecord.business_role == identity.business_role.value,
+            CaseParticipantRecord.active.is_(True),
+        )
         conversations_query = conversations_query.filter(
-            CaseConversationRecord.conversation_role.in_(visible_roles)
+            CaseConversationRecord.conversation_role.in_(visible_roles),
+            CaseConversationRecord.conversation_record_id.in_(participant_conversations),
         )
     conversations = conversations_query.order_by(CaseConversationRecord.created_at).all()
     conversation_ids = [item.conversation_record_id for item in conversations]

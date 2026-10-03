@@ -38,9 +38,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-conversation-runtime.test.mjs",
-      "sha256": "71bb18ec871938e33c0d763a4ecadac513a93f256042f075787b49b93b6fcaa1",
+      "sha256": "200ec4ba4d6bc64f307180d796112f6d4b66c7354bee82abc66daede0ee7ba81",
       "count": 2,
-      "reason": "Reads at lines 4 and 5 use literal app.js and index.html URLs relative to import.meta.url. Conversation data never controls filesystem paths."
+      "reason": "Re-reviewed after delegated order-confirmation click regressions. Reads at lines 4 and 5 remain literal app.js and index.html URLs relative to import.meta.url. Conversation data, synthetic click targets and confirmation responses never control filesystem paths."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

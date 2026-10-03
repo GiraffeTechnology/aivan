@@ -135,27 +135,55 @@ class GiraffeDBClient:
 
     def query_suppliers(self, requirement: BuyerRequirement) -> list[SupplierProfile]:
         if self.uses_remote_data_api:
-            payload = self._remote_get(
-                "/api/data/suppliers",
-                params={"active": "true", "limit": 100, "offset": 0},
-            )
-            if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-                raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
-            suppliers: list[SupplierProfile] = []
-            for record in payload["items"]:
-                if not isinstance(record, dict):
-                    raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
-                record_tenant = record.get("tenant_id")
-                if record_tenant != self.tenant_id:
-                    raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_TENANT_MISMATCH")
-                suppliers.append(_supplier_profile_from_data_api(record))
-            return _filter_supplier_profiles(suppliers, requirement)
+            return _filter_supplier_profiles(self._all_remote_suppliers(), requirement)
 
         from aivan.sourcing.supplier_registry import list_active
 
         registry_suppliers = list_active(tenant_id=self.tenant_id)
         candidates = _filter_supplier_profiles(registry_suppliers, requirement)
         return candidates or _default_known_suppliers()
+
+    def _all_remote_suppliers(self) -> list[SupplierProfile]:
+        """Read the complete tenant catalog, or fail without partial candidates."""
+        suppliers: list[SupplierProfile] = []
+        seen_ids: set[str] = set()
+        offset = 0
+        expected_total: int | None = None
+        while True:
+            payload = self._remote_get(
+                "/api/data/suppliers",
+                params={"active": "true", "limit": 100, "offset": offset},
+            )
+            if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
+            total, limit, page_offset = (payload.get(key) for key in ("total", "limit", "offset"))
+            if (
+                type(total) is not int or type(limit) is not int or type(page_offset) is not int
+            ):
+                raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
+            if (
+                total < 0 or limit <= 0 or page_offset != offset
+                or len(payload["items"]) > limit
+                or offset + len(payload["items"]) > total
+                or (expected_total is not None and total != expected_total)
+                or (not payload["items"] and offset < total)
+            ):
+                raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
+            expected_total = total
+            for record in payload["items"]:
+                if not isinstance(record, dict):
+                    raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
+                record_tenant = record.get("tenant_id")
+                if record_tenant != self.tenant_id:
+                    raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_TENANT_MISMATCH")
+                supplier_id = record.get("supplier_id")
+                if not isinstance(supplier_id, str) or not supplier_id or supplier_id in seen_ids:
+                    raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_INVALID_RESPONSE")
+                seen_ids.add(supplier_id)
+                suppliers.append(_supplier_profile_from_data_api(record))
+            offset += len(payload["items"])
+            if offset == total:
+                return suppliers
 
     def query_supplier_relationships(self, suppliers: list[SupplierProfile]) -> list[dict]:
         return [
@@ -242,11 +270,12 @@ def _filter_supplier_profiles(
     material = (requirement.fabric_material or requirement.material_spec or "").strip().lower()
     candidates: list[SupplierProfile] = []
     for supplier in suppliers:
-        category_fit = not category or category in [item.lower() for item in supplier.categories]
-        material_fit = not material or any(
-            item.lower() in material or material in item.lower() for item in supplier.materials
+        category_fit = bool(category) and category in [item.lower() for item in supplier.categories]
+        material_fit = bool(material) and any(
+            item.strip() and (item.strip().lower() in material or material in item.strip().lower())
+            for item in supplier.materials
         )
-        if category_fit or material_fit:
+        if not (category or material) or category_fit or material_fit:
             candidates.append(supplier)
     return candidates
 
@@ -254,7 +283,8 @@ def _filter_supplier_profiles(
 def _supplier_profile_from_data_api(record: dict[str, Any]) -> SupplierProfile:
     """Map only fields published by giraffe-db's structured supplier API."""
 
-    metadata = record.get("metadata_json") if isinstance(record.get("metadata_json"), dict) else {}
+    raw_metadata = record.get("metadata_json")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     return SupplierProfile(
         supplier_id=str(record.get("supplier_id") or ""),
         name=str(record.get("supplier_name") or record.get("name_en") or ""),
@@ -560,4 +590,3 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         "comparison_snapshot_id": comparison["comparison_snapshot_id"],
         "readback_verified": True,
     }
-
