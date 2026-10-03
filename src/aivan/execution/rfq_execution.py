@@ -66,6 +66,7 @@ from aivan.execution.supplier_routing import (
 )
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.execution.conversation_history import persist_canonical_message
+from aivan.execution.inbound_receipt import replay_inbound_receipt
 from aivan.domain.roles import (
     BusinessRole,
     Capability,
@@ -117,11 +118,13 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         explicit_idempotency_key=event.idempotency_key or "",
     )
     repo = InboundEventRepository(db)
+    db.info["aivan_inbound_replayed"] = False
     if idem_key:
         existing = repo.get(idem_key)
         if existing is not None:
             # Replay the stored result; create no new project/RFQ/draft/event.
-            return RFQExecutionResult(**existing.result_json)
+            db.info["aivan_inbound_replayed"] = True
+            return replay_inbound_receipt(existing, trace_id=event.source_trace_id)
 
     # Script shape is not language identification: Latin input may be French,
     # Spanish, German, or another language. The shared language service must
@@ -140,17 +143,21 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     event = event.model_copy(update={
         "message_text": text, "attachments": english_provenance(event.attachments),
     })
+    claim = None
+    if idem_key:
+        claim, acquired = repo.claim(idem_key, tenant_id=event.tenant_id or "legacy")
+        if not acquired:
+            db.info["aivan_inbound_replayed"] = True
+            return replay_inbound_receipt(claim, trace_id=event.source_trace_id)
     result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
 
-    if idem_key:
-        repo.record(
-            idem_key,
-            tenant_id=event.tenant_id or "legacy",
+    if claim is not None:
+        repo.complete(
+            claim,
             project_id=result.project_id,
             event_type=result.event_type,
             result_json=result.model_dump(),
         )
-        db.commit()
     return result
 
 

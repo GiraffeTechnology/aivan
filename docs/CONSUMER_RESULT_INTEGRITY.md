@@ -50,3 +50,19 @@ Consumer unit tests use explicitly synthetic language responses. They establish
 ordering, fail-closed behavior, and canonical-text persistence only. The language
 service's detector and configured translation models need their own verification;
 a falsely labeled English response cannot be made accurate by this consumer.
+## Inbound execution ownership
+
+An inbound identity is reserved in the existing unique database ledger before
+workflow side effects. A prior absent read is not authorization to execute:
+concurrent insert conflicts read and replay the completed receipt, or return
+`409 INBOUND_OUTCOME_UNCONFIRMED` with the request trace ID if processing has
+not been confirmed complete. A completed retry does not call translation again.
+Relay audit replay classification follows this actual receipt outcome.
+
+The claim survives intermediate workflow commits and process loss. It does not
+expire into automatic re-execution, because business effects may already have
+committed. An incomplete claim requires checking the persisted outcome; the
+error does not assert that the workflow rolled back or that retrying can repeat
+the action. This is not a claim of distributed atomicity. Unit tests use
+controlled SQLite transaction interleavings and do not certify MySQL behavior
+or full live-service workflow acceptance.

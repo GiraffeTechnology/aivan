@@ -1,7 +1,7 @@
 """Idempotency ledger repository for inbound events.
 
-Provides get-or-record semantics so a duplicated/retried inbound event replays
-its original result instead of re-running side effects (drafts, RFQs, events).
+Claims the existing unique ledger identity before workflow side effects. A
+completed receipt can be replayed; an unfinished claim cannot be re-executed.
 """
 from __future__ import annotations
 
@@ -50,6 +50,8 @@ def build_inbound_idempotency_key(
 
 
 class InboundEventRepository:
+    PROCESSING = "inbound_processing"
+
     def __init__(self, db: Session):
         self.db = db
 
@@ -59,6 +61,45 @@ class InboundEventRepository:
             .filter(ProcessedInboundEvent.idempotency_key == idempotency_key)
             .first()
         )
+
+    def claim(self, idempotency_key: str, *, tenant_id: str) -> tuple[ProcessedInboundEvent, bool]:
+        """Insert and commit a unique claim, even after a stale absent SELECT.
+
+        The database constraint, not a process-local lock or caller's prior
+        read, selects the owner. No lease expires into automatic re-execution:
+        a crash after any intermediate workflow commit must remain uncertain.
+        """
+        claim = ProcessedInboundEvent(
+            id=f"pie_{new_id()}", tenant_id=tenant_id,
+            idempotency_key=idempotency_key, project_id="",
+            event_type=self.PROCESSING, result_json={},
+        )
+        self.db.add(claim)
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            existing = self.get(idempotency_key)
+            if existing is None:
+                raise  # A different integrity failure is not a replay.
+            return existing, False
+        return claim, True
+
+    def complete(self, claim: ProcessedInboundEvent, *, project_id: str,
+                 event_type: str, result_json: dict) -> None:
+        """Only the original claim identity may publish the completed result."""
+        changed = self.db.query(ProcessedInboundEvent).filter(
+            ProcessedInboundEvent.id == claim.id,
+            ProcessedInboundEvent.idempotency_key == claim.idempotency_key,
+            ProcessedInboundEvent.event_type == self.PROCESSING,
+        ).update({
+            "project_id": project_id, "event_type": event_type,
+            "result_json": result_json,
+        }, synchronize_session=False)
+        if changed != 1:
+            self.db.rollback()
+            raise RuntimeError("Inbound receipt ownership could not be confirmed")
+        self.db.commit()
 
     def record(
         self,

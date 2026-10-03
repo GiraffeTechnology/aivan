@@ -212,7 +212,6 @@ async def relay_inbound(
     from aivan.api import main as api_main
     from aivan.db.repositories.domain_repo import CaseDomainRepository
     from aivan.db.repositories.inbound_event_repo import (
-        InboundEventRepository,
         build_inbound_idempotency_key,
     )
     from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
@@ -275,8 +274,8 @@ async def relay_inbound(
         message_id=event.message_id,
         explicit_idempotency_key=event.idempotency_key,
     )
-    replayed = bool(idem_key and InboundEventRepository(db).get(idem_key))
     result = await api_main._run_skill_event_with_abort(event_data, db, request)
+    replayed = bool(db.info.get("aivan_inbound_replayed", False))
     if not replayed and isinstance(result, dict):
         project_id = str(result.get("project_id") or "")
         if project_id:
