@@ -13,6 +13,9 @@ from aivan.api.request_context import (
 from aivan.api.serializers import serialize_draft
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.session import get_db
+from aivan.execution.draft_preview import (
+    PreviewError, approval_binding, approved_render, invalidate_approval,
+)
 
 router = APIRouter()
 
@@ -51,15 +54,28 @@ def get_relay_outbox(
     items = []
     for draft in drafts:
         capability = get_channel_capability(draft.channel)
-        if capability.delivery_mode != DeliveryMode.GUIDED_RELAY:
+        binding = None
+        rendered = None
+        render_error = None
+        try:
+            binding = approval_binding(db, draft)
+            rendered = approved_render(db, draft)
+        except PreviewError as exc:
+            render_error = exc.code
+        manual = bool(binding and binding.after_json.get("manual_delivery"))
+        if capability.delivery_mode != DeliveryMode.GUIDED_RELAY and not manual:
             continue
         items.append(
             {
                 **serialize_draft(draft),
                 "channel_account_id": draft.channel_account_id,
-                "delivery_mode": capability.delivery_mode.value,
+                "delivery_mode": "guided_relay",
+                "preview_id": binding.after_json.get("preview_id") if binding else None,
+                "target_language": rendered.target_language if rendered else None,
+                "content_sha256": rendered.rendered_sha256 if rendered else None,
+                "render_error": render_error,
                 "copy_payload": {
-                    "message_text": draft.message_text,
+                    "message_text": rendered.message_text if rendered else "",
                     "attachments": draft.attachments_json or [],
                 },
                 "confirm_path": f"/api/relay/{draft.draft_id}/confirm",
@@ -99,7 +115,11 @@ def confirm_relay_delivery(
         db=db,
     )
     capability = get_channel_capability(draft.channel)
-    if capability.delivery_mode != DeliveryMode.GUIDED_RELAY:
+    try:
+        bound_manual = approval_binding(db, draft).after_json.get("manual_delivery") is True
+    except PreviewError:
+        bound_manual = False
+    if capability.delivery_mode != DeliveryMode.GUIDED_RELAY and not bound_manual:
         raise HTTPException(
             status_code=409,
             detail={
@@ -156,6 +176,20 @@ def confirm_relay_delivery(
             },
         )
 
+    try:
+        rendered = approved_render(db, draft)
+        bound = approval_binding(db, draft).after_json
+        if (rendered.target_language != "en" or rendered.manual_delivery) and (
+                payload.get("preview_id") != bound.get("preview_id")
+                or payload.get("content_sha256") != rendered.rendered_sha256):
+            raise PreviewError("RELAY_PREVIEW_VERSION_MISMATCH")
+    except PreviewError as exc:
+        invalidate_approval(db, draft, exc.code)
+        db.commit()
+        raise HTTPException(exc.status_code, detail={"error": exc.code}) from None
+    # Only proof metadata is copied from the transient localized rendering.
+    metadata = {**metadata, "preview_id": bound.get("preview_id"),
+                "target_language": rendered.target_language, "rendered_sha256": rendered.rendered_sha256}
     receipt, created = receipts.create_or_get(
         tenant_id=context.tenant_id,
         draft_id=draft.draft_id,

@@ -36,13 +36,23 @@ class OpenClawClient:
             )
             resp.raise_for_status()
             data = resp.json()
+            if not isinstance(data, dict) or type(data.get("success")) is not bool:
+                raise ValueError("Missing explicit transport acknowledgement")
+            if data["success"] and not (isinstance(data.get("message_id"), str) and data["message_id"].strip()):
+                raise ValueError("Missing transport message identifier")
             return OpenClawSendResponse(
-                success=data.get("success", True),
-                message_id=data.get("message_id", ""),
+                success=data["success"], message_id=data.get("message_id", ""),
                 sent_at=data.get("sent_at", utcnow_iso()),
+                error=None if data["success"] else "Outbound transport rejected the request",
             )
-        except Exception as e:
-            return OpenClawSendResponse(success=False, error=str(e))
+        except httpx.HTTPStatusError as exc:
+            uncertain = not (400 <= exc.response.status_code < 500)
+            return OpenClawSendResponse(success=False, outcome_uncertain=uncertain,
+                                       error="Outbound delivery is unconfirmed" if uncertain else "Outbound transport rejected the request")
+        except Exception:
+            # A lost response does not establish that the remote side rejected it.
+            return OpenClawSendResponse(success=False, outcome_uncertain=True,
+                                       error="Outbound delivery is unconfirmed")
 
     def check_account_status(self, account_connection_id: str) -> dict:
         if self.mock_mode:

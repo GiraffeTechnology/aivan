@@ -153,10 +153,13 @@
 
   function readLocale() {
     const saved = window.localStorage.getItem('myaivan.locale');
-    return names[saved] ? saved : 'zh';
+    return names[saved] ? saved : 'en';
   }
 
+  const sourceByEnglish = Object.fromEntries(Object.entries(en).map(([source, value]) => [value, source]));
+
   function translate(source) {
+    source = sourceByEnglish[source] || source;
     if (locale === 'zh') return source;
     if (locale === 'zht') return zht[source] || source;
     if (locale === 'en') return en[source] || source;
@@ -179,8 +182,7 @@
       sourceByNode.set(node, original);
       const trimmed = original.trim();
       const translated = translate(trimmed);
-      if (translated !== trimmed) node.nodeValue = original.replace(trimmed, translated);
-      else if (locale === 'zh') node.nodeValue = original;
+      node.nodeValue = original.replace(trimmed, translated);
     });
     document.querySelectorAll('[placeholder]').forEach((node) => {
       const source = node.dataset.i18nPlaceholder || node.getAttribute('placeholder');

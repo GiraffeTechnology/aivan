@@ -289,3 +289,28 @@ def test_invalid_or_unsafe_response_fails_closed(monkeypatch, response):
             gltg_run_id="gltg-run-1",
             gltg_api_version="v2",
         )
+
+
+@pytest.mark.parametrize("replay_headers,accepted", [("valid", True), ("missing-hash", False), ("wrong-hash", False), ("absent", False)])
+def test_original_trace_requires_verified_business_input_replay(monkeypatch, replay_headers, accepted):
+    from aivan.gpm.request_identity import request_fingerprint
+    def handler(request):
+        headers = {}
+        if replay_headers != "absent":
+            headers["X-GPM-Replayed"] = "true"
+        if replay_headers == "valid":
+            headers["X-GPM-Request-SHA256"] = request_fingerprint(json.loads(request.content),
+                tenant_id="tenant-alpha", actor_id="sales-1", actor_role="sales")
+        if replay_headers == "wrong-hash":
+            headers["X-GPM-Request-SHA256"] = "0" * 64
+        return httpx.Response(201, json=_response(), headers=headers)
+    request = dict(tenant_id="tenant-alpha", actor_id="sales-1", actor_role="sales", trace_id="new-transport-trace",
+        idempotency_key="gpm-case-1-option-1", case_id="case-1", quote_id="quote-1", sku="shirt", supplier_id="supplier-1",
+        supplier_quote=12.5, currency="USD", quantity=1000, buyer_unit_price=15, buyer_total=15000, supplier_total=12500,
+        margin_rate=.1667, gltg_run_id="gltg-run-1", gltg_api_version="v2", notes="case=case-1")
+    client = _client(monkeypatch, handler)
+    if accepted:
+        assert client.create_guidance(**request)["lineage"]["source_trace_id"] == "trace-stage1"
+    else:
+        with pytest.raises(GPMGuidanceUnavailableError, match="GPM_RESPONSE_INVALID"):
+            client.create_guidance(**request)

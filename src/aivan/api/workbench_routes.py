@@ -364,6 +364,7 @@ def get_case_detail(
 class DraftCopyCompletion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    preview_id: str | None = Field(default=None, pattern=r"^render_[a-f0-9]{32}$")
 
 
 @router.post("/cases/{case_id}/drafts/{draft_id}/copy")
@@ -385,7 +386,20 @@ def record_draft_copy(
     if (draft is None or (identity.business_role not in _INTERNAL_ROLES
                          and draft.target_role != identity.business_role.value)):
         raise HTTPException(status_code=404, detail={"error": "DRAFT_NOT_FOUND"})
-    digest = hashlib.sha256(draft.message_text.encode("utf-8")).hexdigest()
+    preview_evidence = {}
+    from aivan.execution.draft_preview import PreviewError, latest_preview, verify_preview
+    if body.preview_id:
+        try:
+            preview, rendered = verify_preview(db, draft, body.preview_id)
+        except PreviewError as exc:
+            raise HTTPException(exc.status_code, detail={"error": exc.code}) from None
+        digest = rendered.rendered_sha256
+        preview_evidence = {"preview_id": preview.audit_id, **rendered.fingerprints()}
+    else:
+        previous = latest_preview(db, draft)
+        if previous is not None and previous.after_json.get("target_language") != "en":
+            raise HTTPException(409, detail={"error": "DRAFT_LOCALIZED_PREVIEW_REQUIRED"})
+        digest = hashlib.sha256(draft.message_text.encode("utf-8")).hexdigest()
     if body.content_sha256 != digest:
         raise HTTPException(status_code=409, detail={"error": "DRAFT_COPY_VERSION_MISMATCH"})
     key = hashlib.sha256(
@@ -393,14 +407,15 @@ def record_draft_copy(
     ).hexdigest()[:56]
     audit_id = f"copy_{key}"
     evidence = {"draft_id": draft_id, "content_sha256": digest, "draft_status": draft.status,
-                "action": "copied", "delivery_claim": False}
+                "action": "copied", "delivery_claim": False, **preview_evidence}
 
     def replay(record):
         if (record is None or record.tenant_id != context.tenant_id
                 or record.case_id != case_id or record.actor_id != identity.actor_id
                 or record.event_type != "DRAFT_COPIED"
-                or any(record.after_json.get(key) != evidence[key]
-                       for key in ("draft_id", "content_sha256", "action", "delivery_claim"))):
+                or any(record.after_json.get(key) != evidence.get(key)
+                       for key in ("draft_id", "content_sha256", "action", "delivery_claim",
+                                   "preview_id", "target_language", "source_sha256"))):
             raise HTTPException(status_code=409, detail={"error": "COPY_IDEMPOTENCY_CONFLICT"})
         return {"status": "copied", "delivery_claim": False,
                 "audit_id": audit_id, "idempotent_replay": True}

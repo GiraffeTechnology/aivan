@@ -163,3 +163,10 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
   .attachment-placeholder { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+
+.commercial-preview { max-width: 48rem; width: min(92vw, 48rem); border-radius: 1rem; border: 1px solid #cbd5e1; padding: 1.5rem; }
+.commercial-preview::backdrop { background: rgb(15 23 42 / 55%); }
+.commercial-preview textarea { width: 100%; box-sizing: border-box; white-space: pre-wrap; }
+.commercial-preview label { display: block; margin: .8rem 0; }
+.commercial-preview input[type="checkbox"] { width: auto; margin-right: .5rem; }
+.commercial-preview [data-preview="identity"] { overflow-wrap: anywhere; font-weight: 600; }

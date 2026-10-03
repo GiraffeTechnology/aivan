@@ -203,6 +203,9 @@ class _CapturingStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
+    def get(self, packet_id: str, **kwargs):
+        return None  # This fixture represents a first request, not a replay.
+
     def save(self, packet: dict, **kwargs) -> dict:
         self.calls.append({"packet": dict(packet), **kwargs})
         return dict(packet)

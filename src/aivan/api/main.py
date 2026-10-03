@@ -79,6 +79,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
 
+from aivan.api.draft_preview_routes import ApprovalRequest, router as draft_preview_router
+app.include_router(draft_preview_router)
 
 def _cors_origins() -> list[str]:
     """Return an explicit CORS allowlist; production defaults to no origins."""
@@ -451,7 +453,7 @@ async def create_rfq_from_event_api(
 
 
 def _do_approve_draft(
-    draft_id: str, db: Session, context: RequestContext
+    draft_id: str, db: Session, context: RequestContext, preview_id: str | None = None
 ) -> dict:
     from aivan.db.repositories.domain_repo import CaseDomainRepository
     from aivan.domain.roles import Capability
@@ -473,9 +475,11 @@ def _do_approve_draft(
             status_code=409,
             detail=f"Draft {draft_id} cannot be approved: current status is '{draft.status}'",
         )
-    from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
+    from aivan.execution.channel_policy import DeliveryMode
 
-    channel_capability = get_channel_capability(draft.channel)
+    from aivan.execution.draft_approval_binding import reviewed_channel, claim_pending_approval
+    from aivan.execution.draft_preview import bind_approval
+    preview, channel_capability = reviewed_channel(db, draft, preview_id, identity, context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.UNSUPPORTED:
         CaseDomainRepository(db).record_audit(
             tenant_id=draft.tenant_id,
@@ -532,14 +536,10 @@ def _do_approve_draft(
         requested_by_actor_id=draft.created_by_actor_id,
         requested_by_actor_role=draft.created_by_actor_role,
     )
-    if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
-        repo.mark_approved_pending_send(draft_id, identity.actor_id)
-        approved_status = "approved_pending_send"
-    else:
-        repo.approve(draft_id, identity.actor_id)
-        approved_status = "approved"
+    approved_status = claim_pending_approval(db, draft, identity.actor_id, channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY)
     draft.approval_id = approval.approval_id
     draft.authorization_basis = identity.authorization_basis
+    bind_approval(db, draft, preview, identity=identity, trace_id=context.trace_id)
     CaseDomainRepository(db).record_audit(
         tenant_id=draft.tenant_id,
         case_id=draft.project_id,
@@ -590,7 +590,7 @@ def _do_approve_draft(
     CaseDomainRepository(db).record_audit(
         tenant_id=draft.tenant_id,
         case_id=draft.project_id,
-        event_type="DRAFT_SENT" if response.success else "DRAFT_SEND_FAILED",
+        event_type="DRAFT_SENT" if response.success else ("DRAFT_DELIVERY_UNCONFIRMED" if response.outcome_uncertain else "DRAFT_SEND_FAILED"),
         identity=identity,
         source_trace_id=context.trace_id,
         before={"draft_id": draft.draft_id, "status": "approved"},
@@ -702,11 +702,11 @@ def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict
 @app.post("/api/openclaw/drafts/{draft_id}/approve")
 def approve_draft(
     draft_id: str,
-    body: dict = None,
+    body: ApprovalRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, db, context)
+    return _do_approve_draft(draft_id, db, context, preview_id=body.preview_id if body else None)
 
 
 @app.post("/api/openclaw/drafts/{draft_id}/reject")
@@ -742,11 +742,11 @@ def get_draft(
 @app.post("/api/drafts/{draft_id}/approve")
 def approve_draft_alias(
     draft_id: str,
-    body: dict = None,
+    body: ApprovalRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, db, context)
+    return _do_approve_draft(draft_id, db, context, preview_id=body.preview_id if body else None)
 
 
 @app.post("/api/drafts/{draft_id}/reject")

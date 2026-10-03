@@ -79,3 +79,45 @@ def test_legacy_option_with_changed_source_terms_rejected(captured):
     with pytest.raises(GPMGuidanceUnavailableError, match="GPM_SOURCE_QUOTE_MISMATCH"):
         guidance(legacy, [old, revised])
     assert captured == []
+
+
+def test_new_transport_trace_does_not_mint_new_business_request(captured):
+    source = reply()
+    option = options([source])[0]
+    for trace in ("trace-first", "trace-retry"):
+        create_stage1_gpm_guidance(project=SimpleNamespace(tenant_id="tenant-a", project_id="case-1"),
+            event=OpenClawEvent(tenant_id="tenant-a", conversation_id="quote-revisions", source_trace_id=trace,
+                               authenticated_actor_id="sales-1", authenticated_actor_role="sales"),
+            requirement=BuyerRequirement(project_id="case-1", quantity=100), selected_option=option,
+            replies=[source], gltg_result=SimpleNamespace(gltg_run_id="gltg-run-1", source_api_version="v2"))
+    assert captured[0]["trace_id"] != captured[1]["trace_id"]
+    assert captured[0]["idempotency_key"] == captured[1]["idempotency_key"]
+
+
+def test_hidden_buyer_cost_does_not_erase_internal_supplier_total(captured, monkeypatch):
+    monkeypatch.setenv("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "true")
+    source = reply()
+    option = options([source])[0]
+    assert option.quote.supplier_total == 0
+    guidance(option, [source])
+    assert captured[0]["supplier_total"] == 1250.0
+    assert captured[0]["supplier_quote"] == 12.5
+    assert captured[0]["case_id"] == "case-1"
+    assert captured[0]["quote_id"] == option.source_quote_reference
+    assert captured[0]["notes"] == "This advisory request uses the selected supplier quotation and its recorded source references."
+    assert option.quote.supplier_total == 0
+    assert option.quote.unit_price == 0
+
+
+def test_internal_supplier_total_preserves_source_moq_and_fees(captured, monkeypatch):
+    monkeypatch.setenv("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "true")
+    source = reply().model_copy(update={"moq": 200})
+    option = options([source])[0]
+    option.quote.sample_fee = 25.0
+    option.quote.tooling_fee = 10.0
+    option.quote.packaging_fee = 5.0
+    option.quote.domestic_logistics_fee = 15.0
+    option.quote.qc_fee = 20.0
+    guidance(option, [source])
+    assert captured[0]["supplier_total"] == 2575.0
+    assert option.quote.supplier_total == 0

@@ -70,6 +70,11 @@ def _seed(Session, *, tenant_id="tenant-a", status="send_failed"):
                 "approved_by": "operator-001",
             },
         )
+        if status == "send_failed":
+            from aivan.execution.draft_preview import bind_approval, create_preview
+            proof, _ = create_preview(db, draft, "en")
+            draft.approval_id = "synthetic-retry-approval"
+            bind_approval(db, draft, proof)
         db.commit()
         return draft.draft_id
     finally:

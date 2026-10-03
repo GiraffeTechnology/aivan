@@ -205,6 +205,7 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
     username = os.environ.get("AIVAN_SMTP_USERNAME", "")
     password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
+    submitted = False
     try:
         if real_test_email_gateway() != "openclaw_real_test":
             raise ValueError("AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email sending")
@@ -233,6 +234,7 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             if use_tls and not use_ssl:
                 smtp.starttls()
             smtp.login(username, password)
+            submitted = True
             refused = smtp.send_message(msg, from_addr=sender_address, to_addrs=[recipient_address])
         if refused:
             return OpenClawSendResponse(
@@ -245,4 +247,8 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             sent_at=utcnow_iso(),
         )
     except Exception as exc:
-        return OpenClawSendResponse(success=False, error=redact_secret(str(exc)))
+        # SMTP recipient/data rejection is definitive; timeout/disconnect after
+        # submission may mean delivery succeeded and must never auto-retry.
+        uncertain = submitted and not isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError))
+        error = "Outbound delivery is unconfirmed" if uncertain else ("SMTP rejected the message" if submitted else redact_secret(str(exc)))
+        return OpenClawSendResponse(success=False, outcome_uncertain=uncertain, error=error)

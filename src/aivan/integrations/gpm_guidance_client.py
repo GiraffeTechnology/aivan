@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 from aivan.integrations.transport_safety import reject_test_transport_in_production
+from aivan.gpm.request_identity import request_fingerprint
 
 
 DEFAULT_BASE_URL = "http://localhost:8080"
@@ -123,6 +124,7 @@ class GPMGuidanceClient:
         margin_rate: float,
         gltg_run_id: str,
         gltg_api_version: str,
+        verified_replay: bool = False,
     ) -> dict[str, Any]:
         if not isinstance(data, dict):
             raise GPMGuidanceUnavailableError("GPM_RESPONSE_INVALID")
@@ -155,7 +157,11 @@ class GPMGuidanceClient:
             or data.get("dispatched") is not False
             or not isinstance(data.get("model_result"), dict)
             or not isinstance(data.get("lineage"), dict)
-            or data["lineage"].get("source_trace_id") != trace_id
+            or (data["lineage"].get("source_trace_id") != trace_id and not (
+                verified_replay
+                and isinstance(data["lineage"].get("source_trace_id"), str)
+                and _SAFE_CONTEXT_ID.fullmatch(data["lineage"]["source_trace_id"])
+            ))
             or data["lineage"].get("case_id") != case_id
             or data["lineage"].get("quote_id") != quote_id
             or data["lineage"].get("supplier_id") != supplier_id
@@ -267,6 +273,11 @@ class GPMGuidanceClient:
             data = response.json()
         except ValueError as exc:
             raise GPMGuidanceUnavailableError("GPM_RESPONSE_INVALID") from exc
+        verified_replay = response.headers.get("X-GPM-Replayed") == "true"
+        if verified_replay and response.headers.get("X-GPM-Request-SHA256") != request_fingerprint(
+            payload, tenant_id=tenant_id, actor_id=actor_id, actor_role=actor_role
+        ):
+            raise GPMGuidanceUnavailableError("GPM_RESPONSE_INVALID")
         return self._validate_response(
             data,
             tenant_id=tenant_id,
@@ -284,4 +295,5 @@ class GPMGuidanceClient:
             margin_rate=margin_rate,
             gltg_run_id=gltg_run_id,
             gltg_api_version=gltg_api_version,
+            verified_replay=verified_replay,
         )

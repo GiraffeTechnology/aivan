@@ -11,12 +11,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
 
 from aivan.gpm.auth import require_auth
 from aivan.gpm.giraffe_db_client import GPM_PACKET_API_VERSION
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
+from aivan.gpm.request_identity import matches_request, request_fingerprint
 from aivan.gpm.record_id import validation_error as record_id_validation_error
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,30 @@ async def create_quote_guidance(
             detail={"error": "GPM_CORRELATION_ID_INVALID"},
         )
 
+    if idempotency_key:
+        packet_identity = hashlib.sha256(
+            f"{tenant_id}:{idempotency_key}".encode("utf-8")
+        ).hexdigest()[:16]
+        packet_id = f"gpm_pkt_{packet_identity}"
+    else:
+        packet_id = f"gpm_pkt_{uuid.uuid4().hex[:16]}"
+
+    if idempotency_key:
+        previous = _packet_store.get(packet_id, tenant_id=tenant_id, correlation_id=correlation_id)
+        if previous is not None:
+            if previous.get("packet_id") != packet_id:
+                raise HTTPException(status_code=503, detail={"error": "GPM_PERSISTENCE_OUTCOME_UNKNOWN", "packet_id": packet_id})
+            payload = body.model_dump()
+            if not matches_request(previous, payload, tenant_id=tenant_id,
+                                   actor_id=actor_id, actor_role=actor_role):
+                raise HTTPException(status_code=409, detail={"error": "GPM_IDEMPOTENCY_CONFLICT", "packet_id": packet_id})
+            # Keep the originally persisted analysis and source trace. These
+            # transport headers attest replay of the same complete input.
+            return JSONResponse(status_code=201, content=jsonable_encoder(previous), headers={
+                "X-GPM-Replayed": "true", "X-GPM-Request-SHA256": request_fingerprint(
+                    payload, tenant_id=tenant_id, actor_id=actor_id, actor_role=actor_role),
+            })
+
     runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
     if runtime_mode == "mock":
         analysis = mock_quote_analysis(body.sku, body.supplier_quote)
@@ -165,13 +191,6 @@ async def create_quote_guidance(
             },
         )
 
-    if idempotency_key:
-        packet_identity = hashlib.sha256(
-            f"{tenant_id}:{idempotency_key}".encode("utf-8")
-        ).hexdigest()[:16]
-        packet_id = f"gpm_pkt_{packet_identity}"
-    else:
-        packet_id = f"gpm_pkt_{uuid.uuid4().hex[:16]}"
 
     packet: dict = {
         "packet_id": packet_id,

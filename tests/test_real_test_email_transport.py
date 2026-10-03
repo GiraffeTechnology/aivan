@@ -25,6 +25,14 @@ def _draft(db, *, target: str, status: str = "approved") -> str:
             "created_by_agent": "test",
         },
     )
+    if status == "approved":
+        # Explicit synthetic human-approval proof for transport-only tests.
+        from aivan.execution.draft_preview import bind_approval, create_preview
+        draft.status = "pending_approval"
+        proof, _ = create_preview(db, draft, "en")
+        draft.status = "approved"
+        draft.approval_id = "synthetic-smtp-approval"
+        bind_approval(db, draft, proof)
     db.commit()
     return draft.draft_id
 

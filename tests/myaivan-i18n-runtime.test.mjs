@@ -273,3 +273,22 @@ console.log('myAIVAN i18n runtime: catalog and 7-language inquiry outcome checks
 
 
 await import('./myaivan-inquiry-runtime.test.mjs');
+
+// First visit starts in English; an explicit saved choice is never overwritten.
+for (const [saved, expected] of [[null, 'en'], ['invalid', 'en'], ['zh', 'zh'], ['fr', 'fr']]) {
+  const freshWindow = { ...window, localStorage: { getItem() { return saved; }, setItem() {} } };
+  const freshDocument = { ...document, addEventListener() {} };
+  const fresh = vm.createContext({ window: freshWindow, document: freshDocument,
+    fetch: fetchMock, console, CustomEvent, MutationObserver, NodeFilter: { SHOW_TEXT: 4 },
+    Node: { ELEMENT_NODE: 1 }, encodeURIComponent });
+  vm.runInContext(source, fresh);
+  await freshWindow.myAivanI18n.ready;
+  assert.equal(freshWindow.myAivanI18n.locale, expected);
+  if (saved === 'zh') assert.equal(freshWindow.myAivanI18n.t('Sign in to myAIVAN'), '\u767b\u5f55 myAIVAN');
+}
+const template = fs.readFileSync(new URL('../src/aivan/app/templates/index.html', import.meta.url), 'utf8');
+assert.ok(template.includes('<html lang="en">'));
+const login = template.split('<main id="login-view"')[1].split('</main>')[0]
+  .replace(/<button[^>]*data-language=[\s\S]*?<\/button>/g, '');
+assert.equal(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(login), false, 'initial login labels are English before JavaScript loads');
+console.log('First-visit English, explicit locale retention and initial English markup checks passed.');

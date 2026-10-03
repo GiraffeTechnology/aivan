@@ -180,6 +180,7 @@ jobs:
           node ../../tests/myaivan-copy-audit-runtime.test.mjs
           node ../../tests/myaivan-message-readback-runtime.test.mjs
           node ../../tests/myaivan-attachments-runtime.test.mjs
+          node ../../tests/myaivan-draft-preview-runtime.test.mjs
 
       - name: Install dependencies
         run: npm ci

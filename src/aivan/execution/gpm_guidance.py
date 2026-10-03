@@ -11,6 +11,7 @@ from aivan.integrations.gpm_guidance_client import (
     GPMGuidanceUnavailableError,
 )
 from aivan.openclaw.contracts import OpenClawEvent
+from aivan.pricing.quote_calculator import calculate_supplier_total
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
 from aivan.execution.source_quote import source_quote_reference
@@ -95,6 +96,14 @@ def create_stage1_gpm_guidance(
         "trace_" + hashlib.sha256(trace_seed.encode("utf-8")).hexdigest()[:24]
     )
     actor_id, actor_role = _gpm_actor(event)
+    # Buyer-facing options intentionally hide source costs. Advisory calculations
+    # still use the bound supplier quote and the existing MOQ/fee calculation.
+    supplier_cost = calculate_supplier_total(
+        unit_price=float(selected_reply.unit_price), quantity=quote.quantity,
+        moq=selected_reply.moq or 0, sample_fee=quote.sample_fee,
+        tooling_fee=quote.tooling_fee, packaging_fee=quote.packaging_fee,
+        domestic_logistics_fee=quote.domestic_logistics_fee, qc_fee=quote.qc_fee,
+    )["supplier_total"]
     request = dict(
         tenant_id=tenant_id,
         actor_id=actor_id,
@@ -109,15 +118,16 @@ def create_stage1_gpm_guidance(
         quantity=requirement.quantity,
         buyer_unit_price=float(quote.buyer_unit_price),
         buyer_total=float(quote.buyer_total),
-        supplier_total=float(quote.supplier_total),
+        supplier_total=supplier_cost,
         margin_rate=float(quote.margin_rate),
         gltg_run_id=_gltg_reference(gltg_result),
         gltg_api_version=getattr(gltg_result, "source_api_version", ""),
-        notes=f"case={project.project_id};source_quote={quote_reference}",
+        notes="This advisory request uses the selected supplier quotation and its recorded source references.",
     )
-    # Exact request identity includes tenant/actor/trace, selected terms and GLTG
+    # Exact request identity includes tenant/actor, selected terms and GLTG
     # lineage. Regenerating only a UI option ID does not mint a new decision.
-    canonical = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    canonical = json.dumps({key: value for key, value in request.items() if key != "trace_id"},
+                           sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
     idempotency_key = "gpm_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     packet = GPMGuidanceClient().create_guidance(idempotency_key=idempotency_key, **request)
     return {
