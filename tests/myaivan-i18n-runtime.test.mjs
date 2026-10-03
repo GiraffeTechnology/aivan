@@ -148,3 +148,6 @@ assert.ok(fetchLog.some(({ url }) => url === `/api/ui/catalogs/ko?candidate=${ne
 assert.equal(window.myAivanI18n.installGeneratedCatalog('ja', generated('ja', oldCandidate)), false);
 
 console.log('myAIVAN i18n runtime: 16 assertions passed');
+
+
+await import('./myaivan-inquiry-runtime.test.mjs');
