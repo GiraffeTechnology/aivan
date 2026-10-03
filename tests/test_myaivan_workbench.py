@@ -213,6 +213,9 @@ def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workb
     assert "buyerOptionRow" in script
     assert "Quote options" in script
     assert "leadTime.expected_days" in script
+    assert 'data-action="confirm-order"' in script
+    assert "async function confirmOrder" in script
+    assert "/order-confirmation" in script
 
 
 def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):

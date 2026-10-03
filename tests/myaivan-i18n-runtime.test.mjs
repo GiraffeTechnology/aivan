@@ -104,8 +104,13 @@ const inquiryOutcomeCopy = {
   '请求已受理，请按案例提示继续。': 'The request was accepted. Continue from the case guidance.',
   '询盘草稿已生成，等待人工审批': 'The inquiry draft was created and is awaiting human approval.',
 };
+const orderConfirmationCopy = {
+  '确认选定订单': 'Confirm selected order',
+  '订单已确认并通过数据库回读': 'Order confirmed and verified by database readback',
+  '订单确认失败：': 'Order confirmation failed: ',
+};
 window.myAivanI18n.setLocale('en');
-for (const [sourceText, englishText] of Object.entries(inquiryOutcomeCopy)) {
+for (const [sourceText, englishText] of Object.entries({ ...inquiryOutcomeCopy, ...orderConfirmationCopy })) {
   assert.equal(window.myAivanI18n.t(sourceText), englishText);
   assert.ok(sourceMap[sourceText], `${sourceText} must have a stable catalog id`);
 }

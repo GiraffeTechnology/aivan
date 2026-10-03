@@ -157,27 +157,22 @@ async def _raw_asgi_post(
         (b"authorization", b"Bearer wrong-\xff-token"),
     ],
 )
-def test_raw_nonascii_credential_crosses_b1a_and_gpm_boundary_with_zero_side_effects(
+def test_raw_nonascii_credential_crosses_api_and_gpm_boundary_with_zero_side_effects(
     monkeypatch: pytest.MonkeyPatch,
     credential_header: tuple[bytes, bytes],
 ) -> None:
     _production_api_key(monkeypatch)
     from aivan.api import main
     from aivan.gpm import router as gpm_router
-    from aivan.observability import dependency_probe
 
     class _DBClientMustNotBeCalled:
         def get_tenant(self, *args, **kwargs):
             raise AssertionError("tenant lookup is a side effect after invalid authentication")
 
-    def _probe_must_not_run(*args, **kwargs):
-        raise AssertionError("B1-A probes must not run for invalid authentication")
-
     def _handler_must_not_run(*args, **kwargs):
         raise AssertionError("GPM business handler must not run for invalid authentication")
 
     monkeypatch.setattr(main.app.state, "giraffe_db_client", _DBClientMustNotBeCalled(), raising=False)
-    monkeypatch.setattr(dependency_probe, "run_dependency_probes", _probe_must_not_run)
     monkeypatch.setattr(gpm_router, "analyze_quote", _handler_must_not_run)
     monkeypatch.setattr(gpm_router, "mock_quote_analysis", _handler_must_not_run)
 

@@ -296,11 +296,20 @@ async function openCase(caseId) {
     const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
     const selected = item.selected_option;
     const buyerOptions = Array.isArray(item.requirement?.buyer_options) ? item.requirement.buyer_options : [];
+    const orderConfirmation = item.requirement?.order_confirmation;
+    const canConfirmOrder = state.bootstrap.actor.capabilities.includes('approve_outbound')
+      && item.case_state === 'approved'
+      && selected?.option_id
+      && orderConfirmation?.status !== 'confirmed';
     const recommendation = selected ? `<section class="panel"><h2>Execution recommendation</h2>
       <div class="person"><strong>${escapeHtml(selected.option_label || selected.option_type || 'Recommendation pending review')}</strong><span>${escapeHtml(selected.supplier_display_name || selected.supplier_id || selected.candidate_id || 'Supplier pending confirmation')}</span></div>
       <p>${escapeHtml(selected.reasoning || 'No recommendation rationale is available.')}</p>
       <p>Price: ${escapeHtml(selected.quote?.currency || '')} ${escapeHtml(selected.quote?.buyer_unit_price ?? 'Unknown')} · Lead time: ${escapeHtml(selected.lead_time_estimate?.expected_days ?? 'Unknown')}</p>
-      ${(selected.warnings || []).length ? `<p class="error">${escapeHtml(selected.warnings.join(' · '))}</p>` : ''}</section>` : '';
+      ${(selected.warnings || []).length ? `<p class="error">${escapeHtml(selected.warnings.join(' · '))}</p>` : ''}
+      ${canConfirmOrder ? `<button class="primary" data-action="confirm-order" data-case-id="${escapeHtml(item.case_id)}" data-option-id="${escapeHtml(selected.option_id)}" type="button">${ht('确认选定订单')}</button>` : ''}</section>` : '';
+    const confirmedOrder = orderConfirmation?.status === 'confirmed'
+      ? `<section class="panel"><h2>${ht('订单确认')}</h2><div class="person"><strong>${ht('已由人工确认')}</strong><span>${escapeHtml(orderConfirmation.purchase_order_id || '')}</span></div><p>${ht('权威数据库回读已验证')} · ${escapeHtml(orderConfirmation.authoritative_source || 'giraffe-db')}</p></section>`
+      : '';
     $('#case-detail').innerHTML = `<section class="case-hero">
       <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
       <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${ht('导出审计')}</a>` : ''}</div>
@@ -308,6 +317,7 @@ async function openCase(caseId) {
     <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
     ${recommendation}
+    ${confirmedOrder}
     ${section('Quote options', buyerOptions, buyerOptionRow)}
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
     ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
@@ -406,6 +416,20 @@ async function rejectDraft(draftId) {
   } catch (error) { toast(`${t('拒绝失败：')}${error.message}`, 'error'); }
 }
 
+async function confirmOrder(caseId, optionId) {
+  if (!window.confirm(t('确认将当前选定报价写入订单？此操作需要人工授权。'))) return;
+  try {
+    const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}/order-confirmation`, {
+      method: 'POST',
+      body: JSON.stringify({ selected_option_id: optionId }),
+    });
+    toast(payload.recovered ? t('订单已恢复并通过数据库回读') : t('订单已确认并通过数据库回读'), 'success');
+    await openCase(caseId);
+  } catch (error) {
+    toast(`${t('订单确认失败：')}${error.message}`, 'error');
+  }
+}
+
 async function showImpact(eventId) {
   try {
     const payload = await api(`/api/events/${encodeURIComponent(eventId)}/impact`);
@@ -481,6 +505,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
   if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
+  if (action.dataset.action === 'confirm-order') await confirmOrder(action.dataset.caseId, action.dataset.optionId);
   if (action.dataset.action === 'impact') await showImpact(action.dataset.eventId);
   if (action.dataset.action === 'reverse') await reverseEvent(action.dataset.eventId);
 });

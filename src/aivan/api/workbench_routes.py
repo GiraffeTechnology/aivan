@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -23,6 +24,9 @@ from aivan.db.models.execution import ExecutionEventRecord
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.db.models.project import Project
 from aivan.db.models.relay import RelayReceiptRecord
+from aivan.db.repositories.domain_repo import CaseDomainRepository
+from aivan.db.repositories.event_repo import ExecutionEventRepository
+from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.session import get_db
 from aivan.domain.roles import (
     BusinessRole,
@@ -32,6 +36,10 @@ from aivan.domain.roles import (
     require_capability,
 )
 from aivan.app.ui_catalog import catalog_version, ready_locales
+from aivan.integrations.order_confirmation import (
+    GiraffeDBOrderConfirmationClient,
+    OrderConfirmationError,
+)
 
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"])
@@ -345,6 +353,211 @@ def get_case_detail(
             }
             for item in audits
         ],
+    }
+
+
+def _order_confirmation_error(exc: OrderConfirmationError) -> HTTPException:
+    code = exc.code
+    client_conflict_codes = {
+        "ORDER_CONFIRMATION_ACTOR_REQUIRED",
+        "ORDER_CONFIRMATION_DB_GRAPH_REQUIRED",
+        "ORDER_CONFIRMATION_IDEMPOTENCY_KEY_REQUIRED",
+        "ORDER_CONFIRMATION_PROJECT_REQUIRED",
+        "ORDER_CONFIRMATION_SELECTED_OPTION_REQUIRED",
+        "ORDER_CONFIRMATION_SUPPLIER_ID_REQUIRED",
+        "ORDER_CONFIRMATION_TENANT_REQUIRED",
+        "ORDER_CONFIRMATION_TRACE_REQUIRED",
+    }
+    if code in client_conflict_codes:
+        status_code = 409
+    elif code.endswith("_NOT_FOUND") or code.endswith("_MISSING"):
+        status_code = 409
+    elif "IDEMPOTENCY_CONFLICT" in code:
+        status_code = 409
+    else:
+        status_code = 503
+    return HTTPException(status_code=status_code, detail={"error": code})
+
+
+def _order_confirmation_client(
+    *, context: RequestContext, case_id: str, option_id: str
+) -> GiraffeDBOrderConfirmationClient:
+    stable_trace = hashlib.sha256(
+        f"{context.tenant_id}\0{case_id}\0{option_id}\0order-confirmation".encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return GiraffeDBOrderConfirmationClient(
+        tenant_id=context.tenant_id,
+        trace_id=f"order_{stable_trace}",
+    )
+
+
+@router.post("/cases/{case_id}/order-confirmation")
+def confirm_case_order(
+    case_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_context),
+):
+    """Confirm the selected quote once and verify authoritative DB readback."""
+
+    identity = _identity(context)
+    try:
+        require_capability(identity, Capability.APPROVE_OUTBOUND)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=403, detail={"error": "ORDER_CONFIRMATION_FORBIDDEN"}
+        ) from exc
+    if not context.idempotency_key:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "ORDER_CONFIRMATION_IDEMPOTENCY_KEY_REQUIRED"},
+        )
+
+    project = ProjectRepository(db).get_for_update(
+        case_id, tenant_id=context.tenant_id
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail={"error": "CASE_NOT_FOUND"})
+    selected_option = project.selected_option_json
+    selected_option_id = str(body.get("selected_option_id") or "").strip()
+    if not isinstance(selected_option, dict) or not selected_option_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ORDER_CONFIRMATION_SELECTED_OPTION_REQUIRED"},
+        )
+    if selected_option.get("option_id") != selected_option_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ORDER_CONFIRMATION_OPTION_VERSION_MISMATCH"},
+        )
+
+    requirement = dict(project.requirement_json or {})
+    existing = requirement.get("order_confirmation")
+    try:
+        client = _order_confirmation_client(
+            context=context, case_id=case_id, option_id=selected_option_id
+        )
+    except OrderConfirmationError as exc:
+        raise _order_confirmation_error(exc) from exc
+    if isinstance(existing, dict) and existing.get("status") == "confirmed":
+        if existing.get("selected_option_id") != selected_option_id:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "ORDER_CONFIRMATION_ALREADY_COMMITTED"},
+            )
+        try:
+            result = client.reconcile_order(
+                procurement_case_id=str(existing.get("procurement_case_id") or ""),
+                supplier_quote_id=str(existing.get("supplier_quote_id") or ""),
+                purchase_order_id=str(existing.get("purchase_order_id") or ""),
+            )
+        except OrderConfirmationError as exc:
+            raise _order_confirmation_error(exc) from exc
+        return {
+            **result.as_dict(),
+            "selected_option_id": selected_option_id,
+            "authoritative_source": "giraffe-db",
+            "recovered": True,
+        }
+
+    if project.case_state != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "ORDER_CONFIRMATION_INVALID_CASE_STATE",
+                "case_state": project.case_state,
+                "required_state": "approved",
+            },
+        )
+    graph_reference = requirement.get("giraffe_db_graph")
+    if not isinstance(graph_reference, dict):
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ORDER_CONFIRMATION_DB_GRAPH_REQUIRED"},
+        )
+    try:
+        result = client.confirm_order(
+            project_id=case_id,
+            graph_reference=graph_reference,
+            selected_option=selected_option,
+            identity=identity,
+            request_key=context.idempotency_key,
+        )
+    except OrderConfirmationError as exc:
+        db.rollback()
+        raise _order_confirmation_error(exc) from exc
+
+    projection = {
+        **result.as_dict(),
+        "selected_option_id": selected_option_id,
+        "authoritative_source": "giraffe-db",
+    }
+    requirement["order_confirmation"] = projection
+    project.requirement_json = requirement
+    project.status = "order_confirmed"
+    CaseDomainRepository(db).record_audit(
+        tenant_id=project.tenant_id,
+        case_id=project.project_id,
+        event_type="ORDER_CONFIRMED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={
+            "selected_option_id": selected_option_id,
+            "order_status": "unconfirmed",
+        },
+        after={
+            "selected_option_id": selected_option_id,
+            "purchase_order_id": result.purchase_order_id,
+            "order_status": result.status,
+            "readback_verified": result.readback_verified,
+        },
+    )
+    ExecutionEventRepository(db).append(
+        project.project_id,
+        "ORDER_CONFIRMATION_PERSISTED",
+        "Human-authorized order confirmation persisted and verified by readback",
+        payload=projection,
+        actor=identity.actor_id,
+        tenant_id=project.tenant_id,
+        source_trace_id=context.trace_id,
+    )
+    db.commit()
+    return {**projection, "recovered": False}
+
+
+@router.get("/cases/{case_id}/order-confirmation")
+def get_case_order_confirmation(
+    case_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_context),
+):
+    """Recover and verify the confirmed order from giraffe-db after restart."""
+
+    project = _get_case(db, context, case_id)
+    projection = (project.requirement_json or {}).get("order_confirmation")
+    if not isinstance(projection, dict) or projection.get("status") != "confirmed":
+        raise HTTPException(
+            status_code=404, detail={"error": "ORDER_CONFIRMATION_NOT_FOUND"}
+        )
+    option_id = str(projection.get("selected_option_id") or "")
+    try:
+        client = _order_confirmation_client(
+            context=context, case_id=case_id, option_id=option_id
+        )
+        result = client.reconcile_order(
+            procurement_case_id=str(projection.get("procurement_case_id") or ""),
+            supplier_quote_id=str(projection.get("supplier_quote_id") or ""),
+            purchase_order_id=str(projection.get("purchase_order_id") or ""),
+        )
+    except OrderConfirmationError as exc:
+        raise _order_confirmation_error(exc) from exc
+    return {
+        **result.as_dict(),
+        "selected_option_id": option_id,
+        "authoritative_source": "giraffe-db",
+        "recovered": True,
     }
 
 
