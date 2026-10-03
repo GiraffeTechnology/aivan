@@ -1,8 +1,6 @@
 # Stage 4 guided-relay implementation evidence
 
-Status: implementation complete on the Stage 4 development branch; CTYun
-deployment and mobile-channel production acceptance remain gated on PR review
-and an approved deployment window.
+Historical implementation record. The channel matrix and tests below describe that earlier branch, not the current first-web product requirement. For MyAivan, all IM channels use copy/manual-send/confirmation and email uses explicit configured sending or fallback. Current acceptance is in [Acceptance Criteria](../ACCEPTANCE_CRITERIA.md). Preserve this implementation; do not infer new scope or sending/deployment authority from it.
 
 ## Delivered
 
@@ -36,7 +34,7 @@ idempotent re-apply behavior.
 These are deterministic local acceptance runs. They do not claim a live mobile
 WeChat delivery.
 
-## Production acceptance constraints
+## Historical target-specific operational record
 
 - Do not stop, rebind, or modify AIVAN server ports `443` or `8443`; they are
   reserved by existing SSH/mail services.
@@ -45,6 +43,5 @@ WeChat delivery.
 - Inject channel credentials and API keys from the authorized secret store;
   never place them in the repository or test evidence.
 - Run the Stage 4 migration only after a database backup.
-- After cross-review and deployment, complete five consecutive real mobile
-  WeChat/Relay round trips and retain redacted receipt, trace, Case binding, and
-  audit-log evidence for each run.
+- The earlier program requested five real-mobile relay runs. This record does not establish their completion or impose them on the first-web scope. Use the source-defined five UI runs for that iteration, and record any separately authorized live-channel test at its actual scope.
+

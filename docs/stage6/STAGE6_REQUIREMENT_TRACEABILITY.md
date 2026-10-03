@@ -1,33 +1,20 @@
-# Stage 6 requirement-to-evidence matrix
+# Current Requirement-to-Evidence Map
 
-Baseline reconciled 2026-08-10: `main@61e456688952cda6e09574b33413b4eb1f84aac3`.
-`automated_preflight` never substitutes for current-candidate production evidence.
+Reconciled: 2026-10-02. This replaces the former Stage 6 umbrella-gate matrix. Source IDs refer to [Product Source Reconciliation](../PRODUCT_SOURCE_RECONCILIATION.md). No row below asserts that the current implementation passed.
 
-| Requirement / gate | Current implementation | Automated evidence | Production evidence | Status at Stage 6 start |
-| --- | --- | --- | --- | --- |
-| FR-001 unified inbound | shared invoke service and aliases | `test_stage1_unified_contract.py` | current OpenClaw staging 5/5 | implementation present; production evidence pending |
-| FR-010/130 Case and tenant | shared domain + tenant-scoped repositories and Stage 7B workbench aggregate candidate | Stage 1/2 tenant and domain tests plus `test_myaivan_workbench.py` | MyAIVAN current-candidate walkthrough | candidate present; paginated child APIs and production evidence pending |
-| multi-role RBAC | canonical role/capability/transition policy | Stage 2 role/RBAC tests | role-switch adversarial 5/5 | implementation present; production evidence pending |
-| FR-050 approvals | Core draft/approval state machine | approval suites | Email/LINE/Relay current receipts | partial; Stage 5C pending |
-| FR-060/100 Relay | capability registry and Core relay APIs | `test_stage4_relay.py` | real mobile WeChat 5/5 | automated only; UI/mobile evidence pending |
-| FR-070 MyAIVAN | trusted session and responsive workbench candidate | `test_myaivan_workbench.py`; local mobile browser walkthrough | UI 5/5, accessibility and real-device evidence | candidate present; not production accepted |
-| FR-080 Plugin/SKILL | versioned plugin, SKILL, six tools | plugin/Gateway harness | current OpenClaw staging 5/5 | implementation present; current staging evidence pending |
-| FR-090 Email / LINE | capability mode exists | transport tests are not full current-candidate proof | provider receipts and failure/retry 5/5 | **Stage 5C not delivered** |
-| FR-110 correction | impact/reverse and immutable ledger | Stage 5A suite; all 7 blocker codes covered | UI correction + compensation 5/5 | Core and blocker coverage present; downstream invalidation/correction draft still pending |
-| FR-121 Token Guard | centralized local-model guard | `test_llm_token_guard.py` | AIVAN Qwen/Ollama capacity run | automated present; production benchmark pending |
-| backup and restore | backup locations/config are operational concerns | no repository test can prove live recovery | approved isolated restore drill | pending |
-| CTYun routing | existing `abcdyi-sin` bridge required | static documentation guard | route/service evidence | pending; all non-China paths must use bridge |
-| port safety | 443/8443 reserved for SSH/MAIL | no code shall bind them | before/after listener evidence | pending; modification prohibited |
-| release sign-off | Stage 6 PRD and tracker | CI/Claude cross-review | product/engineering/operations/supervisor signatures | pending |
+| Requirement | Source | Relevant existing assets to inspect | Acceptance evidence |
+| --- | --- | --- | --- |
+| Inquiry/requirement/supplier-reply handling | A1 sections 1-4; C1 | Shared invoke, RFQ and domain services; unified/role tests | Actual correct case/participant flow and DB records |
+| Private-domain facts and process state | C1 | DB clients, repositories, GPM persistence contract | Real selected provider/API writes/readback and conversation/restart recovery on the two designated simulated DBs |
+| Quotation and options | A1 sections 1, 9-10; L1 | Supplier response, buyer options, GLTG/GPM clients | Grounded price/terms/options, real API output and uncertainty |
+| Order confirmation | C1; A2 sections 5, 8 | Shared order integration used by Aivan/industry app | Human confirmation and persisted selected-order state; no extra formal-contract gate |
+| Conversation-first MyAivan UI | W1 sections 6-11 | Existing workbench assets and tests are reusable, not proof of the required layout | Welcome/Start Working, three-area page, right/left alignment |
+| File/image input and backup | W1 sections 11, 13, 15, 19-20 | Upload/content-reference/export implementation and selected storage | Usable supported files/images and Markdown backup with case/status/audit |
+| Draft review and channel behavior | A1 sections 2, 4; W1 sections 5, 10, 12, 17 | Approval, relay and email adapters | All IM manual; configured email confirmation or truthful fallback; no false sent status |
+| Five consecutive UI runs | W1 sections 21, 24 | Existing runner may be reused where it covers the right scope | Five actual runs of original 20 cases, failures retained; no skipped-as-passed |
+| English workflow and DB | C3 | Language integration and canonical/write-validation boundaries | Dynamic translation before workflow; English non-profile DB data; narrow profile exception |
+| Selected-path safety | A1 section 2; A2 role/permission workflow | Tenant, role, idempotency, auth and file/security tests | Changed-path authorization, isolation and integrity verified |
+| GLTG factor iteration when claimed | L1 sections 6-13 | API clients and factor/model tests | Four scenario cases, executable formulas, quantile checks and provenance |
+| Target-host deployment when claimed | Specific operation authorization | Predeployment/migration/deployment tooling | Actual target revision, scoped health/user-flow outcome and applicable operational protection |
 
-## Evidence ownership
-
-| Evidence | Responsible role | Approval required |
-| --- | --- | --- |
-| CI and automated five-run preflight | engineering | Claude Code cross-review |
-| MyAIVAN/UI product scenarios | product + QA | product owner |
-| Email/LINE/WeChat/Wangwang receipts | channel operator + QA | authorized approver |
-| CTYun deployment, bridge, ports and monitoring | operations | operations owner + supervisor |
-| backup restore and rollback drill | database/operations | maintenance-window approval |
-| final release | project supervisor | all prior gates complete |
-
+Tests mentioned are assets to inspect, not automatic proof. Record exact candidate, actual command/actions, expected/observed outcome and safe evidence link. A provider's simulated data is accepted; a fake service response is only mock-test evidence. No new approval hierarchy, enterprise platform or fixed DB/cloud vendor is created by this matrix.

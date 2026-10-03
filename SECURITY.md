@@ -22,11 +22,15 @@ AIVAN does not:
 - Scrape or access marketplace data through undocumented means
 - Impersonate users or automated accounts
 
-## Local-first data boundary
+## Private-domain data and service boundary
 
-All trade data — buyer requirements, supplier details, conversations, risk reports, drafts, event logs — is stored in a local SQLite database (`data/aivan.db`). Data does not leave the operator's machine unless:
-- The operator approves a draft message (sent via OpenClaw)
-- The operator configures an external LLM provider (optional; mock is default)
+The chosen private-domain DB (`giraffe-db` or a compatible replacement) is the system of record for business history and process state. A compatible local SQLite profile may be used; it is not the only permitted database or a reason to make chat context authoritative.
+
+Explicitly configured DB, GLTG, GPM, language and connectivity APIs may process the minimum data needed for their authorized function. Approved dependency processing is distinct from sending an external business message, which still requires human authorization. Do not claim that no data can leave the device when remote dependencies are configured.
+
+Standard English is the work/interaction language. Non-English input/output uses dynamic `giraffe-language-skill` translation before workflow or for requested display. Except enterprise/user profiles, stored textual business content is standard English; raw-message/audit/metadata copies are not exceptions. Safe file/image input remains supported.
+
+The two designated simulated DBs are valid for functional acceptance through real application/API execution. Keep data labels, authentication, tenant/object isolation, durable writes/readback, safe storage and truthful outcomes. No simulated dataset authorizes fabricated facts or skipped checks.
 
 ## External LLM keys are optional
 
@@ -56,6 +60,7 @@ If private vulnerability reporting is unavailable, contact the Giraffe Technolog
 
 ## Security boundaries
 
-AIVAN may make outbound connections to explicitly configured services including OpenClaw, Ollama or an approved external LLM provider, SMTP, GLTG, and giraffe-db. Operators are responsible for configuring authentication, network allow-lists, TLS, retention, and least-privilege credentials for those services.
+AIVAN may make outbound connections to explicitly configured services including OpenClaw, Ollama or an approved external LLM provider, the configured email adapter, GLTG, GPM, giraffe-language-skill and the selected private-domain DB. Operators are responsible for configuring authentication, network allow-lists, TLS, retention, and least-privilege credentials for those services.
 
 Security claims in this document are enforced by automated tests where practical, but deployments must also validate environment variables, reverse-proxy timeouts, database permissions, and external-service configuration.
+
