@@ -148,3 +148,18 @@ def test_freight_currency_does_not_supply_or_override_unit_quote(unavailable_par
 def test_declared_lead_time_is_not_validity_payment_or_ambiguous_days(unavailable_parser_model, text, days):
     result = parser.parse_supplier_reply(text, project_id="case-fixture")
     assert result.lead_time_days == days
+
+
+@pytest.mark.parametrize("condition", ["including shipping", "including freight", "including packaging"])
+def test_explicit_unit_price_retains_included_cost_condition(unavailable_parser_model, condition):
+    result = parser.parse_supplier_reply(
+        f"Unit price: 12.50 GBP {condition}; lead time 8.5 days.", project_id="case-fixture")
+    assert result.unit_price == 12.5
+    assert result.currency == "GBP"
+    assert result.lead_time_days == 8.5
+
+
+def test_fee_only_message_does_not_create_a_unit_quote(unavailable_parser_model):
+    result = parser.parse_supplier_reply("Freight: GBP 5.00; lead time 8.5 days.", project_id="case-fixture")
+    assert result.unit_price is None
+    assert result.currency == ""

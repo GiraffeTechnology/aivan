@@ -52,9 +52,14 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     )
     amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
     price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
-    price_clauses = [clause for clause in clauses
-        if not re.search(r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b', clause, re.IGNORECASE)
-        and re.search(price_pattern, clause, re.IGNORECASE)]
+    price_clauses = []
+    for clause in clauses:
+        quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
+        if quoted_amount and not re.search(
+            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
+            clause[:quoted_amount.start()], re.IGNORECASE,
+        ):
+            price_clauses.append(clause)
     named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
     price_clause = next(iter(named_prices or price_clauses), "")
     price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
