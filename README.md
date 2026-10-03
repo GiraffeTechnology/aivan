@@ -182,3 +182,8 @@ uv run python scripts/run_gpm_giraffe_db_http_acceptance.py --phase readback --p
 ```
 
 It verifies trusted tenant/actor headers, quote and currency identity, model results, GLTG lineage, provider readback, replay/conflict, cross-tenant denial, and restart recovery. Supply the configured service endpoints and secrets through the authorized environment. See `.env.example` and the runner's argument help. Mock-model checks are local contract evidence and do not establish a live model or database run.
+
+When no actual model provider is available, `--model-mode mock` exercises only
+authenticated persistence, replay, conflict, isolation and restart. The runner
+reports `PASS_PERSISTENCE_ONLY_MODEL_MOCK`, not live model or full workflow
+acceptance. Its default `actual` mode rejects mock or unidentified providers.

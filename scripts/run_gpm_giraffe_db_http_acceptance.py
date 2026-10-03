@@ -197,7 +197,12 @@ def _payload() -> dict[str, Any]:
     return payload
 
 
-def _assert_packet(packet: dict[str, Any], settings: Settings) -> str:
+def _assert_packet(
+    packet: dict[str, Any],
+    settings: Settings,
+    *,
+    model_mode: str = "actual",
+) -> str:
     packet_id = packet.get("packet_id")
     if (
         not isinstance(packet_id, str)
@@ -222,11 +227,20 @@ def _assert_packet(packet: dict[str, Any], settings: Settings) -> str:
             reasoning = json.loads(reasoning)
         except json.JSONDecodeError:
             reasoning = None
-    if isinstance(reasoning, dict) and reasoning.get("runtime_status") in {
-        "mock",
-        "unavailable",
-    }:
-        raise AcceptanceFailure("GPM did not use an available live model runtime")
+    runtime_status = reasoning.get("runtime_status") if isinstance(reasoning, dict) else None
+    model_result = packet["model_result"]
+    if model_mode == "actual":
+        if runtime_status != "available" or model_result.get("model_provider") in {
+            None,
+            "",
+            "mock",
+        }:
+            raise AcceptanceFailure("GPM did not use an identified live model runtime")
+    elif model_mode == "mock":
+        if runtime_status != "mock" or model_result.get("model_provider") != "mock":
+            raise AcceptanceFailure("GPM did not use the declared mock model runtime")
+    else:
+        raise AcceptanceFailure("unsupported model evidence mode")
     return packet_id
 
 
@@ -260,7 +274,11 @@ def provider_preflight(client: httpx.Client, settings: Settings) -> None:
 
 
 def readback(
-    client: httpx.Client, settings: Settings, packet_id: str
+    client: httpx.Client,
+    settings: Settings,
+    packet_id: str,
+    *,
+    model_mode: str = "actual",
 ) -> dict[str, Any]:
     gpm_packet = _expect_status(
         client.get(
@@ -280,7 +298,7 @@ def readback(
     )
     if gpm_packet != db_packet:
         raise AcceptanceFailure("GPM and giraffe-db readback packets differ")
-    _assert_packet(gpm_packet, settings)
+    _assert_packet(gpm_packet, settings, model_mode=model_mode)
     return gpm_packet
 
 
@@ -314,7 +332,12 @@ def cross_tenant_negative(
         raise AcceptanceFailure("cross-tenant provider credential was not rejected")
 
 
-def run_full(client: httpx.Client, settings: Settings) -> str:
+def run_full(
+    client: httpx.Client,
+    settings: Settings,
+    *,
+    model_mode: str = "actual",
+) -> str:
     provider_preflight(client, settings)
     payload = _payload()
     first = _expect_status(
@@ -326,7 +349,7 @@ def run_full(client: httpx.Client, settings: Settings) -> str:
         {201},
         "GPM create",
     )
-    packet_id = _assert_packet(first, settings)
+    packet_id = _assert_packet(first, settings, model_mode=model_mode)
     replay = _expect_status(
         client.post(
             f"{settings.gpm_url}/api/gpm/quote-guidance",
@@ -350,7 +373,7 @@ def run_full(client: httpx.Client, settings: Settings) -> str:
     if not isinstance(detail, dict) or detail.get("error") != "GPM_IDEMPOTENCY_CONFLICT":
         raise AcceptanceFailure("GPM idempotency conflict code is unstable")
 
-    persisted = readback(client, settings, packet_id)
+    persisted = readback(client, settings, packet_id, model_mode=model_mode)
     if persisted != first:
         raise AcceptanceFailure("persisted packet differs from the create response")
     cross_tenant_negative(client, settings, packet_id)
@@ -371,18 +394,36 @@ def main() -> int:
         "--packet-id",
         help="Previously reported packet ID; required for the readback phase.",
     )
+    parser.add_argument(
+        "--model-mode",
+        choices=("actual", "mock"),
+        default="actual",
+        help=(
+            "Use actual for full model plus persistence acceptance. Use mock only "
+            "for explicitly limited persistence-path evidence."
+        ),
+    )
     args = parser.parse_args()
     try:
         settings = load_settings()
         with httpx.Client(timeout=30.0, follow_redirects=False) as client:
             if args.phase == "full":
-                packet_id = run_full(client, settings)
+                packet_id = run_full(
+                    client,
+                    settings,
+                    model_mode=args.model_mode,
+                )
                 print(
                     json.dumps(
                         {
-                            "status": "PASS",
+                            "status": (
+                                "PASS"
+                                if args.model_mode == "actual"
+                                else "PASS_PERSISTENCE_ONLY_MODEL_MOCK"
+                            ),
                             "phase": "full",
                             "packet_id": packet_id,
+                            "model_mode": args.model_mode,
                             "next": "restart services, then run --phase readback --packet-id <packet_id>",
                         },
                         sort_keys=True,
@@ -392,14 +433,24 @@ def main() -> int:
                 if not args.packet_id or not SAFE_VALUE.fullmatch(args.packet_id):
                     raise AcceptanceFailure("a safe --packet-id is required for readback")
                 provider_preflight(client, settings)
-                readback(client, settings, args.packet_id)
+                readback(
+                    client,
+                    settings,
+                    args.packet_id,
+                    model_mode=args.model_mode,
+                )
                 cross_tenant_negative(client, settings, args.packet_id)
                 print(
                     json.dumps(
                         {
-                            "status": "PASS",
+                            "status": (
+                                "PASS"
+                                if args.model_mode == "actual"
+                                else "PASS_PERSISTENCE_ONLY_MODEL_MOCK"
+                            ),
                             "phase": "readback",
                             "packet_id": args.packet_id,
+                            "model_mode": args.model_mode,
                         },
                         sort_keys=True,
                     )
