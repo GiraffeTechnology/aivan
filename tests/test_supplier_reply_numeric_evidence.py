@@ -126,3 +126,25 @@ def test_buyer_quote_explanation_uses_selected_currency_without_default_usd(monk
     assert "USD" not in buyer_unit_trace[0]
     if currency:
         assert buyer_unit_trace[0].endswith(f" {currency}")
+
+
+@pytest.mark.parametrize("text,currency", [
+    ("Unit price: 12.50; freight: GBP 5.00; lead time 8.5 days.", ""),
+    ("Unit price: 12.50 GBP; freight: USD 5.00; lead time 8.5 days.", "GBP"),
+])
+def test_freight_currency_does_not_supply_or_override_unit_quote(unavailable_parser_model, text, currency):
+    result = parser.parse_supplier_reply(text, project_id="case-fixture")
+    assert result.unit_price == 12.5
+    assert result.currency == currency
+    assert ("currency" in result.missing_info) == (not currency)
+
+
+@pytest.mark.parametrize("text,days", [
+    ("Unit price: 12.50 GBP; offer valid for 2 days; production lead time 8.5 days.", 8.5),
+    ("Unit price: 12.50 GBP; offer valid for 2 days.", None),
+    ("Unit price: 12.50 GBP; lead time 8.5 days; payment due in 30 days.", 8.5),
+    ("Unit price: 12.50 GBP; lead time 8.5 days or 10 days.", None),
+])
+def test_declared_lead_time_is_not_validity_payment_or_ambiguous_days(unavailable_parser_model, text, days):
+    result = parser.parse_supplier_reply(text, project_id="case-fixture")
+    assert result.lead_time_days == days

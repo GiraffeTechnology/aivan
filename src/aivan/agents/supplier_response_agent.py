@@ -43,23 +43,32 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         pass
 
     text_lower = raw_text.lower()
+    # Bind fallback facts to their business clause, not unrelated freight,
+    # payment or offer-validity facts elsewhere in the same message.
+    clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
     currency_codes = (
         "USD|EUR|GBP|CNY|JPY|HKD|CAD|AUD|CHF|NZD|SGD|KRW|INR|BRL|MXN|ZAR|"
         "SEK|NOK|DKK|PLN|THB|TWD|VND|IDR|AED|SAR|TRY|RUB"
     )
+    amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
+    price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
+    price_clauses = [clause for clause in clauses
+        if not re.search(r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b', clause, re.IGNORECASE)
+        and re.search(price_pattern, clause, re.IGNORECASE)]
+    named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
+    price_clause = next(iter(named_prices or price_clauses), "")
+    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
+    unit_price = float(price_match.group(1)) if price_match else None
     explicit_currencies = {
-        code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', raw_text, re.IGNORECASE)
+        code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
     }
     currency = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
-    amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
-    price_match = re.search(
-        rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}',
-        raw_text, re.IGNORECASE,
-    )
-    unit_price = float(price_match.group(1)) if price_match else None
 
-    day_match = re.search(r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', text_lower)
-    lead_time = float(day_match.group(1)) if day_match else None
+    lead_clauses = [clause for clause in clauses if re.search(
+        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)]
+    lead_values = {float(value) for clause in lead_clauses for value in re.findall(
+        r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
+    lead_time = next(iter(lead_values)) if len(lead_values) == 1 else None
 
     moq_match = re.search(r'moq[:\s]*(\d[\d,]*)', text_lower)
     moq = int(moq_match.group(1).replace(",", "")) if moq_match else None
