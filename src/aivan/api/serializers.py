@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 
-def serialize_draft(draft) -> dict:
+def draft_type_from_notes(draft) -> str:
+    """Return the persisted draft type encoded by the existing notes contract."""
     draft_type = ""
     for part in (draft.notes or "").split():
         if part.startswith("draft_type="):
             draft_type = part.split("=", 1)[1]
+    return draft_type
+
+
+def serialize_draft(draft) -> dict:
+    draft_type = draft_type_from_notes(draft)
     return {
         "draft_id": draft.draft_id,
         "tenant_id": draft.tenant_id,
