@@ -51,3 +51,11 @@ Do not resume the original development tasks as a side effect of this cleanup; t
 Follow [the current security scan policy](docs/SECURITY_SCANNING.md) for scanner coverage, failure thresholds, reviewed findings and evidence. The license-available scans differ from CodeQL security-extended; do not claim equivalence or hide failures. Historical CodeQL/Dependency Review references do not restore an unavailable paid service as a product requirement.
 
 Before handoff: identify the exact scope and revision, run relevant checks, distinguish passed/failed/skipped/not-run, record evidence and limitations, and avoid new gates. Draft PRs and docs do not prove code implementation, merge, functional acceptance or production deployment.
+
+## CTYun TCP port 443 reservation
+
+On CTYun hosts, TCP port 443 is reserved for SSH. Do not configure HTTP, HTTPS, web servers, reverse proxies, or TLS listeners to bind to TCP port 443. Do not stop, rebind, replace, or otherwise disrupt SSH to free that port.
+
+Before selecting a web or bridge port, inspect the existing deployment and operations configuration and reuse an explicitly confirmed allocation. Do not guess a replacement port. If the allocation is unclear, report the missing configuration rather than changing a service binding.
+
+This constraint applies only to CTYun hosts; do not extend it to SIN or other environments without an explicit instruction. Recording this rule does not authorize server access or changes to SSH, firewalls, credentials, network settings, or security settings.
