@@ -29,7 +29,8 @@ The authoritative PDF contains no independent vector `/Form` logo object, so the
 
 - Delivery ZIP: `giraffe-vi-v1.2-approved-pdf-derived-raster-assets.zip`, 1,242,218 bytes, SHA-256 `91FA47AC57DE5E77D745A0479C812417CE62D1EAC5079D81DD0669E48CD515D9`.
 - Web asset: `giraffe-logo-graphic-mark-approved-pdf-derived.png`, 615×802, 271,382 bytes, SHA-256 `DFD19B25AE703DD1F4584CC255D822A26A967BE3100EB2C94202CCC541724E4F`.
-- Traceability manifest: `docs/brand/giraffe-vi-v1.2-approved-pdf-derived-raster-manifest.json`, repository copy SHA-256 `0131A4C0564A5E2AFC3ACC3CE66BF17B618C4646C3264A501E687A81C2DA71E1`.
+- Traceability manifest: `docs/brand/giraffe-vi-v1.2-approved-pdf-derived-raster-manifest.json`, repository copy SHA-256 `94261811698178C804BF6FEA94BD136DA164450A3BD02BE4B14F5F9594F0CA2D`.
+  The manifest's human-readable labels and usage constraints are translated to English; source PDF, extraction-tool, image identities and asset hashes are unchanged. The immediately preceding tracked manifest bytes had SHA-256 `41EFD4377AE884594A2A2F2136F901C04061E84ADBAB23AE663DE38D26FA5DD0`. Earlier documentation recorded `0131A4C0564A5E2AFC3ACC3CE66BF17B618C4646C3264A501E687A81C2DA71E1`; that historical value differs from those tracked bytes and has not been revalidated against the imported source.
 
 The UI renders the independent mark without distortion inside a white, strictly circular base. The approved mark is at least 40px high in the header and 52px on the login screen. ArtCCH, the QC icon, JINÉ/NÉSHA, old Stage 3 UI, `giraffe-icon-tight.png`, screenshots, and JPG sources are excluded. This asset may be called an **approved-PDF-derived raster asset**, never an original vector master; unlimited scaling/print editing still requires brand-owner SVG/AI/EPS/vector-PDF delivery.
 

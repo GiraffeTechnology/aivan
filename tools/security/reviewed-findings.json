@@ -10,7 +10,7 @@
     {
       "rule": "python_urlopen_rule-urllib-urlopen",
       "path": "scripts/run_gpm_llm_api_smoke.py",
-      "sha256": "e06d52c1004180b9a0417feefaf0ae2607373140d99323290c54aa342f86e609",
+      "sha256": "579c75ea31f1a6de4107173989b5e27fce904257607330b99a7d1ddc6abd89fe",
       "count": 3,
       "reason": "Smoke-test destinations are literal localhost or operator-supplied QWEN_BASE_URL; not application request input. Requests retain explicit timeouts. Reviewed at lines 91, 237 and 258."
     },
