@@ -134,8 +134,15 @@ finding cannot inherit an exception.
   test/API destinations or fixed localhost URLs, with explicit timeouts. Their
   URL inputs are not application request input. The generic urllib rule matches
   all such uses. These exact two files account for two and three findings.
-- The web-only JavaScript i18n test reads one constant source-file URL resolved
-  from `import.meta.url`; it does not accept a user-supplied filename.
+- Eight web-only JavaScript runtime tests contain twelve exact filesystem reads
+  of literal application source/template URLs resolved from `import.meta.url`.
+  Inquiry, conversation, upload and clipboard fixtures never control those paths.
+  Each reviewed rule/path is bound to its own whole-file digest and exact count,
+  not a blanket test exclusion. The GPM smoke-script review was refreshed after
+  synthetic request fields changed; its three operator-selected/localhost URL
+  destinations and explicit timeouts are unchanged. Scanner reports retain all
+  seventeen WARNING findings (five urllib calls and twelve source-file reads).
+  Content drift, a new matching occurrence, or an unrelated rule still fails.
 - The main-only `myaivan-direction-policy.yml` uses `pull_request_target` to keep
   its direction guard owned by the base branch. It reads metadata with a read-only
   token, does not check out or execute PR code, and passes untrusted metadata via

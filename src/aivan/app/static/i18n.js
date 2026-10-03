@@ -53,6 +53,9 @@
     '事件时间线': 'Event timeline', '审计记录': 'Audit records', '待审批': 'Pending approval',
     '摘要回执': 'Receipt digest', '案例': 'Case', '已创建': 'created',
     '已进入 Core 工作流': 'Entered the Core workflow', '询盘已写入共享 Core': 'Inquiry recorded in shared Core',
+    '服务器未确认案例创建，请检查输入后重试。': 'The server did not confirm case creation. Check the input and try again.',
+    '请求已受理，请按案例提示继续。': 'The request was accepted. Continue from the case guidance.',
+    '询盘草稿已生成，等待人工审批': 'The inquiry draft was created and is awaiting human approval.',
     '创建失败：': 'Creation failed: ', '已审批，等待人工转发': 'Approved; awaiting manual relay',
     '已审批并产生发送回执': 'Approved with a send receipt', '审批完成': 'Approval complete',
     '审批失败：': 'Approval failed: ', '影响范围：': 'Impact scope: ', '预览失败：': 'Preview failed: ',
@@ -65,6 +68,12 @@
     '只读配置检查': 'Read-only configuration check', '本地模型': 'Local model', '候选版本': 'Candidate version',
     '未冻结': 'Not frozen', '已配置': 'Configured', '待完成': 'Pending',
     '读取健康状态失败：': 'Could not load health status: ', '已复制到剪贴板': 'Copied to clipboard',
+    '确认选定订单': 'Confirm selected order', '订单确认': 'Order confirmation',
+    '已由人工确认': 'Human confirmed', '权威数据库回读已验证': 'Authoritative database readback verified',
+    '确认将当前选定报价写入订单？此操作需要人工授权。': 'Confirm the selected quote as an order? This action requires human authorization.',
+    '订单已恢复并通过数据库回读': 'Order recovered and verified by database readback',
+    '订单已确认并通过数据库回读': 'Order confirmed and verified by database readback',
+    '订单确认失败：': 'Order confirmation failed: ',
     '正在加载翻译…': 'Loading translation…',
     '翻译暂不可用，正在显示权威英文。': 'Translation is unavailable; authoritative English is shown.',
   };
@@ -81,6 +90,10 @@
     '供应商已回复': '供應商已回覆', '等待审批': '等待審批', '已审批': '已審批',
     '采购': '採購', '审批人': '審批人', '审计员': '稽核員', '买家': '買家',
     '供应商': '供應商', '复制': '複製', '审批': '審批', '纠错': '糾錯', '导出审计': '匯出稽核',
+    '服务器未确认案例创建，请检查输入后重试。': '伺服器未確認案例建立，請檢查輸入後重試。',
+    '请求已受理，请按案例提示继续。': '請求已受理，請依案例提示繼續。',
+    '询盘草稿已生成，等待人工审批': '詢盤草稿已建立，等待人工審批',
+    '创建失败：': '建立失敗：',
   };
   const sourceByNode = new WeakMap();
   const generatedCatalogs = {};
@@ -140,10 +153,13 @@
 
   function readLocale() {
     const saved = window.localStorage.getItem('myaivan.locale');
-    return names[saved] ? saved : 'zh';
+    return names[saved] ? saved : 'en';
   }
 
+  const sourceByEnglish = Object.fromEntries(Object.entries(en).map(([source, value]) => [value, source]));
+
   function translate(source) {
+    source = sourceByEnglish[source] || source;
     if (locale === 'zh') return source;
     if (locale === 'zht') return zht[source] || source;
     if (locale === 'en') return en[source] || source;
@@ -166,8 +182,7 @@
       sourceByNode.set(node, original);
       const trimmed = original.trim();
       const translated = translate(trimmed);
-      if (translated !== trimmed) node.nodeValue = original.replace(trimmed, translated);
-      else if (locale === 'zh') node.nodeValue = original;
+      node.nodeValue = original.replace(trimmed, translated);
     });
     document.querySelectorAll('[placeholder]').forEach((node) => {
       const source = node.dataset.i18nPlaceholder || node.getAttribute('placeholder');

@@ -92,12 +92,17 @@ def test_analyze_quote_retries_on_schema_failure_then_succeeds():
         return dict(VALID_OUTPUT)
 
     mock_provider = MagicMock()
+    mock_provider.provider_name = "qwen"
+    mock_provider.model = "qwen-test-model"
     mock_provider.complete_json.side_effect = fake_complete_json
 
     with patch("aivan.llm.gateway.get_provider", return_value=mock_provider):
         result = analyze_quote("SKU-001", 3.75, max_retries=2)
 
     assert result["recommendation"] == "accept"
+    assert result["runtime_status"] == "available"
+    assert result["model_provider"] == "qwen"
+    assert result["model_name"] == "qwen-test-model"
     assert call_count == 2
 
 

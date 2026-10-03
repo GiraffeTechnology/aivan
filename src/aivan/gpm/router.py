@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
+import re
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, ConfigDict, Field
 
 from aivan.gpm.auth import require_auth
+from aivan.gpm.giraffe_db_client import GPM_PACKET_API_VERSION
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
+from aivan.gpm.request_identity import matches_request, request_fingerprint
 from aivan.gpm.record_id import validation_error as record_id_validation_error
 
 logger = logging.getLogger(__name__)
@@ -23,6 +28,7 @@ router = APIRouter()
 # Module-level singletons; replaced in tests via _reset_store().
 _packet_store: GPMPacketStore = GPMPacketStore(db_client=None)
 _db_client = None
+_SAFE_REQUEST_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$")
 
 
 def _reset_store(store: GPMPacketStore) -> None:
@@ -53,26 +59,38 @@ async def require_gpm_tenant(request: Request) -> str:
     """Authenticate a tenant and prohibit production in-memory degradation."""
 
     tenant_id = await require_auth(request)
-    if (
-        os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
-        and not _packet_store.is_durable
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "GPM_PERSISTENCE_UNAVAILABLE",
-                "message": "production GPM requires durable giraffe-db persistence",
-            },
-        )
+    correlation_id = request.headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    _packet_store.ensure_tenant_ready(
+        tenant_id,
+        correlation_id=correlation_id,
+    )
     return tenant_id
 
 
 class QuoteGuidanceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    case_id: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+    quote_id: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
     sku: str
     supplier_id: Optional[str] = None
-    supplier_quote: float
-    currency: str = "USD"
-    quantity: Optional[int] = None
+    supplier_quote: float = Field(ge=0)
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    quantity: Optional[int] = Field(default=None, ge=1)
+    buyer_unit_price: float = Field(ge=0)
+    buyer_total: float = Field(ge=0)
+    supplier_total: float = Field(ge=0)
+    margin_rate: float = Field(ge=0, lt=1)
+    gltg_run_id: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+    )
+    gltg_api_version: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+    )
     evidence_ids: Optional[list[str]] = None
     notes: Optional[str] = None
 
@@ -85,6 +103,7 @@ class ApprovalRequest(BaseModel):
 @router.post("/quote-guidance", status_code=201, response_model=None)
 async def create_quote_guidance(
     body: QuoteGuidanceRequest,
+    request: Request = None,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict | JSONResponse:
     """Analyse a supplier quote and persist the resulting decision packet."""
@@ -97,6 +116,62 @@ async def create_quote_guidance(
         if id_error is not None:
             return JSONResponse(status_code=422, content=id_error)
 
+    headers = request.headers if request is not None else {}
+    idempotency_key = headers.get("Idempotency-Key", "").strip()
+    correlation_id = headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    actor_id = headers.get("X-AIVAN-Actor-ID", "").strip() or None
+    actor_role = headers.get("X-AIVAN-Role", "").strip() or None
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        if not idempotency_key:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "GPM_IDEMPOTENCY_KEY_REQUIRED"},
+            )
+        if not _SAFE_REQUEST_TOKEN.fullmatch(idempotency_key):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "GPM_IDEMPOTENCY_KEY_INVALID"},
+            )
+        if (
+            not actor_id
+            or not actor_role
+            or not _SAFE_REQUEST_TOKEN.fullmatch(actor_id)
+            or not _SAFE_REQUEST_TOKEN.fullmatch(actor_role)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "GPM_ACTOR_CONTEXT_REQUIRED"},
+            )
+    if correlation_id and not _SAFE_REQUEST_TOKEN.fullmatch(correlation_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "GPM_CORRELATION_ID_INVALID"},
+        )
+
+    if idempotency_key:
+        packet_identity = hashlib.sha256(
+            f"{tenant_id}:{idempotency_key}".encode("utf-8")
+        ).hexdigest()[:16]
+        packet_id = f"gpm_pkt_{packet_identity}"
+    else:
+        packet_id = f"gpm_pkt_{uuid.uuid4().hex[:16]}"
+
+    if idempotency_key:
+        previous = _packet_store.get(packet_id, tenant_id=tenant_id, correlation_id=correlation_id)
+        if previous is not None:
+            if previous.get("packet_id") != packet_id:
+                raise HTTPException(status_code=503, detail={"error": "GPM_PERSISTENCE_OUTCOME_UNKNOWN", "packet_id": packet_id})
+            payload = body.model_dump()
+            if not matches_request(previous, payload, tenant_id=tenant_id,
+                                   actor_id=actor_id, actor_role=actor_role):
+                raise HTTPException(status_code=409, detail={"error": "GPM_IDEMPOTENCY_CONFLICT", "packet_id": packet_id})
+            # Keep the originally persisted analysis and source trace. These
+            # transport headers attest replay of the same complete input.
+            return JSONResponse(status_code=201, content=jsonable_encoder(previous), headers={
+                "X-GPM-Replayed": "true", "X-GPM-Request-SHA256": request_fingerprint(
+                    payload, tenant_id=tenant_id, actor_id=actor_id, actor_role=actor_role),
+            })
+
     runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
     if runtime_mode == "mock":
         analysis = mock_quote_analysis(body.sku, body.supplier_quote)
@@ -107,20 +182,46 @@ async def create_quote_guidance(
             currency=body.currency,
             quantity=body.quantity,
         )
+    if analysis.get("runtime_status") == "unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "GPM_MODEL_UNAVAILABLE",
+                "reason": analysis.get("reason", "provider_error"),
+            },
+        )
 
-    packet_id = f"gpm_pkt_{uuid.uuid4().hex[:16]}"
 
     packet: dict = {
         "packet_id": packet_id,
         "tenant_id": tenant_id,
+        "case_id": body.case_id,
+        "quote_id": body.quote_id,
+        "actor_id": actor_id,
+        "actor_role": actor_role,
         "sku": body.sku,
         "supplier_id": body.supplier_id,
         "supplier_quote": body.supplier_quote,
         "currency": body.currency,
         "quantity": body.quantity,
+        "buyer_unit_price": body.buyer_unit_price,
+        "buyer_total": body.buyer_total,
+        "supplier_total": body.supplier_total,
+        "margin_rate": body.margin_rate,
+        "gltg_run_id": body.gltg_run_id,
+        "gltg_api_version": body.gltg_api_version,
         "quote_position": analysis.get("quote_position"),
         "recommendation": analysis.get("recommendation"),
         "confidence": analysis.get("confidence"),
+        "model_result": analysis,
+        "lineage": {
+            "source_trace_id": correlation_id,
+            "case_id": body.case_id,
+            "quote_id": body.quote_id,
+            "supplier_id": body.supplier_id,
+            "gltg_run_id": body.gltg_run_id,
+            "gltg_api_version": body.gltg_api_version,
+        },
         "human_approval_required": True,
         "approval_status": "pending",
         "dispatched": False,
@@ -129,16 +230,31 @@ async def create_quote_guidance(
         "notes": body.notes,
     }
 
-    persisted = _packet_store.save(packet)
+    persisted = _packet_store.save(
+        packet,
+        idempotency_key=idempotency_key or None,
+        correlation_id=correlation_id,
+    )
     return persisted
 
 
 @router.get("/quote-guidance/{packet_id}")
 async def get_quote_guidance(
     packet_id: str,
+    request: Request,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
-    packet = _packet_store.get(packet_id, tenant_id=tenant_id)
+    correlation_id = request.headers.get("X-AIVAN-Trace-ID", "").strip() or None
+    if correlation_id and not _SAFE_REQUEST_TOKEN.fullmatch(correlation_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "GPM_CORRELATION_ID_INVALID"},
+        )
+    packet = _packet_store.get(
+        packet_id,
+        tenant_id=tenant_id,
+        correlation_id=correlation_id,
+    )
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
     if packet.get("tenant_id") != tenant_id:
@@ -155,6 +271,11 @@ async def approve_packet(
     body: ApprovalRequest,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "GPM_DECISION_PATH_DISABLED"},
+        )
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
@@ -188,6 +309,11 @@ async def reject_packet(
     body: ApprovalRequest,
     tenant_id: str = Depends(require_gpm_tenant),
 ) -> dict:
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "GPM_DECISION_PATH_DISABLED"},
+        )
     packet = _packet_store.get(packet_id, tenant_id=tenant_id)
     if packet is None:
         raise HTTPException(status_code=404, detail={"error": "not_found"})
@@ -266,14 +392,16 @@ async def capabilities() -> dict:
         "version": "0.3.0",
         "features": {
             "quote_guidance": True,
-            "approval_workflow": True,
-            "rejection_workflow": True,
+            "approval_workflow": False,
+            "rejection_workflow": False,
+            "stage1_advisory_only": True,
             "durable_packet_persistence": _packet_store.is_durable,
-            "approval_audit_trail": _packet_store.is_durable,
+            "approval_audit_trail": False,
         },
         "persistence": {
             "mode": "giraffe_db" if _packet_store.is_durable else "in_memory_only",
             "restart_safe": _packet_store.is_durable,
+            "expected_api_version": GPM_PACKET_API_VERSION,
         },
         "auth": {
             "mode": auth_mode,

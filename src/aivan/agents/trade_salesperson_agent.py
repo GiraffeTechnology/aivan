@@ -21,6 +21,10 @@ from aivan.execution.event_log import append_event
 from aivan.utils.ids import new_project_id
 from aivan.utils.time_utils import utcnow_iso
 from aivan.utils.tenant import tenant_for_new_record
+from aivan.integrations.language_skill import (
+    LanguageNormalizationRequired, LanguageSkillUnavailable,
+    canonicalize_rfq, canonical_english_text, english_provenance,
+)
 
 @dataclass
 class AgentTurnResult:
@@ -40,6 +44,19 @@ def handle_trade_salesperson_event(
     db_session,
 ) -> AgentTurnResult:
     """Main entry point: handle an incoming OpenClaw event."""
+    try:
+        canonicalization = canonicalize_rfq(
+            event.message_text, source_channel=event.channel,
+            tenant_id=event.tenant_id, sender_role=event.business_role or "buyer",
+        )
+    except LanguageSkillUnavailable:
+        raise LanguageNormalizationRequired() from None
+    if canonicalization is None:
+        raise LanguageNormalizationRequired()
+    event = event.model_copy(update={
+        "message_text": canonical_english_text(canonicalization),
+        "attachments": english_provenance(event.attachments),
+    })
     from aivan.db.repositories.project_repo import ProjectRepository
     project_repo = ProjectRepository(db_session)
 
@@ -75,9 +92,9 @@ def handle_trade_salesperson_event(
     if is_supplier_reply(event):
         return _handle_supplier_reply(event, project_id, project, db_session)
 
-    return _handle_customer_message(event, project_id, project, db_session)
+    return _handle_customer_message(event, project_id, project, db_session, canonicalization)
 
-def _handle_customer_message(event, project_id, project, db_session) -> AgentTurnResult:
+def _handle_customer_message(event, project_id, project, db_session, canonicalization=None) -> AgentTurnResult:
     from aivan.db.repositories.project_repo import ProjectRepository
     project_repo = ProjectRepository(db_session)
 
@@ -95,6 +112,7 @@ def _handle_customer_message(event, project_id, project, db_session) -> AgentTur
         existing_requirement=existing_req,
         project_id=project_id,
         source_channel=event.channel,
+        canonicalization=canonicalization,
     )
 
     project_repo.update_requirement(project_id, req.model_dump())

@@ -96,6 +96,7 @@ function showApp() {
 }
 
 function setView(name) {
+  window.myAivanAttachments?.dispose();
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
   history.replaceState(null, '', `#${name}`);
@@ -146,8 +147,8 @@ async function establishSession() {
     await loadBootstrap();
     await Promise.all([loadCases(true), loadHealth()]);
     const requestedView = location.hash.slice(1);
-    const recoverableViews = ['dashboard', 'cases', 'new-inquiry', 'relay', 'health'];
-    setView(recoverableViews.includes(requestedView) ? requestedView : 'dashboard');
+    const recoverableViews = ['welcome', 'dashboard', 'cases', 'new-inquiry', 'relay', 'health'];
+    setView(recoverableViews.includes(requestedView) ? requestedView : 'welcome');
   } catch (error) {
     if (error.status === 401 || error.status === 403) showLogin();
     else showLogin(t('无法恢复会话，请重新登录。'));
@@ -175,7 +176,7 @@ async function login(event) {
     $('#test-account-banner').hidden = true;
     populateRoles(payload.allowed_roles, payload.role);
     await Promise.all([loadBootstrap(), loadCases(true), loadHealth()]);
-    setView('dashboard');
+    setView('welcome');
   } catch (error) {
     showLogin(error.message);
   } finally {
@@ -275,6 +276,31 @@ function section(title, items, renderer) {
   return `<section class="detail-section"><div class="panel-heading"><h2>${escapeHtml(title)}</h2><span class="count">${items.length}</span></div>${items.length ? `<div class="timeline">${items.map(renderer).join('')}</div>` : emptyHtml()}</section>`;
 }
 
+function buyerOptionRow(option) {
+  const quote = option.quote || {};
+  const leadTime = option.lead_time_estimate || {};
+  const supplier = option.supplier_display_name || option.supplier_id || option.candidate_id || 'Supplier pending confirmation';
+  const warnings = Array.isArray(option.warnings) ? option.warnings : [];
+  return `<article class="draft-card"><div><strong>${escapeHtml(option.option_label || option.option_type || 'Recommendation pending review')}</strong><span>${escapeHtml(supplier)}</span></div>
+    <p>${escapeHtml(option.reasoning || 'No recommendation rationale is available.')}</p>
+    <p>Price: ${escapeHtml(quote.currency || '')} ${escapeHtml(quote.buyer_unit_price ?? 'Unknown')} · Lead time: ${escapeHtml(leadTime.expected_days ?? 'Unknown')}</p>
+    ${warnings.length ? `<p class="error">${escapeHtml(warnings.join(' · '))}</p>` : ''}</article>`;
+}
+
+function savedMessageRow(message) {
+  const resolved = message.body_resolution === 'resolved'
+    && message.canonical_language === 'en'
+    && typeof message.message_text === 'string';
+  let body = 'Message body unavailable: the returned content could not be verified.';
+  if (resolved) body = message.message_text;
+  else if (message.body_resolution === 'missing_legacy_content') {
+    body = 'Message body unavailable: this legacy record contains no recoverable body.';
+  } else if (message.body_resolution === 'integrity_mismatch') {
+    body = 'Message body unavailable: the integrity check failed.';
+  }
+  return `<article><strong>${escapeHtml(roleLabel(message.actor_role))}</strong><p class="saved-message-body"${resolved ? ' lang="en"' : ''}>${escapeHtml(body)}</p><time>${escapeHtml(formatTime(message.created_at))}</time></article>`;
+}
+
 async function openCase(caseId) {
   setView('case-detail');
   $('#case-detail').innerHTML = `<div class="loading-card">${ht('正在读取共享 Core 数据…')}</div>`;
@@ -283,18 +309,39 @@ async function openCase(caseId) {
     state.selectedCase = payload;
     const item = payload.case;
     const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
+    const selected = item.selected_option;
+    const buyerOptions = Array.isArray(item.requirement?.buyer_options) ? item.requirement.buyer_options : [];
+    const orderConfirmation = item.requirement?.order_confirmation;
+    const canConfirmOrder = state.bootstrap.actor.capabilities.includes('approve_outbound')
+      && item.case_state === 'approved'
+      && selected?.option_id
+      && orderConfirmation?.status !== 'confirmed';
+    const recommendation = selected ? `<section class="panel"><h2>Execution recommendation</h2>
+      <div class="person"><strong>${escapeHtml(selected.option_label || selected.option_type || 'Recommendation pending review')}</strong><span>${escapeHtml(selected.supplier_display_name || selected.supplier_id || selected.candidate_id || 'Supplier pending confirmation')}</span></div>
+      <p>${escapeHtml(selected.reasoning || 'No recommendation rationale is available.')}</p>
+      <p>Price: ${escapeHtml(selected.quote?.currency || '')} ${escapeHtml(selected.quote?.buyer_unit_price ?? 'Unknown')} · Lead time: ${escapeHtml(selected.lead_time_estimate?.expected_days ?? 'Unknown')}</p>
+      ${(selected.warnings || []).length ? `<p class="error">${escapeHtml(selected.warnings.join(' · '))}</p>` : ''}
+      ${canConfirmOrder ? `<button class="primary" data-action="confirm-order" data-case-id="${escapeHtml(item.case_id)}" data-option-id="${escapeHtml(selected.option_id)}" type="button">${ht('确认选定订单')}</button>` : ''}</section>` : '';
+    const confirmedOrder = orderConfirmation?.status === 'confirmed'
+      ? `<section class="panel"><h2>${ht('订单确认')}</h2><div class="person"><strong>${ht('已由人工确认')}</strong><span>${escapeHtml(orderConfirmation.purchase_order_id || '')}</span></div><p>${ht('权威数据库回读已验证')} · ${escapeHtml(orderConfirmation.authoritative_source || 'giraffe-db')}</p></section>`
+      : '';
     $('#case-detail').innerHTML = `<section class="case-hero">
       <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
       <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${ht('导出审计')}</a>` : ''}</div>
     </section>
+    ${section('Saved conversation', payload.messages, savedMessageRow)}
+    <section class="panel" id="case-attachments"></section>
     <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
+    ${recommendation}
+    ${confirmedOrder}
+    ${section('Quote options', buyerOptions, buyerOptionRow)}
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
-    ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
     ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
     ${section(t('回执'), payload.receipts, (r) => `<article><strong>${escapeHtml(r.channel)} · ${escapeHtml(r.receipt_id)}</strong><span>${escapeHtml(r.receipt_reference || r.external_message_id || t('摘要回执'))}</span><time>${escapeHtml(formatTime(r.confirmed_at))}</time></article>`)}
     ${section(t('事件时间线'), payload.events, eventRow)}
     ${section(t('审计记录'), payload.audit, (a) => `<article><strong>${escapeHtml(a.event_type)}</strong><span>${escapeHtml(a.actor_role)} · ${escapeHtml(a.actor_id)}</span><code>${escapeHtml(a.source_trace_id)}</code><time>${escapeHtml(formatTime(a.created_at))}</time></article>`)}`;
+    window.myAivanAttachments?.mount($('#case-attachments'), item.case_id, api);
   } catch (error) {
     $('#case-detail').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
@@ -302,9 +349,9 @@ async function openCase(caseId) {
 
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
-  const action = draft.status === 'pending_approval' && canApprove
-    ? `<button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('审批')}</button>` : '';
-  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" type="button">${ht('复制')}</button>${action}</div></article>`;
+  const actions = draft.status === 'pending_approval' && canApprove
+    ? `<button class="secondary compact" data-action="reject" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('拒绝')}</button><button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">Review / approve</button>` : '';
+  return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" data-copy-case-id="${escapeHtml(draft.case_id)}" data-draft-id="${escapeHtml(draft.draft_id)}" data-content-sha256="${escapeHtml(draft.content_sha256)}" type="button">${ht('复制')}</button>${actions}</div></article>`;
 }
 
 function eventRow(event) {
@@ -312,11 +359,51 @@ function eventRow(event) {
   return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
+async function showInquiryConversation(caseId, input, response) {
+  const stream = $('#conversation-stream');
+  const review = $('#outbound-review-content');
+  stream.replaceChildren();
+  for (const [className, text] of [['user-message', input], ['assistant-message', response]]) {
+    const message = document.createElement('p');
+    message.className = `conversation-message ${className}`;
+    message.textContent = text;
+    stream.append(message);
+  }
+  review.textContent = 'Loading saved drafts…';
+  try {
+    const detail = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
+    if (!Array.isArray(detail.drafts)) throw new Error('Invalid draft response');
+    if (detail.drafts.length) review.innerHTML = detail.drafts.map(draftRow).join('');
+    else review.textContent = 'No saved draft is available yet. Open the case for clarification or status.';
+  } catch (_) {
+    review.textContent = 'The input was accepted, but saved drafts could not be loaded. Reopen the case to retry. No message was sent by this view.';
+  }
+}
+
+function inquirySubmissionOutcome(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (payload.status !== 'ok' || typeof payload.project_id !== 'string') return null;
+  const projectId = payload.project_id.trim();
+  if (!projectId) return null;
+  const draftsCreated = payload.drafts_created;
+  const enteredApprovalFlow = payload.action === 'pending_email_approval'
+    && Array.isArray(draftsCreated)
+    && draftsCreated.length > 0
+    && draftsCreated.every((draftId) => typeof draftId === 'string' && draftId.trim());
+  return {
+    projectId,
+    enteredApprovalFlow,
+  };
+}
+
 async function submitInquiry(event) {
   event.preventDefault();
   const buyerId = $('#buyer-id').value.trim();
   const text = $('#inquiry-text').value.trim();
   const conversation = requestId('manual-conversation');
+  const result = $('#inquiry-result');
+  result.hidden = true;
+  result.textContent = '';
   const headers = {
     'X-AIVAN-Participant-ID': buyerId,
     'X-AIVAN-Participant-Role': 'buyer',
@@ -331,23 +418,105 @@ async function submitInquiry(event) {
         sender_display_name: $('#buyer-name').value.trim(), message_text: text,
       }),
     });
-    const result = $('#inquiry-result');
+    const outcome = inquirySubmissionOutcome(payload);
+    if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
     result.hidden = false;
-    result.textContent = `${t('案例')} ${payload.project_id || t('已创建')}\n${payload.user_control_message || payload.message || payload.reply_text || t('已进入 Core 工作流')}`;
-    event.target.reset();
+    const responseMessage = payload.action === 'pending_email_approval' && !outcome.enteredApprovalFlow
+      ? t('请求已受理，请按案例提示继续。')
+      : (payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。'));
+    result.textContent = `${t('案例')} ${outcome.projectId}\n${responseMessage}`;
     await loadCases(true);
-    toast(t('询盘已写入共享 Core'), 'success');
+    if ($('#conversation-stream')) await showInquiryConversation(outcome.projectId, text, responseMessage);
+    if (outcome.enteredApprovalFlow) {
+      event.target.reset();
+      toast(t('询盘草稿已生成，等待人工审批'), 'success');
+    } else {
+      toast(t('请求已受理，请按案例提示继续。'), 'info');
+    }
   } catch (error) {
     toast(`${t('创建失败：')}${error.message}`, 'error');
   }
 }
 
 async function approveDraft(draftId) {
-  try {
-    const payload = await api(`/api/drafts/${encodeURIComponent(draftId)}/approve`, { method: 'POST', body: '{}' });
-    toast(payload.relay_required ? t('已审批，等待人工转发') : (payload.sent ? t('已审批并产生发送回执') : t('审批完成')), 'success');
+  if (!window.myAivanDraftPreview) { toast('The review component is unavailable. Nothing was sent.', 'error'); return; }
+  await window.myAivanDraftPreview.open({draftId, api, onApproved: async () => {
     if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
-  } catch (error) { toast(`${t('审批失败：')}${error.message}`, 'error'); }
+  }});
+}
+
+async function rejectDraft(draftId) {
+  if (!window.confirm(t('确认拒绝当前草稿并返回修订？'))) return;
+  try {
+    await api(`/api/drafts/${encodeURIComponent(draftId)}/reject`, { method: 'POST', body: '{}' });
+    toast(t('已拒绝，案例可继续修订'), 'success');
+    if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
+  } catch (error) { toast(`${t('拒绝失败：')}${error.message}`, 'error'); }
+}
+
+async function confirmOrder(caseId, optionId) {
+  if (!window.confirm(t('确认将当前选定报价写入订单？此操作需要人工授权。'))) return;
+  try {
+    const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}/order-confirmation`, {
+      method: 'POST',
+      body: JSON.stringify({ selected_option_id: optionId }),
+    });
+    toast(payload.recovered ? t('订单已恢复并通过数据库回读') : t('订单已确认并通过数据库回读'), 'success');
+    await openCase(caseId);
+  } catch (error) {
+    toast(`${t('订单确认失败：')}${error.message}`, 'error');
+  }
+}
+
+async function copyDraftText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied to clipboard. This does not send the draft.', 'success');
+    return true;
+  } catch (_) {
+    const field = $('#manual-copy-text');
+    field.value = text;
+    $('#manual-copy-dialog').showModal();
+    field.focus();
+    field.select();
+    toast('Automatic copy was unavailable. Use Ctrl+C or Cmd+C on the selected text.', 'info');
+    return false;
+  }
+}
+
+async function copyAndRecordDraft(button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  let clipboardCompleted = false;
+  try {
+    const text = button.dataset.copy || '';
+    if (!await copyDraftText(text)) return;
+    clipboardCompleted = true;
+    const { copyCaseId, draftId, contentSha256 } = button.dataset;
+    if (!copyCaseId || !draftId || !/^[a-f0-9]{64}$/.test(contentSha256 || '')) {
+      throw new Error('Copy audit identity unavailable');
+    }
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    const actual = Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('');
+    if (actual !== contentSha256) throw new Error('Copy content changed');
+    button.dataset.copyKey ||= requestId('copy');
+    const result = await api(`/api/workbench/cases/${encodeURIComponent(copyCaseId)}/drafts/${encodeURIComponent(draftId)}/copy`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': button.dataset.copyKey },
+      body: JSON.stringify({ content_sha256: contentSha256, ...(button.dataset.previewId ? { preview_id: button.dataset.previewId } : {}) }),
+    });
+    if (result.status !== 'copied' || result.delivery_claim !== false || !result.audit_id) {
+      throw new Error('Copy audit not confirmed');
+    }
+    delete button.dataset.copyKey;
+    toast('Copied and recorded. No message was sent.', 'success');
+  } catch (_) {
+    toast(clipboardCompleted
+      ? 'Copied to clipboard, but the copy audit was not confirmed. Retry or reopen the case. No delivery is claimed.'
+      : 'Copy could not be confirmed. Select the draft text and copy it manually. No delivery is claimed.', 'info');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function showImpact(eventId) {
@@ -376,9 +545,10 @@ async function loadRelay() {
     const payload = await api('/api/relay/outbox');
     list.innerHTML = payload.outbox.length ? payload.outbox.map((item) => `<article class="relay-card">
       <div><span class="status-pill">${escapeHtml(item.channel)}</span><code>${escapeHtml(item.draft_id)}</code></div>
-      <p>${escapeHtml(item.message_text)}</p>
-      <button class="secondary" data-action="copy" data-copy="${escapeHtml(item.message_text)}" type="button">${ht('复制内容')}</button>
-      <form class="relay-confirm" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
+      <p>${escapeHtml(item.copy_payload?.message_text || '')}</p>
+      <p>${escapeHtml(item.render_error || `Target language: ${item.target_language || 'en'}`)}</p>
+      <button class="secondary" ${item.render_error ? 'disabled' : ''} data-preview-id="${escapeHtml(item.preview_id || '')}" data-action="copy" data-copy="${escapeHtml(item.copy_payload?.message_text || '')}" data-copy-case-id="${escapeHtml(item.project_id)}" data-draft-id="${escapeHtml(item.draft_id)}" data-content-sha256="${escapeHtml(item.content_sha256)}" type="button">${ht('复制内容')}</button>
+      <form class="relay-confirm" data-preview-id="${escapeHtml(item.preview_id || '')}" data-content-sha256="${escapeHtml(item.content_sha256 || '')}" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
     </article>`).join('') : emptyHtml();
   } catch (error) { list.innerHTML = `<p class="error">${ht('读取转发队列失败：')}${escapeHtml(error.message)}</p>`; }
 }
@@ -389,7 +559,7 @@ async function confirmRelay(event) {
   const receipt = new FormData(event.target).get('receipt').trim();
   try {
     await api(`/api/relay/${encodeURIComponent(draftId)}/confirm`, {
-      method: 'POST', body: JSON.stringify({ receipt_reference: receipt, metadata: { source: 'myaivan_mobile' } }),
+      method: 'POST', body: JSON.stringify({ receipt_reference: receipt, preview_id: event.target.dataset.previewId || undefined, content_sha256: event.target.dataset.contentSha256 || undefined, metadata: { source: 'myaivan_mobile' } }),
     });
     toast(t('已记录 relayed 回执'), 'success');
     await loadRelay();
@@ -420,10 +590,11 @@ document.addEventListener('click', async (event) => {
   const action = event.target.closest('[data-action]');
   if (!action) return;
   if (action.dataset.action === 'copy') {
-    await navigator.clipboard.writeText(action.dataset.copy || '');
-    toast(t('已复制到剪贴板'), 'success');
+    await copyAndRecordDraft(action);
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
+  if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
+  if (action.dataset.action === 'confirm-order') await confirmOrder(action.dataset.caseId, action.dataset.optionId);
   if (action.dataset.action === 'impact') await showImpact(action.dataset.eventId);
   if (action.dataset.action === 'reverse') await reverseEvent(action.dataset.eventId);
 });
@@ -440,6 +611,16 @@ document.addEventListener('submit', (event) => {
 });
 
 $('#logout-button').addEventListener('click', logout);
+$('#paste-inquiry')?.addEventListener('click', async () => {
+  const field = $('#inquiry-text');
+  try {
+    field.value += await navigator.clipboard.readText();
+    $('#input-status').textContent = 'Pasted into the input. Review before sending to Aivan.';
+  } catch (_) {
+    $('#input-status').textContent = 'Clipboard access is unavailable. Use Ctrl+V or Cmd+V in the input.';
+  }
+  field.focus();
+});
 $('#role-select').addEventListener('change', switchRole);
 $('#case-state-filter').addEventListener('change', () => loadCases(true));
 $('#refresh-cases').addEventListener('click', () => loadCases());

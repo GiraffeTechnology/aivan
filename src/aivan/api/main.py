@@ -36,6 +36,8 @@ from aivan.api.request_context import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.observability.metrics import record_request_metrics, router as _metrics_router
 from aivan.observability.readiness import router as _readiness_router
+from aivan.integrations.language_skill import LanguageNormalizationRequired
+from aivan.integrations.skill_reply import render_skill_reply
 
 logger = logging.getLogger("aivan.api")
 
@@ -77,6 +79,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
 
+from aivan.api.draft_preview_routes import ApprovalRequest, router as draft_preview_router
+app.include_router(draft_preview_router)
 
 def _cors_origins() -> list[str]:
     """Return an explicit CORS allowlist; production defaults to no origins."""
@@ -147,6 +151,17 @@ SKILL_INVOKE_PATHS = frozenset(
 ERROR_REPLY_TEXT = "AIVAN encountered a backend dependency error while processing your request. Please try again later."
 
 
+@app.exception_handler(LanguageNormalizationRequired)
+async def language_normalization_required(request: Request, exc: LanguageNormalizationRequired) -> JSONResponse:
+    """Reject unnormalized intake without persisting or echoing its source."""
+    context = getattr(request.state, "aivan_context", None)
+    trace_id = context.trace_id if context else uuid.uuid4().hex
+    return JSONResponse(status_code=503, content={"detail": {
+        "code": "LANGUAGE_NORMALIZATION_REQUIRED", "trace_id": trace_id,
+        "message": "Canonical English normalization is unavailable. Retry when the language service is ready.",
+    }})
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Fail soft for OpenClaw skill routes; keep normal HTTP semantics elsewhere.
@@ -203,6 +218,7 @@ def _skill_response(result) -> dict:
         data.get("message"),
         "Your request has been received.",
     )
+    reply_text = render_skill_reply(data, reply_text)
     return {**data, "status": "ok", "output": reply_text, "reply_text": reply_text}
 
 
@@ -437,7 +453,7 @@ async def create_rfq_from_event_api(
 
 
 def _do_approve_draft(
-    draft_id: str, db: Session, context: RequestContext
+    draft_id: str, db: Session, context: RequestContext, preview_id: str | None = None
 ) -> dict:
     from aivan.db.repositories.domain_repo import CaseDomainRepository
     from aivan.domain.roles import Capability
@@ -459,9 +475,11 @@ def _do_approve_draft(
             status_code=409,
             detail=f"Draft {draft_id} cannot be approved: current status is '{draft.status}'",
         )
-    from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
+    from aivan.execution.channel_policy import DeliveryMode
 
-    channel_capability = get_channel_capability(draft.channel)
+    from aivan.execution.draft_approval_binding import reviewed_channel, claim_pending_approval
+    from aivan.execution.draft_preview import bind_approval
+    preview, channel_capability = reviewed_channel(db, draft, preview_id, identity, context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.UNSUPPORTED:
         CaseDomainRepository(db).record_audit(
             tenant_id=draft.tenant_id,
@@ -518,14 +536,10 @@ def _do_approve_draft(
         requested_by_actor_id=draft.created_by_actor_id,
         requested_by_actor_role=draft.created_by_actor_role,
     )
-    if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
-        repo.mark_approved_pending_send(draft_id, identity.actor_id)
-        approved_status = "approved_pending_send"
-    else:
-        repo.approve(draft_id, identity.actor_id)
-        approved_status = "approved"
+    approved_status = claim_pending_approval(db, draft, identity.actor_id, channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY)
     draft.approval_id = approval.approval_id
     draft.authorization_basis = identity.authorization_basis
+    bind_approval(db, draft, preview, identity=identity, trace_id=context.trace_id)
     CaseDomainRepository(db).record_audit(
         tenant_id=draft.tenant_id,
         case_id=draft.project_id,
@@ -576,7 +590,7 @@ def _do_approve_draft(
     CaseDomainRepository(db).record_audit(
         tenant_id=draft.tenant_id,
         case_id=draft.project_id,
-        event_type="DRAFT_SENT" if response.success else "DRAFT_SEND_FAILED",
+        event_type="DRAFT_SENT" if response.success else ("DRAFT_DELIVERY_UNCONFIRMED" if response.outcome_uncertain else "DRAFT_SEND_FAILED"),
         identity=identity,
         source_trace_id=context.trace_id,
         before={"draft_id": draft.draft_id, "status": "approved"},
@@ -595,8 +609,9 @@ def _do_approve_draft(
 
 
 def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
-    from aivan.db.repositories.domain_repo import CaseDomainRepository
     from aivan.domain.roles import Capability
+    from aivan.execution.approval_state import DraftStateError
+    from aivan.execution.draft_rejection import reject_draft_atomically
 
     repo = DraftRepository(db)
     draft = repo.get(draft_id, tenant_id=context.tenant_id)
@@ -610,33 +625,26 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
         source_trace_id=context.trace_id,
         db=db,
     )
+    project_repo = ProjectRepository(db)
+    project_repo.get_for_update(draft.project_id, tenant_id=draft.tenant_id)
+    db.refresh(draft)
     if draft.status != "pending_approval":
         raise HTTPException(
             status_code=409,
             detail=f"Draft {draft_id} cannot be rejected: current status is '{draft.status}'",
         )
-    repo.reject(draft_id)
-    CaseDomainRepository(db).record_approval(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        draft_id=draft.draft_id,
-        identity=identity,
-        source_trace_id=context.trace_id,
-        status="rejected",
-        requested_by_actor_id=draft.created_by_actor_id,
-        requested_by_actor_role=draft.created_by_actor_role,
-    )
-    CaseDomainRepository(db).record_audit(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        event_type="DRAFT_REJECTED",
-        identity=identity,
-        source_trace_id=context.trace_id,
-        before={"draft_id": draft.draft_id, "status": "pending_approval"},
-        after={"draft_id": draft.draft_id, "status": "rejected"},
-    )
+    try:
+        outcome = reject_draft_atomically(
+            db=db, draft=draft, identity=identity, source_trace_id=context.trace_id,
+        )
+    except DraftStateError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Draft is no longer pending approval") from exc
     db.commit()
-    return {"draft_id": draft_id, "status": "rejected"}
+    result = {"draft_id": draft_id, "status": outcome.status}
+    if outcome.reopened_case_state is not None:
+        result["case_state"] = outcome.reopened_case_state
+    return result
 
 
 def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
@@ -694,11 +702,11 @@ def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict
 @app.post("/api/openclaw/drafts/{draft_id}/approve")
 def approve_draft(
     draft_id: str,
-    body: dict = None,
+    body: ApprovalRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, db, context)
+    return _do_approve_draft(draft_id, db, context, preview_id=body.preview_id if body else None)
 
 
 @app.post("/api/openclaw/drafts/{draft_id}/reject")
@@ -734,11 +742,11 @@ def get_draft(
 @app.post("/api/drafts/{draft_id}/approve")
 def approve_draft_alias(
     draft_id: str,
-    body: dict = None,
+    body: ApprovalRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, db, context)
+    return _do_approve_draft(draft_id, db, context, preview_id=body.preview_id if body else None)
 
 
 @app.post("/api/drafts/{draft_id}/reject")
@@ -1044,7 +1052,12 @@ def run_project_gltg(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
     giraffe = GiraffeDBClient(db, tenant_id=context.tenant_id).build_context(requirement, customer_id=project.customer_id)
-    simulation = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    simulation = GLTGClient().simulate(
+        requirement,
+        strategy,
+        supplier_count=len(giraffe.suppliers),
+        tenant_id=context.tenant_id,
+    )
     payload["strategy"] = strategy.model_dump()
     payload["gltg_simulation"] = simulation.model_dump()
     project_repo.update_requirement(project_id, payload)

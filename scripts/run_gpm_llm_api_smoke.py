@@ -241,11 +241,19 @@ def test_gpm_api_service(key: str) -> bool:
 
         # quote-guidance（live Qwen）
         payload = json.dumps({
+            "case_id": "case-ci-smoke-001",
+            "quote_id": "quote-ci-smoke-001",
             "sku": "CI-SMOKE-E2E-001",
             "supplier_id": "SUP-CI-01",
             "supplier_quote": 3.75,
             "currency": "USD",
             "quantity": 500,
+            "buyer_unit_price": 4.5,
+            "buyer_total": 2250.0,
+            "supplier_total": 1875.0,
+            "margin_rate": 0.1667,
+            "gltg_run_id": "gltg-ci-smoke-001",
+            "gltg_api_version": "v2",
             "enable_llm_analysis": True,
         }).encode()
 

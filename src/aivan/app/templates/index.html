@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <title>myAIVAN 工作台</title>
+  <title>myAIVAN Workbench</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
   <main id="login-view" class="login-shell">
     <section class="login-card" aria-labelledby="login-title">
       <div class="language-control login-language-control">
-        <button id="login-language-trigger" class="ghost compact language-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="login-language-menu" aria-label="简体中文 — Language">简</button>
+        <button id="login-language-trigger" class="ghost compact language-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="login-language-menu" aria-label="English — Language">EN</button>
         <div id="login-language-menu" class="language-menu" role="menu" aria-label="Language" hidden>
           <button type="button" role="menuitem" data-language="en" aria-label="English">EN</button>
           <button type="button" role="menuitem" data-language="zh" aria-label="简体中文">简</button>
@@ -28,12 +28,12 @@
       </div>
       <span class="giraffe-brand-mark login-logo" aria-hidden="true"><img src="/static/giraffe-logo-graphic-mark-approved-pdf-derived.png" alt=""></span>
       <p class="eyebrow">Giraffe Technology</p>
-      <h1 id="login-title">登录 myAIVAN</h1>
-      <p class="muted">访问凭据仅用于换取 HttpOnly 会话，不会保存在浏览器存储中。</p>
+      <h1 id="login-title">Sign in to myAIVAN</h1>
+      <p class="muted">The access credential is exchanged only for an HttpOnly session and is never stored in browser storage.</p>
       <form id="login-form">
-        <label for="access-key">部署访问凭据</label>
+        <label for="access-key">Deployment access credential</label>
         <input id="access-key" name="access-key" type="password" autocomplete="current-password" required>
-        <button class="primary full" type="submit">安全登录</button>
+        <button class="primary full" type="submit">Secure sign in</button>
       </form>
       <p id="login-error" class="error" role="alert" hidden></p>
     </section>
@@ -41,13 +41,13 @@
 
   <div id="app-shell" class="app-shell" hidden>
     <header class="topbar">
-      <a class="brand" href="#dashboard" aria-label="myAIVAN 首页">
+      <a class="brand" href="#dashboard" aria-label="myAIVAN home">
         <span class="giraffe-brand-mark" aria-hidden="true"><img src="/static/giraffe-logo-graphic-mark-approved-pdf-derived.png" alt=""></span>
         <span><strong>myAIVAN</strong><small>Giraffe Technology</small></span>
       </a>
       <div class="top-actions">
         <div class="language-control">
-          <button id="language-trigger" class="ghost compact language-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="language-menu" aria-label="简体中文 — Language">简</button>
+          <button id="language-trigger" class="ghost compact language-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="language-menu" aria-label="English — Language">EN</button>
           <div id="language-menu" class="language-menu" role="menu" aria-label="Language" hidden>
             <button type="button" role="menuitem" data-language="en" aria-label="English">EN</button>
             <button type="button" role="menuitem" data-language="zh" aria-label="简体中文">简</button>
@@ -61,90 +61,120 @@
           </div>
         </div>
         <label class="role-control" for="role-select">
-          <span>当前角色</span>
-          <select id="role-select" aria-label="切换业务角色"></select>
+          <span>Current role</span>
+          <select id="role-select" aria-label="Switch business role"></select>
         </label>
-        <button id="logout-button" class="ghost" type="button">退出</button>
+        <button id="logout-button" class="ghost" type="button">Sign out</button>
       </div>
     </header>
 
     <div class="workspace">
-      <nav class="sidebar" aria-label="主导航">
-        <button class="nav-item active" data-view="dashboard" type="button"><span aria-hidden="true">◫</span>总览</button>
-        <button class="nav-item" data-view="cases" type="button"><span aria-hidden="true">▤</span>业务案例</button>
-        <button class="nav-item test-account-restricted" data-view="new-inquiry" type="button"><span aria-hidden="true">＋</span>录入询盘</button>
-        <button class="nav-item test-account-restricted" data-view="relay" type="button"><span aria-hidden="true">⇄</span>人工转发</button>
-        <button class="nav-item" data-view="health" type="button"><span aria-hidden="true">♡</span>依赖健康</button>
+      <nav class="sidebar" aria-label="Main navigation">
+        <button class="nav-item active" data-view="dashboard" type="button"><span aria-hidden="true">◫</span>Overview</button>
+        <button class="nav-item" data-view="cases" type="button"><span aria-hidden="true">▤</span>Business cases</button>
+        <button class="nav-item test-account-restricted" data-view="new-inquiry" type="button"><span aria-hidden="true">＋</span>New inquiry</button>
+        <button class="nav-item test-account-restricted" data-view="relay" type="button"><span aria-hidden="true">⇄</span>Guided relay</button>
+        <button class="nav-item" data-view="health" type="button"><span aria-hidden="true">♡</span>Dependency health</button>
       </nav>
 
       <main class="content" id="content">
         <div id="test-account-banner" class="notice warning test-account-banner" role="status" hidden>
           专用测试账号：已跳过常规登录并进入隔离测试租户。生产数据、询盘写入、审批和外发均不可用。
         </div>
-        <section id="view-dashboard" class="view active" aria-labelledby="dashboard-title">
+        <section id="view-welcome" class="view active" aria-labelledby="welcome-title">
+          <div class="panel">
+            <p class="eyebrow">Aivan · Your digital trade assistant</p>
+            <h1 id="welcome-title">Welcome back. What should your AIVAN handle today?</h1>
+            <p>Prepare an inquiry, review a draft, or continue an existing case. You stay in control of commercial decisions and external messages.</p>
+            <div class="row-actions">
+              <button class="primary test-account-restricted" data-open-view="new-inquiry" type="button">Start Working</button>
+              <button class="secondary" data-open-view="cases" type="button">Resume a case</button>
+            </div>
+          </div>
+        </section>
+        <section id="view-dashboard" class="view" aria-labelledby="dashboard-title">
           <div class="page-heading">
-            <div><p class="eyebrow">今日业务</p><h1 id="dashboard-title">运营总览</h1></div>
-            <button class="primary test-account-restricted" data-open-view="new-inquiry" type="button">录入新询盘</button>
+            <div><p class="eyebrow">Today</p><h1 id="dashboard-title">Operations overview</h1></div>
+            <button class="primary test-account-restricted" data-open-view="new-inquiry" type="button">Record inquiry</button>
           </div>
           <div id="candidate-banner" class="candidate-banner"></div>
           <div id="metric-grid" class="metric-grid" aria-live="polite"></div>
           <section class="panel">
-            <div class="panel-heading"><h2>最近更新</h2><button class="link-button" data-open-view="cases" type="button">查看全部</button></div>
-            <div id="recent-cases" class="case-list loading">正在读取案例…</div>
+            <div class="panel-heading"><h2>Recent updates</h2><button class="link-button" data-open-view="cases" type="button">View all</button></div>
+            <div id="recent-cases" class="case-list loading">Loading cases…</div>
           </section>
         </section>
 
         <section id="view-cases" class="view" aria-labelledby="cases-title">
-          <div class="page-heading"><div><p class="eyebrow">Shared Core</p><h1 id="cases-title">业务案例</h1></div></div>
+          <div class="page-heading"><div><p class="eyebrow">Shared Core</p><h1 id="cases-title">Business cases</h1></div></div>
           <div class="toolbar">
-            <label for="case-state-filter">状态筛选</label>
+            <label for="case-state-filter">Status filter</label>
             <select id="case-state-filter">
-              <option value="">全部状态</option>
-              <option value="inquiry">询盘</option><option value="sourcing">寻源</option>
-              <option value="awaiting_supplier">等待供应商</option><option value="supplier_replied">供应商已回复</option>
-              <option value="awaiting_approval">等待审批</option><option value="approved">已审批</option>
-              <option value="qc">质检</option><option value="logistics">物流</option><option value="completed">完成</option>
+              <option value="">All states</option>
+              <option value="inquiry">Inquiry</option><option value="sourcing">Sourcing</option>
+              <option value="awaiting_supplier">Awaiting supplier</option><option value="supplier_replied">Supplier replied</option>
+              <option value="awaiting_approval">Awaiting approval</option><option value="approved">Approved</option>
+              <option value="qc">Quality control</option><option value="logistics">Logistics</option><option value="completed">Completed</option>
             </select>
-            <button id="refresh-cases" class="secondary" type="button">刷新</button>
+            <button id="refresh-cases" class="secondary" type="button">Refresh</button>
           </div>
           <div id="case-list" class="case-list"></div>
-          <div class="pagination"><button id="prev-page" class="ghost" type="button">上一页</button><span id="page-summary"></span><button id="next-page" class="ghost" type="button">下一页</button></div>
+          <div class="pagination"><button id="prev-page" class="ghost" type="button">Previous</button><span id="page-summary"></span><button id="next-page" class="ghost" type="button">Next</button></div>
         </section>
 
         <section id="view-case-detail" class="view" aria-labelledby="case-detail-title">
-          <button class="back-button" data-open-view="cases" type="button">← 返回案例</button>
+          <button class="back-button" data-open-view="cases" type="button">← Back to cases</button>
           <div id="case-detail" class="detail-layout"></div>
         </section>
 
         <section id="view-new-inquiry" class="view" aria-labelledby="new-inquiry-title">
-          <div class="page-heading"><div><p class="eyebrow">Human-in-the-loop</p><h1 id="new-inquiry-title">录入买家询盘</h1></div></div>
+          <div class="page-heading"><div><p class="eyebrow">Aivan digital trade assistant</p><h1 id="new-inquiry-title">Start a buyer inquiry</h1></div></div>
+          <section class="panel conversation-panel" aria-labelledby="conversation-title">
+            <h2 id="conversation-title">Conversation</h2>
+            <p class="muted">This view shows the current submission. Reopen a saved case to inspect its available database records.</p>
+            <div id="conversation-stream" class="conversation-stream" role="log" aria-live="polite" aria-relevant="additions"></div>
+          </section>
+          <section id="outbound-review" class="panel conversation-panel" aria-labelledby="outbound-review-title">
+            <h2 id="outbound-review-title">Outbound draft review</h2>
+            <p class="muted">Review recipients, prices, dates and commitments. Copying a draft does not send it.</p>
+            <div id="outbound-review-content" aria-live="polite">Submit an inquiry to load its saved drafts.</div>
+          </section>
           <form id="inquiry-form" class="panel form-grid">
-            <div><label for="buyer-id">买家标识</label><input id="buyer-id" required placeholder="buyer-001"></div>
-            <div><label for="buyer-name">买家名称</label><input id="buyer-name" placeholder="客户或公司名称"></div>
-            <div class="span-2"><label for="inquiry-text">询盘原文</label><textarea id="inquiry-text" rows="8" required placeholder="粘贴中文、英文或其他语言的原始询盘…"></textarea></div>
-            <div class="span-2 attachment-placeholder" aria-label="附件功能状态"><strong>附件 / 语音</strong><span>当前候选仅提供元数据占位；对象存储授权与恶意内容扫描未完成前禁止上传。</span></div>
-            <div class="span-2 form-actions"><button class="primary" type="submit">创建案例并生成待审批草稿</button></div>
+            <div><label for="buyer-id">Buyer reference</label><input id="buyer-id" required placeholder="buyer-001"></div>
+            <div><label for="buyer-name">Buyer name</label><input id="buyer-name" placeholder="Contact or company name"></div>
+            <div class="span-2"><label for="inquiry-text">Your inquiry</label><textarea id="inquiry-text" rows="6" required placeholder="Type or paste the buyer inquiry here."></textarea></div>
+            <div class="span-2 form-actions"><button class="secondary" id="paste-inquiry" type="button">Paste</button><button class="ghost" type="button" disabled title="Voice transcription is not available">Voice unavailable</button><button class="primary" type="submit">Send to Aivan</button></div>
+            <p class="span-2 muted" id="input-status" role="status">To upload a TXT file or PNG/JPEG image, first save a complete inquiry and open its case. Sending here does not send a message to a customer.</p>
           </form>
           <pre id="inquiry-result" class="result" aria-live="polite" hidden></pre>
         </section>
 
         <section id="view-relay" class="view" aria-labelledby="relay-title">
-          <div class="page-heading"><div><p class="eyebrow">Guided Relay</p><h1 id="relay-title">微信 / 旺旺人工转发</h1></div></div>
-          <div class="notice">AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。</div>
+          <div class="page-heading"><div><p class="eyebrow">Guided Relay</p><h1 id="relay-title">WeChat / WangWang guided relay</h1></div></div>
+          <div class="notice">AIVAN creates relay cards only. A person must copy, send in the destination client, and enter the receipt; the system never sends personal IM automatically.</div>
           <div id="relay-list" class="case-list"></div>
         </section>
 
         <section id="view-health" class="view" aria-labelledby="health-title">
-          <div class="page-heading"><div><p class="eyebrow">Release Readiness</p><h1 id="health-title">依赖健康</h1></div></div>
+          <div class="page-heading"><div><p class="eyebrow">Release Readiness</p><h1 id="health-title">Dependency health</h1></div></div>
           <div id="health-grid" class="health-grid"></div>
-          <div class="notice warning">此页面只显示配置状态，不主动连接外部依赖，也不替代 CTYun、桥接、备份恢复和真机五轮验收证据。</div>
+          <div class="notice warning">This page shows configuration status only. It does not connect to external dependencies or replace CTYun, bridge, backup-restore, and five-round device evidence.</div>
         </section>
       </main>
     </div>
   </div>
 
-  <template id="empty-template"><div class="empty"><strong>暂无数据</strong><span>当前筛选条件下没有可显示的记录。</span></div></template>
+  <template id="empty-template"><div class="empty"><strong>No data</strong><span>No records match the current filter.</span></div></template>
+  <dialog id="manual-copy-dialog" aria-labelledby="manual-copy-title">
+    <h2 id="manual-copy-title">Copy draft manually</h2>
+    <p>Select the text and use Ctrl+C or Cmd+C. Copying does not send a message.</p>
+    <label for="manual-copy-text">Draft body</label>
+    <textarea id="manual-copy-text" rows="8" readonly></textarea>
+    <form method="dialog"><button class="secondary" type="submit">Close</button></form>
+  </dialog>
   <script src="/static/i18n.js" defer></script>
+  <script src="/static/attachments.js" defer></script>
+  <script src="/static/draft-preview.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

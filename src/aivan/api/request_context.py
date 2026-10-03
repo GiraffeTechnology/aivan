@@ -42,6 +42,24 @@ def _header(request: Request, name: str) -> str:
     return request.headers.get(name, "").strip()
 
 
+def _credential_matches(provided: str, expected: str) -> bool:
+    """Compare ASCII HTTP credentials without allowing Unicode to raise.
+
+    Starlette decodes raw header bytes as latin-1.  Passing a resulting
+    non-ASCII ``str`` to ``secrets.compare_digest`` raises ``TypeError`` and
+    previously turned invalid credentials into an HTTP 500.  Credentials on
+    this boundary are ASCII-only; reject every other value before the
+    constant-time byte comparison.
+    """
+
+    try:
+        provided_bytes = provided.encode("ascii")
+        expected_bytes = expected.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return secrets.compare_digest(provided_bytes, expected_bytes)
+
+
 def _safe_identifier(value: str, *, field: str, required: bool = False) -> str:
     value = (value or "").strip()
     if not value:
@@ -186,11 +204,11 @@ def resolve_request_context(request: Request, *, allow_ui_session: bool = True) 
                     detail={"error": "TENANT_REQUIRED", "field": "tenant_id"},
                 )
             expected = tenant_keys.get(tenant_id, "")
-            if not expected or not secrets.compare_digest(provided, expected):
+            if not expected or not _credential_matches(provided, expected):
                 raise HTTPException(status_code=403, detail={"error": "INVALID_API_KEY"})
         elif not (
-            (api_key and secrets.compare_digest(provided, api_key))
-            or (auth_secret and secrets.compare_digest(provided, auth_secret))
+            (api_key and _credential_matches(provided, api_key))
+            or (auth_secret and _credential_matches(provided, auth_secret))
         ):
             raise HTTPException(status_code=403, detail={"error": "INVALID_API_KEY"})
 

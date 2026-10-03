@@ -15,6 +15,7 @@ from aivan.integrations.language_skill_client import LanguageSkillClient
 
 SUPPORTED_TARGETS = {"en", "zh", "zht", "fr", "es", "de", "ko", "ja"}
 GENERATED_TARGETS = {"fr", "es", "de", "ko", "ja"}
+TRANSLATED_TARGETS = SUPPORTED_TARGETS - {"en"}
 
 
 class TranslationUnavailable(RuntimeError):
@@ -44,8 +45,8 @@ def translate_authoritative_english(
 ) -> OutboundTranslation:
     """Generate a target translation from authoritative English only."""
     target = target_language.strip().lower()
-    if target not in GENERATED_TARGETS:
-        raise ValueError("dedicated generation is only valid for FR/ES/DE/KO/JA")
+    if target not in TRANSLATED_TARGETS:
+        raise ValueError("dedicated generation requires a supported non-English target")
     source = canonical_english.strip()
     if not source:
         raise ValueError("canonical English source is required")

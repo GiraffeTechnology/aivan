@@ -1,11 +1,18 @@
 from __future__ import annotations
+import hashlib
 
 
-def serialize_draft(draft) -> dict:
+def draft_type_from_notes(draft) -> str:
+    """Return the persisted draft type encoded by the existing notes contract."""
     draft_type = ""
     for part in (draft.notes or "").split():
         if part.startswith("draft_type="):
             draft_type = part.split("=", 1)[1]
+    return draft_type
+
+
+def serialize_draft(draft) -> dict:
+    draft_type = draft_type_from_notes(draft)
     return {
         "draft_id": draft.draft_id,
         "tenant_id": draft.tenant_id,
@@ -16,6 +23,7 @@ def serialize_draft(draft) -> dict:
         "target_peer_id": draft.target_peer_id,
         "target_role": draft.target_role,
         "message_text": draft.message_text,
+        "content_sha256": hashlib.sha256(draft.message_text.encode("utf-8")).hexdigest(),
         "message_type": draft.message_type,
         "attachments": draft.attachments_json or [],
         "status": draft.status,

@@ -54,6 +54,11 @@ def _product_label(req: dict, zh: bool) -> str:
     return base
 
 
+def render_canonical_operator_reply(result: RFQExecutionResult) -> str:
+    """English workflow/audit text; recipient rendering must not be persisted."""
+    return _render_operator_reply(result, False)
+
+
 def render_operator_reply(result: RFQExecutionResult, language: str = "") -> str:
     """Render the operator-facing reply for an RFQ execution result."""
     target_language = _target_language(result, language)

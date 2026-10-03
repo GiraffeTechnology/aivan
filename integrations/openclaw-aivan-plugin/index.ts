@@ -755,6 +755,7 @@ export function register(api: any): void {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async runAttempt(params: any): Promise<any> {
+        let matchedTrade = false;
         try {
           const prompt = extractPrompt(params);
 
@@ -772,6 +773,7 @@ export function register(api: any): void {
             return buildPassThroughResult(params);
           }
 
+          matchedTrade = true;
           const ctx = extractSessionContext(params);
           const stableMessageId =
             ctx.message_id ??
@@ -814,17 +816,14 @@ export function register(api: any): void {
             process.stderr.write(
               `[aivan] AIVAN fetch error: ${String(fetchErr)}\n`
             );
-            return buildPassThroughResult(params);
+            return buildNoOutboundResult(params);
           }
 
           if (!result.accepted) {
             process.stderr.write(
               `[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`
             );
-            if (result.reply_text) {
-              return buildNoOutboundResult(params);
-            }
-            return buildPassThroughResult(params);
+            return buildNoOutboundResult(params);
           }
 
           const replyText =
@@ -841,7 +840,9 @@ export function register(api: any): void {
           process.stderr.write(
             `[aivan] runAttempt unexpected error: ${String(err)}\n`
           );
-          return buildPassThroughResult(params);
+          return matchedTrade
+            ? buildNoOutboundResult(params)
+            : buildPassThroughResult(params);
         }
       },
     });

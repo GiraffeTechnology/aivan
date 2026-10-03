@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +20,25 @@ from aivan.schemas.rfq import RFQStrategy
 
 
 @pytest.fixture(autouse=True)
+def _explicit_unit_supplier_dataset(monkeypatch):
+    """Bind test-only demo inputs independently of source vs wheel layout.
+
+    Production packages deliberately omit demo suppliers. This fixture does not
+    enable production stubs or claim a real private-data service acceptance.
+    """
+    from aivan.integrations import giraffe_db
+
+    fixture_path = Path(__file__).resolve().parents[1] / "data/demo/stub_suppliers.json"
+    assert fixture_path.is_file()
+    monkeypatch.setattr(giraffe_db, "_STUB_SUPPLIERS_PATH", fixture_path)
+    giraffe_db._load_stub_supplier_data.cache_clear()
+    try:
+        yield
+    finally:
+        giraffe_db._load_stub_supplier_data.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _language_skill_resolves_canonical_fields(monkeypatch):
     """These integration tests assume the language skill is available.
 
@@ -31,10 +51,12 @@ def _language_skill_resolves_canonical_fields(monkeypatch):
     from aivan.agents import requirement_agent
 
     real = rfqe.structure_customer_requirement_with_llm
+    monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
 
     def canonicalize(raw_text: str, **kwargs):
         if "白色纯棉衬衣" not in raw_text and "温哥华" not in raw_text:
-            return None
+            return {"normalize": {"raw_text": raw_text, "canonical_language": "en",
+                                  "canonical_text": raw_text}, "structure": None}
         return {
             "normalize": {
                 "raw_text": raw_text,
@@ -86,6 +108,7 @@ def _language_skill_resolves_canonical_fields(monkeypatch):
         return req
 
     monkeypatch.setattr(requirement_agent, "canonicalize_rfq", canonicalize)
+    monkeypatch.setattr(rfqe, "canonicalize_rfq", canonicalize)
     monkeypatch.setattr(rfqe, "structure_customer_requirement_with_llm", wrapped)
     yield
 
@@ -186,12 +209,10 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert payload["strategy"]["priority"] == "speed"
     assert payload["gltg_simulation"]["p80_days"] > 0
     assert payload["drafts_created"]
-    # The user command is Chinese, so the operator summary is rendered in Chinese.
+    # Persisted workflow text is English; recipient rendering is separate.
     user_control_message = payload["user_control_message"]
     assert (
-        "pending approval" in user_control_message.lower()
-        or "等待人工审批" in user_control_message
-        or "仍需人工审批" in user_control_message
+        "pending human approval" in user_control_message.lower()
     )
 
     drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
@@ -207,7 +228,7 @@ def test_create_rfq_from_user_command_creates_pending_email_drafts(api_client):
     assert "outbound_authorization=required" in user_notifications[0]["notes"]
 
 
-def test_chinese_user_control_message_is_localized_and_pending_approval():
+def test_source_language_does_not_localize_persisted_approval_summary():
     import types
 
     from aivan.execution.rfq_execution import _build_user_control_message
@@ -230,13 +251,13 @@ def test_chinese_user_control_message_is_localized_and_pending_approval():
         requirement, strategy, gltg, routing, ["draft_1", "draft_2"]
     )
 
-    # Chinese operator summary must still signal that the outbound drafts are
-    # blocked on human approval.
-    assert "等待人工审批" in message or "仍需人工审批" in message
+    # Persisted work text stays English even for a Chinese recipient.
+    assert "pending approval" in message
+    assert not any("\u4e00" <= char <= "\u9fff" for char in message)
     assert "Tokyo" in message
 
 
-def test_giraffe_db_graph_persist_failure_does_not_block_pending_drafts(api_client, api_db, monkeypatch):
+def test_giraffe_db_graph_persist_failure_blocks_pending_drafts(api_client, api_db, monkeypatch):
     import aivan.execution.rfq_execution as rfq_execution
 
     def fail_persist(**kwargs):
@@ -248,13 +269,12 @@ def test_giraffe_db_graph_persist_failure_does_not_block_pending_drafts(api_clie
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["action"] == "pending_email_approval"
-    assert payload["drafts_created"]
+    assert payload["action"] == "pending_dependency_recovery"
+    assert payload["drafts_created"] == []
 
     drafts = api_client.get(f"/api/projects/{payload['project_id']}/drafts").json()["drafts"]
     supplier_drafts = [draft for draft in drafts if draft["target_role"] == "supplier"]
-    assert supplier_drafts
-    assert {draft["status"] for draft in supplier_drafts} == {"pending_approval"}
+    assert supplier_drafts == []
 
     from aivan.db.repositories.event_repo import ExecutionEventRepository
 
@@ -410,6 +430,9 @@ def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_c
 
     project = api_client.get(f"/api/projects/{created['project_id']}").json()
     assert project["requirement"]["supplier_replies"][0]["unit_price"] == 4.5
+    assert project["requirement"]["supplier_replies"][0]["source_event_id"] == (
+        "openclaw:wechat::supplier_reply_thread_001:supplier_reply_msg_001"
+    )
     assert project["requirement"]["lead_time_estimates"][0]["expected_days"] > 0
     assert project["requirement"]["buyer_options"]
     assert project["selected_option"]["quote"]["buyer_unit_price"] > 0
@@ -423,6 +446,240 @@ def test_supplier_reply_invokes_quote_option_and_customer_email_draft_path(api_c
     events = api_client.get(f"/api/projects/{created['project_id']}/events").json()["events"]
     assert any(event["event_type"] == "SUPPLIER_REPLY_PARSED" for event in events)
     assert any(event["event_type"] == "BUYER_OPTIONS_GENERATED" for event in events)
+
+
+def test_supplier_reply_propagates_project_tenant_to_both_gltg_calls(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    expected_tenant = os.environ["AIVAN_TEST_TENANT_ID"]
+    captured = {}
+    real_estimate = rfq_execution.calculate_leadtime_for_requirement
+    real_simulate = rfq_execution.GLTGClient.simulate
+
+    def estimate(*args, **kwargs):
+        captured["estimate_tenant"] = kwargs.get("tenant_id")
+        return real_estimate(*args, **kwargs)
+
+    def simulate(self, *args, **kwargs):
+        captured["simulate_tenant"] = kwargs.get("tenant_id")
+        return real_simulate(self, *args, **kwargs)
+
+    monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", estimate)
+    monkeypatch.setattr(rfq_execution.GLTGClient, "simulate", simulate)
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_tenant_propagation",
+            "message_id": "supplier_reply_tenant_propagation_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured == {
+        "estimate_tenant": expected_tenant,
+        "simulate_tenant": expected_tenant,
+    }
+
+
+def test_gpm_unavailable_is_visible_and_creates_no_customer_approval_draft(
+    api_client, monkeypatch
+):
+    from aivan.integrations.gpm_guidance_client import (
+        GPMGuidanceClient,
+        GPMGuidanceUnavailableError,
+    )
+
+    def unavailable(*args, **kwargs):
+        raise GPMGuidanceUnavailableError("GPM_HTTP_503")
+
+    monkeypatch.setattr(GPMGuidanceClient, "create_guidance", unavailable)
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_gpm_down",
+            "message_id": "supplier_reply_gpm_down_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": (
+                "We can quote USD 4.50/pc, MOQ 5000 pcs, daily capacity "
+                "500 pcs, lead time 35 days, FOB Guangzhou."
+            ),
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "gpm_guidance_unavailable"
+    assert payload["drafts_created"] == []
+    assert payload["requirement"]["gpm_guidance"] == {
+        "status": "unavailable",
+        "error": "GPM_HTTP_503",
+    }
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["selected_option"] is None
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+    events = api_client.get(f"/api/projects/{created['project_id']}/events").json()["events"]
+    assert any(event["event_type"] == "GPM_GUIDANCE_UNAVAILABLE" for event in events)
+
+
+def test_supplier_reply_gltg_estimate_failure_is_structured_and_creates_no_draft(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+    from aivan.integrations.gltg import GLTGUnavailableError
+
+    def unavailable(*args, **kwargs):
+        raise GLTGUnavailableError("GLTG_EVIDENCE_NOT_FOUND")
+
+    monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", unavailable)
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_gltg_evidence_down",
+            "message_id": "supplier_reply_gltg_evidence_down_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "pending_dependency_recovery"
+    assert payload["drafts_created"] == []
+    assert "GLTG" in payload["user_control_message"]
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+
+
+def test_supplier_reply_gltg_summary_failure_is_structured_and_creates_no_draft(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+    from aivan.integrations.gltg import GLTGUnavailableError
+
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+
+    def unavailable(*args, **kwargs):
+        raise GLTGUnavailableError("GLTG_TIMEOUT")
+
+    monkeypatch.setattr(rfq_execution.GLTGClient, "simulate", unavailable)
+
+    response = api_client.post(
+        "/api/openclaw/events",
+        json={
+            "source": "openclaw",
+            "channel": "wechat",
+            "conversation_id": "supplier_reply_gltg_summary_down",
+            "message_id": "supplier_reply_gltg_summary_down_001",
+            "sender_id": "supplier_001",
+            "sender_display_name": "Guangzhou Trendy Garment",
+            "project_id": created["project_id"],
+            "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+            "role_context": "supplier",
+            "mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["action"] == "pending_dependency_recovery"
+    assert payload["drafts_created"] == []
+    assert "GLTG" in payload["user_control_message"]
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    assert not [draft for draft in drafts if draft["draft_type"] == "customer_quote_email"]
+
+
+def test_supplier_reply_gltg_failure_supersedes_stale_quote_and_selection(
+    api_client, monkeypatch
+):
+    from aivan.execution import rfq_execution
+    from aivan.integrations.gltg import GLTGUnavailableError
+
+    created = api_client.post("/api/rfq/create-from-event", json=_customer_email_event()).json()
+    first_reply = {
+        "source": "openclaw",
+        "channel": "wechat",
+        "conversation_id": "supplier_reply_before_gltg_failure",
+        "message_id": "supplier_reply_before_gltg_failure_001",
+        "sender_id": "supplier_001",
+        "sender_display_name": "Guangzhou Trendy Garment",
+        "project_id": created["project_id"],
+        "message_text": "USD 4.50/pc, MOQ 5000, lead time 35 days.",
+        "role_context": "supplier",
+        "mode": "auto",
+    }
+    first = api_client.post("/api/openclaw/events", json=first_reply)
+    assert first.status_code == 200, first.text
+    assert first.json()["action"] == "buyer_options_ready"
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["selected_option"] is not None
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    old_quote = next(
+        draft
+        for draft in drafts
+        if draft["draft_type"] == "customer_quote_email"
+        and draft["status"] == "pending_approval"
+    )
+    assert old_quote
+    assert any(
+        draft["draft_type"] == "customer_quote_email"
+        and draft["status"] == "pending_approval"
+        for draft in drafts
+    )
+
+    def unavailable(*args, **kwargs):
+        raise GLTGUnavailableError("GLTG_EVIDENCE_NOT_FOUND")
+
+    monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", unavailable)
+    second_reply = dict(first_reply)
+    second_reply["message_id"] = "supplier_reply_before_gltg_failure_002"
+    second_reply["message_text"] = "Updated quote USD 4.20/pc, lead time 34 days."
+    failed = api_client.post("/api/openclaw/events", json=second_reply)
+
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["action"] == "pending_dependency_recovery"
+    project = api_client.get(f"/api/projects/{created['project_id']}").json()
+    assert project["selected_option"] is None
+    drafts = api_client.get(f"/api/projects/{created['project_id']}/drafts").json()["drafts"]
+    old_quote = next(
+        draft for draft in drafts if draft["draft_id"] == old_quote["draft_id"]
+    )
+    assert old_quote["status"] == "superseded"
+    assert not [
+        draft
+        for draft in drafts
+        if draft["draft_type"] == "customer_quote_email"
+        and draft["status"] == "pending_approval"
+    ]
+    approval = api_client.post(f"/api/drafts/{old_quote['draft_id']}/approve", json={})
+    assert approval.status_code == 409, approval.text
 
 
 def test_customer_personal_im_without_actor_requires_owner_resolution(api_client):

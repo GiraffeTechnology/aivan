@@ -128,6 +128,30 @@ const degraded = await harness.runAttempt(trade);
 assert("HTTP 200 fail-soft result remains local and does not auto-reply", degraded.assistantTexts.length === 0 && degraded.didSendViaMessagingTool === true);
 globalThis.fetch = originalFetch;
 
+// Matched trade events must never unlock automatic downstream replies on failure.
+function noOutbound(result) {
+  return result.aivanHandled === true && result.didSendViaMessagingTool === true &&
+    result.outboundAuthorization === "required" && result.assistantTexts.length === 0 &&
+    result.messagingToolSentTexts.length === 0 && result.messagingToolSentMediaUrls.length === 0 &&
+    result.messagingToolSentTargets.length === 0;
+}
+try {
+  for (const status of [401, 403, 409, 422, 503]) {
+    globalThis.fetch = async () => new Response(JSON.stringify({ detail: "Controlled dependency failure" }), {
+      status, headers: { "Content-Type": "application/json" },
+    });
+    assert(`matched HTTP ${status} failure suppresses automatic outbound fallback`, noOutbound(await harness.runAttempt(trade)));
+  }
+  globalThis.fetch = async () => { throw new Error("Controlled transport failure"); };
+  assert("matched transport failure suppresses automatic outbound fallback", noOutbound(await harness.runAttempt(trade)));
+  let contextFetches = 0;
+  globalThis.fetch = async () => { contextFetches += 1; throw new Error("Unexpected request"); };
+  const invalidContext = { ...trade, get senderId() { throw new Error("Controlled context failure"); } };
+  assert("matched context failure suppresses automatic outbound fallback", noOutbound(await harness.runAttempt(invalidContext)) && contextFetches === 0);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 await new Promise((resolve) => server.close(resolve));
 console.log(`GATEWAY STAGE3 TEST: ${failed === 0 ? "PASS" : "FAIL"} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);

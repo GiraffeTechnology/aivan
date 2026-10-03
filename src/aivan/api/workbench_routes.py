@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, ConfigDict, Field
 
 from aivan.api.request_context import (
     RequestContext,
@@ -23,6 +26,9 @@ from aivan.db.models.execution import ExecutionEventRecord
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.db.models.project import Project
 from aivan.db.models.relay import RelayReceiptRecord
+from aivan.db.repositories.domain_repo import CaseDomainRepository
+from aivan.db.repositories.event_repo import ExecutionEventRepository
+from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.session import get_db
 from aivan.domain.roles import (
     BusinessRole,
@@ -32,6 +38,11 @@ from aivan.domain.roles import (
     require_capability,
 )
 from aivan.app.ui_catalog import catalog_version, ready_locales
+from aivan.execution.conversation_history import resolve_canonical_message
+from aivan.integrations.order_confirmation import (
+    GiraffeDBOrderConfirmationClient,
+    OrderConfirmationError,
+)
 
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"])
@@ -118,6 +129,7 @@ def _serialize_draft(record: InquiryDraftRecord) -> dict:
         "channel": record.channel,
         "status": record.status,
         "message_text": record.message_text,
+        "content_sha256": hashlib.sha256(record.message_text.encode("utf-8")).hexdigest(),
         "message_type": record.message_type,
         "attachments": record.attachments_json or [],
         "approval_id": record.approval_id,
@@ -148,7 +160,7 @@ def bootstrap(context: RequestContext = Depends(_context)):
             "guided_relay": True,
             "event_correction": True,
             "audit_export": Capability.VIEW_AUDIT in ROLE_CAPABILITIES[identity.business_role],
-            "attachments": "metadata_only",
+            "attachments": "db_backed_selected_case" if os.environ.get("GIRAFFE_DB_BASE_URL") else "unavailable",
         },
     }
 
@@ -289,6 +301,7 @@ def get_case_detail(
                 "payload_digest": item.payload_digest,
                 "content_reference": f"aivan://message-evidence/{item.message_record_id}/v1",
                 "content_version": 1,
+                **resolve_canonical_message(item, events),
                 "source_trace_id": item.source_trace_id,
                 "created_at": _iso(item.created_at),
             }
@@ -348,6 +361,291 @@ def get_case_detail(
     }
 
 
+class DraftCopyCompletion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    preview_id: str | None = Field(default=None, pattern=r"^render_[a-f0-9]{32}$")
+
+
+@router.post("/cases/{case_id}/drafts/{draft_id}/copy")
+def record_draft_copy(
+    case_id: str, draft_id: str, body: DraftCopyCompletion,
+    db: Session = Depends(get_db), context: RequestContext = Depends(_context),
+):
+    """Record a user's clipboard completion report, not provider delivery."""
+    _get_case(db, context, case_id)
+    identity = _identity(context)
+    if identity.business_role == BusinessRole.AUDITOR:
+        raise HTTPException(status_code=403, detail={"error": "COPY_AUDIT_READ_ONLY"})
+    if not context.idempotency_key:
+        raise HTTPException(status_code=400, detail={"error": "IDEMPOTENCY_KEY_REQUIRED"})
+    ProjectRepository(db).get_for_update(case_id, tenant_id=context.tenant_id)
+    draft = db.query(InquiryDraftRecord).filter_by(
+        tenant_id=context.tenant_id, project_id=case_id, draft_id=draft_id,
+    ).execution_options(populate_existing=True).first()
+    if (draft is None or (identity.business_role not in _INTERNAL_ROLES
+                         and draft.target_role != identity.business_role.value)):
+        raise HTTPException(status_code=404, detail={"error": "DRAFT_NOT_FOUND"})
+    preview_evidence = {}
+    from aivan.execution.draft_preview import PreviewError, latest_preview, verify_preview
+    if body.preview_id:
+        try:
+            preview, rendered = verify_preview(db, draft, body.preview_id)
+        except PreviewError as exc:
+            raise HTTPException(exc.status_code, detail={"error": exc.code}) from None
+        digest = rendered.rendered_sha256
+        preview_evidence = {"preview_id": preview.audit_id, **rendered.fingerprints()}
+    else:
+        previous = latest_preview(db, draft)
+        if previous is not None and previous.after_json.get("target_language") != "en":
+            raise HTTPException(409, detail={"error": "DRAFT_LOCALIZED_PREVIEW_REQUIRED"})
+        digest = hashlib.sha256(draft.message_text.encode("utf-8")).hexdigest()
+    if body.content_sha256 != digest:
+        raise HTTPException(status_code=409, detail={"error": "DRAFT_COPY_VERSION_MISMATCH"})
+    key = hashlib.sha256(
+        f"{context.tenant_id}\0{identity.actor_id}\0{context.idempotency_key}\0copy".encode()
+    ).hexdigest()[:56]
+    audit_id = f"copy_{key}"
+    evidence = {"draft_id": draft_id, "content_sha256": digest, "draft_status": draft.status,
+                "action": "copied", "delivery_claim": False, **preview_evidence}
+
+    def replay(record):
+        if (record is None or record.tenant_id != context.tenant_id
+                or record.case_id != case_id or record.actor_id != identity.actor_id
+                or record.event_type != "DRAFT_COPIED"
+                or any(record.after_json.get(key) != evidence.get(key)
+                       for key in ("draft_id", "content_sha256", "action", "delivery_claim",
+                                   "preview_id", "target_language", "source_sha256"))):
+            raise HTTPException(status_code=409, detail={"error": "COPY_IDEMPOTENCY_CONFLICT"})
+        return {"status": "copied", "delivery_claim": False,
+                "audit_id": audit_id, "idempotent_replay": True}
+
+    existing = db.get(AuditLogRecord, audit_id)
+    if existing is not None:
+        return replay(existing)
+    record = AuditLogRecord(
+        audit_id=audit_id, tenant_id=context.tenant_id, case_id=case_id,
+        source_trace_id=context.trace_id, event_type="DRAFT_COPIED",
+        actor_id=identity.actor_id, actor_role=identity.business_role.value,
+        conversation_role=identity.conversation_role.value,
+        authorization_basis=identity.authorization_basis,
+        before_json={"draft_id": draft_id, "status": draft.status}, after_json=evidence,
+    )
+    db.add(record)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return replay(db.get(AuditLogRecord, audit_id))
+    return {"status": "copied", "delivery_claim": False,
+            "audit_id": audit_id, "idempotent_replay": False}
+
+
+def _order_confirmation_error(exc: OrderConfirmationError) -> HTTPException:
+    code = exc.code
+    client_conflict_codes = {
+        "ORDER_CONFIRMATION_ACTOR_REQUIRED",
+        "ORDER_CONFIRMATION_DB_GRAPH_REQUIRED",
+        "ORDER_CONFIRMATION_IDEMPOTENCY_KEY_REQUIRED",
+        "ORDER_CONFIRMATION_PROJECT_REQUIRED",
+        "ORDER_CONFIRMATION_SELECTED_OPTION_REQUIRED",
+        "ORDER_CONFIRMATION_SUPPLIER_ID_REQUIRED",
+        "ORDER_CONFIRMATION_TENANT_REQUIRED",
+        "ORDER_CONFIRMATION_TRACE_REQUIRED",
+    }
+    if code in client_conflict_codes:
+        status_code = 409
+    elif code.endswith("_NOT_FOUND") or code.endswith("_MISSING"):
+        status_code = 409
+    elif "IDEMPOTENCY_CONFLICT" in code:
+        status_code = 409
+    else:
+        status_code = 503
+    return HTTPException(status_code=status_code, detail={"error": code})
+
+
+def _order_confirmation_client(
+    *, context: RequestContext, case_id: str, option_id: str
+) -> GiraffeDBOrderConfirmationClient:
+    stable_trace = hashlib.sha256(
+        f"{context.tenant_id}\0{case_id}\0{option_id}\0order-confirmation".encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return GiraffeDBOrderConfirmationClient(
+        tenant_id=context.tenant_id,
+        trace_id=f"order_{stable_trace}",
+    )
+
+
+@router.post("/cases/{case_id}/order-confirmation")
+def confirm_case_order(
+    case_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_context),
+):
+    """Confirm the selected quote once and verify authoritative DB readback."""
+
+    identity = _identity(context)
+    try:
+        require_capability(identity, Capability.APPROVE_OUTBOUND)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=403, detail={"error": "ORDER_CONFIRMATION_FORBIDDEN"}
+        ) from exc
+    if not context.idempotency_key:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "ORDER_CONFIRMATION_IDEMPOTENCY_KEY_REQUIRED"},
+        )
+
+    project = ProjectRepository(db).get_for_update(
+        case_id, tenant_id=context.tenant_id
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail={"error": "CASE_NOT_FOUND"})
+    selected_option = project.selected_option_json
+    selected_option_id = str(body.get("selected_option_id") or "").strip()
+    if not isinstance(selected_option, dict) or not selected_option_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ORDER_CONFIRMATION_SELECTED_OPTION_REQUIRED"},
+        )
+    if selected_option.get("option_id") != selected_option_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ORDER_CONFIRMATION_OPTION_VERSION_MISMATCH"},
+        )
+
+    requirement = dict(project.requirement_json or {})
+    existing = requirement.get("order_confirmation")
+    try:
+        client = _order_confirmation_client(
+            context=context, case_id=case_id, option_id=selected_option_id
+        )
+    except OrderConfirmationError as exc:
+        raise _order_confirmation_error(exc) from exc
+    if isinstance(existing, dict) and existing.get("status") == "confirmed":
+        if existing.get("selected_option_id") != selected_option_id:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "ORDER_CONFIRMATION_ALREADY_COMMITTED"},
+            )
+        try:
+            result = client.reconcile_order(
+                procurement_case_id=str(existing.get("procurement_case_id") or ""),
+                supplier_quote_id=str(existing.get("supplier_quote_id") or ""),
+                purchase_order_id=str(existing.get("purchase_order_id") or ""),
+            )
+        except OrderConfirmationError as exc:
+            raise _order_confirmation_error(exc) from exc
+        return {
+            **result.as_dict(),
+            "selected_option_id": selected_option_id,
+            "authoritative_source": "giraffe-db",
+            "recovered": True,
+        }
+
+    if project.case_state != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "ORDER_CONFIRMATION_INVALID_CASE_STATE",
+                "case_state": project.case_state,
+                "required_state": "approved",
+            },
+        )
+    graph_reference = requirement.get("giraffe_db_graph")
+    if not isinstance(graph_reference, dict):
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ORDER_CONFIRMATION_DB_GRAPH_REQUIRED"},
+        )
+    try:
+        result = client.confirm_order(
+            project_id=case_id,
+            graph_reference=graph_reference,
+            selected_option=selected_option,
+            identity=identity,
+            request_key=context.idempotency_key,
+        )
+    except OrderConfirmationError as exc:
+        db.rollback()
+        raise _order_confirmation_error(exc) from exc
+
+    projection = {
+        **result.as_dict(),
+        "selected_option_id": selected_option_id,
+        "authoritative_source": "giraffe-db",
+    }
+    requirement["order_confirmation"] = projection
+    project.requirement_json = requirement
+    project.status = "order_confirmed"
+    CaseDomainRepository(db).record_audit(
+        tenant_id=project.tenant_id,
+        case_id=project.project_id,
+        event_type="ORDER_CONFIRMED",
+        identity=identity,
+        source_trace_id=context.trace_id,
+        before={
+            "selected_option_id": selected_option_id,
+            "order_status": "unconfirmed",
+        },
+        after={
+            "selected_option_id": selected_option_id,
+            "purchase_order_id": result.purchase_order_id,
+            "order_status": result.status,
+            "readback_verified": result.readback_verified,
+        },
+    )
+    ExecutionEventRepository(db).append(
+        project.project_id,
+        "ORDER_CONFIRMATION_PERSISTED",
+        "Human-authorized order confirmation persisted and verified by readback",
+        payload=projection,
+        actor=identity.actor_id,
+        tenant_id=project.tenant_id,
+        source_trace_id=context.trace_id,
+    )
+    db.commit()
+    return {**projection, "recovered": False}
+
+
+@router.get("/cases/{case_id}/order-confirmation")
+def get_case_order_confirmation(
+    case_id: str,
+    db: Session = Depends(get_db),
+    context: RequestContext = Depends(_context),
+):
+    """Recover and verify the confirmed order from giraffe-db after restart."""
+
+    project = _get_case(db, context, case_id)
+    projection = (project.requirement_json or {}).get("order_confirmation")
+    if not isinstance(projection, dict) or projection.get("status") != "confirmed":
+        raise HTTPException(
+            status_code=404, detail={"error": "ORDER_CONFIRMATION_NOT_FOUND"}
+        )
+    option_id = str(projection.get("selected_option_id") or "")
+    try:
+        client = _order_confirmation_client(
+            context=context, case_id=case_id, option_id=option_id
+        )
+        result = client.reconcile_order(
+            procurement_case_id=str(projection.get("procurement_case_id") or ""),
+            supplier_quote_id=str(projection.get("supplier_quote_id") or ""),
+            purchase_order_id=str(projection.get("purchase_order_id") or ""),
+        )
+    except OrderConfirmationError as exc:
+        raise _order_confirmation_error(exc) from exc
+    return {
+        **result.as_dict(),
+        "selected_option_id": option_id,
+        "authoritative_source": "giraffe-db",
+        "recovered": True,
+    }
+
+
 def _markdown_export(payload: dict) -> str:
     case = payload["case"]
     lines = [
@@ -361,14 +659,15 @@ def _markdown_export(payload: dict) -> str:
     for title, key in (
         ("Conversations", "conversations"),
         ("Participants", "participants"),
-        ("Messages (digest-only)", "messages"),
+        ("Messages (canonical English and source references)", "messages"),
+        ("Attachments (provider-verified references)", "attachments"),
         ("Drafts", "drafts"),
         ("Approvals", "approvals"),
         ("Receipts", "receipts"),
         ("Events", "events"),
         ("Audit", "audit"),
     ):
-        lines.extend([f"## {title}", "", "```json", json.dumps(payload[key], ensure_ascii=False, indent=2), "```", ""])
+        lines.extend([f"## {title}", "", "```json", json.dumps(payload.get(key, []), ensure_ascii=False, indent=2), "```", ""])
     return "\n".join(lines)
 
 
@@ -385,6 +684,8 @@ def export_case(
     except Exception as exc:
         raise HTTPException(status_code=403, detail={"error": "AUDIT_EXPORT_FORBIDDEN"}) from exc
     payload = get_case_detail(case_id, db, context)
+    from aivan.api.attachment_routes import export_attachment_metadata
+    payload["attachments"] = export_attachment_metadata(db, context, case_id)
     candidate = os.environ.get("AIVAN_CANDIDATE_SHA", "").strip() or None
     if format == "json":
         return {"candidate_sha": candidate, "api_version": "0.3.0", **payload}
@@ -393,3 +694,12 @@ def export_case(
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="aivan-case-{case_id}.md"'},
     )
+
+
+def _register_attachment_routes():
+    # Register after case authorization helpers exist; share them, not a second ACL.
+    from aivan.api.attachment_routes import router as attachment_router
+    router.include_router(attachment_router)
+
+
+_register_attachment_routes()

@@ -37,6 +37,7 @@ def test_approve_draft_success_marks_sent(db_session, monkeypatch):
 
 def test_approve_draft_send_failure_marks_send_failed(db_session, monkeypatch):
     class _Resp:
+        outcome_uncertain = False
         success = False
         error = "transport boom"
         message_id = ""
@@ -70,6 +71,7 @@ def test_send_failed_draft_is_recoverable(db_session, monkeypatch):
     calls = {"n": 0}
 
     class _Resp:
+        outcome_uncertain = False
         def __init__(self, ok):
             self.success = ok
             self.error = None if ok else "temporary"

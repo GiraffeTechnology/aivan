@@ -13,9 +13,18 @@ from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.db.repositories.domain_repo import CaseDomainRepository
-from aivan.integrations.giraffe_db import GiraffeDBClient, persist_rfq_gltg_graph
+from aivan.integrations.giraffe_db import (
+    GiraffeDBClient,
+    GiraffeDBContextError,
+    persist_rfq_gltg_graph,
+)
 from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 from aivan.integrations.gltg import calculate_leadtime_for_requirement
+from aivan.integrations.gpm_guidance_client import GPMGuidanceUnavailableError
+from aivan.integrations.language_skill import (
+    LanguageNormalizationRequired, LanguageSkillUnavailable,
+    canonical_english_text, canonicalize_rfq, english_provenance,
+)
 from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.policy import ExternalModelApiRequiresApprovalError, LocalModelUnavailableError
@@ -25,22 +34,25 @@ from aivan.execution.safety import (
     evaluate_supplier_readiness,
 )
 from aivan.rfq.dependency_policy import classify_exception
-from aivan.rfq.operator_reply import render_operator_reply
+from aivan.rfq.operator_reply import render_canonical_operator_reply
 from aivan.openclaw.binding_store import bind_conversation, get_project_id
 from aivan.openclaw.contracts import OpenClawEvent
-from aivan.openclaw.event_adapter import is_supplier_reply
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
 from aivan.schemas.rfq import (
     EventClassification,
-    FallbackTrigger,
     GiraffeContext,
-    GLTGSimulation,
     RFQExecutionResult,
     RFQStrategy,
     SupplierRoutingDecision,
 )
-from aivan.utils.env import env_bool
+from aivan.execution.event_interpretation import (
+    classify_event as _classify_event,
+    interpret_strategy as _interpret_strategy,
+)
+from aivan.execution.gpm_guidance import (
+    create_stage1_gpm_guidance as _create_stage1_gpm_guidance,
+)
 from aivan.execution.rfq_user_control import (
     _should_use_chinese_user_message,
     build_user_control_message as _build_user_control_message,
@@ -48,7 +60,13 @@ from aivan.execution.rfq_user_control import (
     owner_user_id_for_event as _owner_user_id_for_event,
     send_user_control_notification as _send_user_control_notification,
 )
+from aivan.execution.supplier_routing import (
+    create_supplier_email_drafts as _create_supplier_email_drafts,
+    select_suppliers as _select_suppliers,
+)
 from aivan.observability.safe_logging import log_exception_safely
+from aivan.execution.conversation_history import persist_canonical_message
+from aivan.execution.inbound_receipt import replay_inbound_receipt
 from aivan.domain.roles import (
     BusinessRole,
     Capability,
@@ -61,103 +79,19 @@ from aivan.domain.roles import (
 logger = logging.getLogger(__name__)
 
 
-CLASSIFICATION_SYSTEM = """
-You classify AIVAN private-domain trade events. Return JSON only.
-Allowed event_type values: user_command, customer_new_inquiry, customer_followup,
-customer_reply, supplier_reply, internal_status_request, approval_response, unknown.
-Do not attach an event to a project unless AIVAN-provided state validates it.
-"""
+def _invalidate_stale_customer_quote_state(project_id: str, db: Session) -> None:
+    """Invalidate an older recommendation without deleting its audit history."""
 
-STRATEGY_SYSTEM = """
-You translate user trade strategy into structured JSON. Use only the user's
-instruction and AIVAN-provided context. Do not invent suppliers, history, prices,
-lead times, risk facts, or compliance decisions.
-"""
+    ProjectRepository(db).update_selected_option(project_id, None)
+    DraftRepository(db).supersede_customer_quote_drafts(project_id)
+
 
 def classify_event(event: OpenClawEvent, db: Session) -> EventClassification:
-    project_repo = ProjectRepository(db)
-    validated_project_id = (
-        event.project_id
-        if event.project_id and project_repo.get(event.project_id, tenant_id=event.tenant_id)
-        else None
-    )
-    if not validated_project_id and event.conversation_id:
-        project = project_repo.get_by_conversation(
-            event.conversation_id, tenant_id=event.tenant_id
-        )
-        if project:
-            validated_project_id = project.project_id
-    if not validated_project_id and event.conversation_id:
-        bound_case_id = CaseDomainRepository(db).resolve_case_id_for_conversation(
-            tenant_id=event.tenant_id or "legacy",
-            external_conversation_id=event.conversation_id,
-            channel=event.channel,
-            channel_account_id=event.channel_account_id,
-        )
-        if bound_case_id and project_repo.get(
-            bound_case_id, tenant_id=event.tenant_id or "legacy"
-        ):
-            validated_project_id = bound_case_id
-
-    # Deterministic-by-default: do not send raw (possibly non-English) event text
-    # to the classification LLM unless explicitly enabled. The deterministic
-    # fallback classifies by role/keyword only — it never canonicalizes business
-    # facts — so this is safe under the P0 language boundary.
-    fallback = _fallback_event_type(event, bool(validated_project_id))
-    if fallback != "unknown" and not env_bool("AIVAN_EVENT_CLASSIFICATION_LLM_ENABLED"):
-        return EventClassification(
-            event_type=fallback,
-            confidence=0.7,
-            reason="deterministic fallback classification",
-            project_id=validated_project_id,
-            validated_project_attachment=bool(validated_project_id),
-        )
-
-    schema_hint = {
-        "event_type": "user_command | customer_new_inquiry | customer_followup | customer_reply | supplier_reply | internal_status_request | approval_response | unknown",
-        "confidence": 0.0,
-        "reason": "",
-    }
-    user_prompt = (
-        f"channel={event.channel}\nrole_context={event.role_context}\n"
-        f"mode={event.mode}\nmessage={event.message_text}\n"
-        f"validated_project_id={validated_project_id or ''}"
-    )
-    try:
-        raw = llm_complete_json("aivan_event_classification", CLASSIFICATION_SYSTEM, user_prompt, schema_hint)
-    except Exception:
-        raw = {}
-    event_type = raw.get("event_type") if raw.get("event_type") in EventClassification.model_fields["event_type"].annotation.__args__ else fallback
-    return EventClassification(
-        event_type=event_type or fallback,
-        confidence=float(raw.get("confidence") or (0.7 if fallback != "unknown" else 0.3)),
-        reason=raw.get("reason") or "deterministic fallback classification",
-        project_id=validated_project_id,
-        validated_project_attachment=bool(validated_project_id),
-    )
+    return _classify_event(event, db, complete_json=llm_complete_json)
 
 
 def interpret_strategy(raw_text: str, context: GiraffeContext | None = None) -> RFQStrategy:
-    # Deterministic-by-default: do not send raw instruction text to the strategy
-    # LLM unless explicitly enabled. The keyword-based fallback is deterministic.
-    if not env_bool("AIVAN_STRATEGY_LLM_ENABLED"):
-        return _fallback_strategy(raw_text)
-
-    schema_hint = RFQStrategy().model_dump()
-    user_prompt = f"User instruction:\n{raw_text}\n\nAIVAN context keys: {list((context or GiraffeContext()).model_dump().keys())}"
-    try:
-        raw = llm_complete_json("aivan_strategy_interpretation", STRATEGY_SYSTEM, user_prompt, schema_hint)
-    except Exception:
-        raw = {}
-    if not isinstance(raw, dict):
-        raw = {}
-    strategy_keys = set(RFQStrategy.model_fields)
-    if not (set(raw) & strategy_keys):
-        return _fallback_strategy(raw_text)
-    try:
-        return RFQStrategy(**raw)
-    except Exception:
-        return _fallback_strategy(raw_text)
+    return _interpret_strategy(raw_text, context, complete_json=llm_complete_json)
 
 
 def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
@@ -184,27 +118,52 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         explicit_idempotency_key=event.idempotency_key or "",
     )
     repo = InboundEventRepository(db)
+    db.info["aivan_inbound_replayed"] = False
     if idem_key:
         existing = repo.get(idem_key)
         if existing is not None:
             # Replay the stored result; create no new project/RFQ/draft/event.
-            return RFQExecutionResult(**existing.result_json)
+            db.info["aivan_inbound_replayed"] = True
+            return replay_inbound_receipt(existing, trace_id=event.source_trace_id)
 
-    result = _create_rfq_from_event_inner(event, db)
-
+    # Script shape is not language identification: Latin input may be French,
+    # Spanish, German, or another language. The shared language service must
+    # normalize every business intake before classification or persistence.
+    try:
+        canonicalization = canonicalize_rfq(
+            event.message_text, source_channel=event.channel,
+            tenant_id=event.tenant_id, sender_role=event.business_role or "buyer",
+        )
+    except LanguageSkillUnavailable:
+        raise LanguageNormalizationRequired() from None
+    if canonicalization is None:
+        raise LanguageNormalizationRequired()
+    text = canonical_english_text(canonicalization)
+    # Keep caller-owned event immutable and its authenticated identity intact.
+    event = event.model_copy(update={
+        "message_text": text, "attachments": english_provenance(event.attachments),
+    })
+    claim = None
     if idem_key:
-        repo.record(
-            idem_key,
-            tenant_id=event.tenant_id or "legacy",
+        claim, acquired = repo.claim(idem_key, tenant_id=event.tenant_id or "legacy")
+        if not acquired:
+            db.info["aivan_inbound_replayed"] = True
+            return replay_inbound_receipt(claim, trace_id=event.source_trace_id)
+    result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
+
+    if claim is not None:
+        repo.complete(
+            claim,
             project_id=result.project_id,
             event_type=result.event_type,
             result_json=result.model_dump(),
         )
-        db.commit()
     return result
 
 
-def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecutionResult:
+def _create_rfq_from_event_inner(
+    event: OpenClawEvent, db: Session, *, canonicalization: dict | None = None,
+) -> RFQExecutionResult:
     classification = classify_event(event, db)
     if classification.event_type == "supplier_reply":
         return _handle_supplier_reply_event(event, classification, db)
@@ -233,12 +192,14 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
 
     project = _get_or_create_project(event, classification, db)
     existing_requirement = _load_requirement(project.requirement_json)
+    language_kwargs = {"canonicalization": canonicalization} if canonicalization else {}
     requirement = structure_customer_requirement_with_llm(
         raw_text=event.message_text,
         attachments=event.attachments,
         existing_requirement=existing_requirement,
         project_id=project.project_id,
         source_channel=event.channel,
+        **language_kwargs,
     )
 
     # ---- Execution readiness gate ------------------------------------- #
@@ -267,12 +228,21 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
                 supplier_feasibility, giraffe.suppliers, db,
             )
 
-        gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
-    except (GLTGUnavailableError, ExternalModelApiRequiresApprovalError, LocalModelUnavailableError) as exc:
+        gltg = GLTGClient().simulate(
+            requirement,
+            strategy,
+            supplier_count=len(giraffe.suppliers),
+            tenant_id=project.tenant_id or event.tenant_id,
+        )
+    except (
+        GiraffeDBContextError,
+        GLTGUnavailableError,
+        ExternalModelApiRequiresApprovalError,
+        LocalModelUnavailableError,
+    ) as exc:
         return _dependency_recovery_result(project, event, classification, requirement, exc, db)
 
     giraffe_db_graph: dict = {}
-    giraffe_db_graph_error: dict | None = None
     try:
         giraffe_db_graph = persist_rfq_gltg_graph(
             event=event,
@@ -291,6 +261,21 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
             "Failed to persist giraffe-db RFQ/GLTG graph",
             exc=exc,
             context={"project_id": project.project_id},
+        )
+        ExecutionEventRepository(db).append(
+            project.project_id,
+            "GIRAFFE_DB_GRAPH_PERSIST_FAILED",
+            "Failed to persist pre-PO transaction graph; no drafts were created.",
+            payload=giraffe_db_graph_error,
+            actor="giraffe_db",
+        )
+        return _dependency_recovery_result(
+            project,
+            event,
+            classification,
+            requirement,
+            RuntimeError("GIRAFFE_DB_GRAPH_PERSISTENCE_FAILED"),
+            db,
         )
     routing = _select_suppliers(giraffe, strategy)
 
@@ -348,15 +333,6 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
             payload=giraffe_db_graph,
             actor="giraffe_db",
         )
-    if giraffe_db_graph_error:
-        event_repo.append(
-            project.project_id,
-            "GIRAFFE_DB_GRAPH_PERSIST_FAILED",
-            "Failed to persist pre-PO transaction graph; RFQ workflow continued.",
-            payload=giraffe_db_graph_error,
-            actor="giraffe_db",
-        )
-
     drafts_created = _create_supplier_email_drafts(project.project_id, event, requirement, strategy, giraffe, gltg, routing, db)
     if drafts_created:
         _advance_to_awaiting_supplier(project, event, db)
@@ -374,7 +350,7 @@ def _create_rfq_from_event_inner(event: OpenClawEvent, db: Session) -> RFQExecut
         drafts_created=drafts_created,
     )
     # Deterministic, language-matched operator reply (no debug fields / raw ids).
-    user_message = render_operator_reply(result, requirement.language)
+    user_message = render_canonical_operator_reply(result)
     result.user_control_message = user_message
     user_notification = _send_user_control_notification(project.project_id, event, user_message, db)
     event_repo.append(
@@ -445,23 +421,6 @@ def _advance_to_awaiting_supplier(project, event: OpenClawEvent, db: Session) ->
         )
 
 
-def _empty_gltg_simulation() -> GLTGSimulation:
-    """A zeroed GLTG simulation for blocked/recovery results (GLTG not run)."""
-    return GLTGSimulation(
-        p50_days=0,
-        p80_days=0,
-        p90_days=0,
-        minimum_feasible_days=0,
-        supplier_set_feasibility="unknown",
-        known_suppliers_first_feasibility="unknown_without_deadline",
-        public_bidding_time_cost_days=0,
-        fallback_trigger_recommendation=FallbackTrigger(),
-        selected_confidence_days=0,
-        deadline_risk_level="unknown",
-        explanation="GLTG not run (requirement/dependency gate blocked execution).",
-    )
-
-
 def _persist_raw_requirement_only(project, requirement, gate, db) -> None:
     """Persist the raw requirement and gate state without executing anything."""
     payload = requirement.model_dump()
@@ -488,7 +447,7 @@ def _blocked_requirement_result(project, event, classification, requirement, gat
         strategy=RFQStrategy(),
         requirement=requirement.model_dump(),
         giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
         drafts_created=[],
         user_control_message=gate.operator_message,
@@ -561,7 +520,7 @@ def _pending_supplier_result(project, event, classification, requirement, strate
         strategy=strategy,
         requirement=requirement.model_dump(),
         giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
         drafts_created=[],
         user_control_message=message,
@@ -594,49 +553,10 @@ def _dependency_recovery_result(project, event, classification, requirement, exc
         strategy=RFQStrategy(),
         requirement=requirement.model_dump(),
         giraffe_context=GiraffeContext(),
-        gltg_simulation=_empty_gltg_simulation(),
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
         drafts_created=[],
         user_control_message=message,
-    )
-
-
-def _fallback_event_type(event: OpenClawEvent, has_project: bool) -> str:
-    text = (event.message_text or "").lower()
-    role = (event.business_role or event.role_context or "").lower()
-    if is_supplier_reply(event):
-        return "supplier_reply"
-    if any(word in text for word in ["approve", "approved", "同意", "批准", "发送", "send it"]):
-        return "approval_response"
-    if any(word in text for word in ["status", "进度", "状态"]):
-        return "internal_status_request"
-    if role in {"user", "owner", "operator", "sales", "salesperson", "procurement", "follow_up", "qc", "logistics", "admin", "approver"} or event.mode in {"user", "command"}:
-        return "user_command"
-    if role in {"buyer", "customer", "b_side"}:
-        return "customer_followup" if has_project else "customer_new_inquiry"
-    if event.channel in {"wechat", "line", "whatsapp", "im", "openclaw-im"}:
-        return "user_command"
-    return "customer_followup" if has_project else "customer_new_inquiry"
-
-
-def _fallback_strategy(raw_text: str) -> RFQStrategy:
-    text = (raw_text or "").lower()
-    urgent = any(token in text for token in ["urgent", "asap", "急", "很急", "赶"])
-    known = any(token in text for token in ["known", "familiar", "old supplier", "老供应商", "熟悉供应商", "靠谱"])
-    cheap = any(token in text for token in ["cheap", "price", "价格", "便宜", "别太离谱"])
-    quality = any(token in text for token in ["quality", "reliable", "质量", "靠谱", "可靠"])
-    return RFQStrategy(
-        priority="speed" if urgent else "price" if cheap and not urgent else "balanced",
-        supplier_scope="known_suppliers_first" if known else "known_suppliers_only",
-        public_bidding="fallback_only" if known else "disabled",
-        lead_time_confidence="P80" if urgent else "P50",
-        price_sensitivity="medium" if cheap else "low",
-        quality_sensitivity="high" if quality else "medium",
-        fallback_trigger=FallbackTrigger(
-            min_valid_supplier_replies=2,
-            max_wait_hours=24 if urgent else 48,
-            lead_time_risk_threshold="medium",
-        ),
     )
 
 
@@ -679,6 +599,7 @@ def _bind_event_to_case(project, event: OpenClawEvent, db: Session):
     conversation, participant, message, _created = CaseDomainRepository(
         db
     ).bind_inbound_event(project.project_id, event)
+    persist_canonical_message(db, project=project, event=event, message=message)
     db.flush()
     return conversation, participant, message
 
@@ -690,72 +611,6 @@ def _load_requirement(payload: dict | None) -> BuyerRequirement | None:
         return BuyerRequirement(**{k: v for k, v in payload.items() if k in BuyerRequirement.model_fields})
     except Exception:
         return None
-
-
-def _select_suppliers(giraffe: GiraffeContext, strategy: RFQStrategy) -> SupplierRoutingDecision:
-    suppliers = sorted(
-        giraffe.suppliers,
-        key=lambda s: (
-            s.get("past_performance_score", 0),
-            s.get("delivery_score", 0),
-            s.get("quality_score", 0),
-        ),
-        reverse=True,
-    )
-    selected = [s["supplier_id"] for s in suppliers if s.get("email")][:5]
-    skipped = [s["supplier_id"] for s in suppliers if not s.get("email")]
-    return SupplierRoutingDecision(
-        selected_supplier_ids=selected,
-        skipped_supplier_ids=skipped,
-        public_bidding_mode=strategy.public_bidding,
-        rationale=(
-            "Known suppliers selected first from Giraffe DB context; public bidding is "
-            f"{strategy.public_bidding} per strategy."
-        ),
-    )
-
-
-def _create_supplier_email_drafts(
-    project_id: str,
-    event: OpenClawEvent,
-    requirement: BuyerRequirement,
-    strategy: RFQStrategy,
-    giraffe: GiraffeContext,
-    gltg,
-    routing: SupplierRoutingDecision,
-    db: Session,
-) -> list[str]:
-    repo = DraftRepository(db)
-    suppliers_by_id = {supplier["supplier_id"]: supplier for supplier in giraffe.suppliers}
-    draft_ids = []
-    for supplier_id in routing.selected_supplier_ids:
-        supplier = suppliers_by_id[supplier_id]
-        message_text = _draft_supplier_email(requirement, strategy, supplier, gltg)
-        draft = repo.create(
-            project_id,
-            {
-                "tenant_id": event.tenant_id or "legacy",
-                "conversation_id": event.conversation_id,
-                "channel": "email",
-                "target_peer_id": supplier.get("email", ""),
-                "target_role": "supplier",
-                "message_text": message_text,
-                "message_type": "text",
-                "attachments_json": [],
-                "status": "pending_approval",
-                "created_by_agent": "aivan_rfq_execution",
-                "notes": f"draft_type=supplier_inquiry_email Known supplier: {supplier.get('name', supplier_id)}",
-            },
-        )
-        draft_ids.append(draft.draft_id)
-        ExecutionEventRepository(db).append(
-            project_id,
-            "PENDING_EMAIL_DRAFT_CREATED",
-            f"Supplier inquiry email draft created for {supplier.get('name', supplier_id)}",
-            payload={"draft_id": draft.draft_id, "supplier_id": supplier_id},
-            actor="aivan_rfq_execution",
-        )
-    return draft_ids
 
 
 def _learn_strategy_preference(user_id: str, strategy: RFQStrategy, db: Session, *, tenant_id: str = "legacy") -> None:
@@ -798,6 +653,15 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             "Supplier reply must be attached to an existing validated Case thread",
             reason="supplier_reply_requires_validated_case_binding",
         )
+    project = ProjectRepository(db).get_for_update(
+        project.project_id, tenant_id=event.tenant_id or "legacy"
+    )
+    if project is None:
+        raise RoleAuthorizationError(
+            "SUPPLIER_CASE_BINDING_REQUIRED",
+            "Supplier reply must be attached to an existing validated Case thread",
+            reason="supplier_reply_case_disappeared_before_lock",
+        )
     supplier_identity = _require_event_capability(
         event, classification, Capability.RESPOND_AS_SUPPLIER, db
     )
@@ -828,6 +692,10 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         supplier_id=event.sender_id or "",
         channel=event.channel,
     )
+    # A model cannot supply this identity. Bind the actual inbound message,
+    # already authenticated and case-bound, to the persisted parsed revision.
+    reply.source_event_id = ":".join((event.source or "", event.channel or "",
+        event.channel_account_id or "", event.conversation_id or "", event.message_id or ""))
     event_repo.append(
         project.project_id,
         "SUPPLIER_REPLY_PARSED",
@@ -840,7 +708,6 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     if not requirement:
         db.commit()
         empty_strategy = RFQStrategy()
-        gltg = GLTGClient().simulate(BuyerRequirement(project_id=project.project_id, quantity=1), empty_strategy, 0)
         return RFQExecutionResult(
             project_id=project.project_id,
             event_type="supplier_reply",
@@ -849,7 +716,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             strategy=empty_strategy,
             requirement={},
             giraffe_context=GiraffeContext(),
-            gltg_simulation=gltg,
+            gltg_simulation=None,
             supplier_routing=SupplierRoutingDecision(selected_supplier_ids=[reply.supplier_id] if reply.supplier_id else []),
         )
 
@@ -860,9 +727,18 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         strategy = RFQStrategy()
 
     # P2: carry supplier_id so generate_buyer_options can match lead time to this reply
-    lead_time = calculate_leadtime_for_requirement(
-        requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None
-    )
+    try:
+        lead_time = calculate_leadtime_for_requirement(
+            requirement,
+            supplier_reply=reply,
+            supplier_id=reply.supplier_id or None,
+            tenant_id=project.tenant_id or event.tenant_id,
+        )
+    except GLTGUnavailableError as exc:
+        _invalidate_stale_customer_quote_state(project.project_id, db)
+        return _dependency_recovery_result(
+            project, event, classification, requirement, exc, db
+        )
     event_repo.append(
         project.project_id,
         "LEADTIME_RECALCULATED",
@@ -900,12 +776,87 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         actor="buyer_option_agent",
     )
 
+    try:
+        gltg = GLTGClient().simulate(
+            requirement,
+            strategy,
+            supplier_count=len(all_replies),
+            supplier_id=reply.supplier_id or None,
+            tenant_id=project.tenant_id or event.tenant_id,
+        )
+    except GLTGUnavailableError as exc:
+        _invalidate_stale_customer_quote_state(project.project_id, db)
+        return _dependency_recovery_result(
+            project, event, classification, requirement, exc, db
+        )
+    gpm_guidance = None
+    if buyer_options:
+        try:
+            gpm_guidance = _create_stage1_gpm_guidance(
+                project=project,
+                event=event,
+                requirement=requirement,
+                selected_option=buyer_options[0],
+                replies=all_replies,
+                gltg_result=gltg,
+            )
+        except GPMGuidanceUnavailableError as exc:
+            error_code = str(exc) or "GPM_GUIDANCE_UNAVAILABLE"
+            requirement_payload["buyer_options"] = option_payloads
+            requirement_payload["gpm_guidance"] = {
+                "status": "unavailable",
+                "error": error_code,
+            }
+            project_repo.update_requirement(project.project_id, requirement_payload)
+            _invalidate_stale_customer_quote_state(project.project_id, db)
+            event_repo.append(
+                project.project_id,
+                "GPM_GUIDANCE_UNAVAILABLE",
+                "GPM execution recommendation is unavailable; approval draft was not created",
+                payload={"error": error_code},
+                actor="gpm_guidance_client",
+            )
+            db.commit()
+            return RFQExecutionResult(
+                project_id=project.project_id,
+                event_type="supplier_reply",
+                action="gpm_guidance_unavailable",
+                message="Supplier reply parsed, but the execution recommendation is unavailable. No approval draft was created.",
+                strategy=strategy,
+                requirement=requirement_payload,
+                giraffe_context=GiraffeContext(),
+                gltg_simulation=gltg,
+                supplier_routing=SupplierRoutingDecision(
+                    selected_supplier_ids=[reply.supplier_id] if reply.supplier_id else []
+                ),
+                drafts_created=[],
+            )
+        option_payloads[0]["gpm_guidance"] = gpm_guidance
+        requirement_payload["gpm_guidance"] = gpm_guidance
+        event_repo.append(
+            project.project_id,
+            "GPM_GUIDANCE_CREATED",
+            "GPM advisory execution recommendation created; human approval remains required",
+            payload=gpm_guidance,
+            actor="gpm_guidance_client",
+        )
+
     requirement_payload["buyer_options"] = option_payloads
     project_repo.update_requirement(project.project_id, requirement_payload)
     if option_payloads:
         project_repo.update_selected_option(project.project_id, option_payloads[0])
 
-    drafts_created = _create_customer_quote_email_draft(project, event, buyer_options, db) if buyer_options else []
+    drafts_created = (
+        _create_customer_quote_email_draft(
+            project,
+            event,
+            buyer_options,
+            db,
+            gpm_guidance=gpm_guidance,
+        )
+        if buyer_options
+        else []
+    )
     if drafts_created and project.case_state == CaseState.SUPPLIER_REPLIED.value:
         CaseDomainRepository(db).transition_case(
             project=project,
@@ -913,7 +864,6 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             identity=_automation_identity(),
             source_trace_id=event.source_trace_id,
         )
-    gltg = GLTGClient().simulate(requirement, strategy, supplier_count=len(all_replies))
     db.commit()
     return RFQExecutionResult(
         project_id=project.project_id,
@@ -929,7 +879,14 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
     )
 
 
-def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_options: list, db: Session) -> list[str]:
+def _create_customer_quote_email_draft(
+    project,
+    event: OpenClawEvent,
+    buyer_options: list,
+    db: Session,
+    *,
+    gpm_guidance: dict | None = None,
+) -> list[str]:
     # Supersede any pending approval drafts from earlier supplier replies so they
     # cannot be approved or sent after buyer options have been regenerated.
     DraftRepository(db).supersede_customer_quote_drafts(project.project_id)
@@ -940,6 +897,14 @@ def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_opti
         f"Price: {opt.quote.buyer_unit_price if opt.quote else 'N/A'} {opt.quote.currency if opt.quote else ''}"
         for opt in buyer_options
     )
+    guidance_summary = ""
+    if gpm_guidance:
+        guidance_summary = (
+            "\n\nGPM advisory: "
+            f"{gpm_guidance['recommendation']} "
+            f"(confidence: {gpm_guidance['confidence']}). "
+            "Human approval is still required."
+        )
     draft = DraftRepository(db).create(
         project.project_id,
         {
@@ -950,7 +915,8 @@ def _create_customer_quote_email_draft(project, event: OpenClawEvent, buyer_opti
             "target_role": "customer",
             "message_text": (
                 "We have received supplier quotes. Here are the current options:\n\n"
-                f"{option_summary}\n\nPlease let us know which option you prefer."
+                f"{option_summary}"
+                f"{guidance_summary}\n\nPlease let us know which option you prefer."
             ),
             "message_type": "text",
             "attachments_json": [],
@@ -981,7 +947,6 @@ def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassificat
     db.commit()
     empty_strategy = RFQStrategy()
     empty_context = GiraffeContext()
-    gltg = GLTGClient().simulate(BuyerRequirement(project_id=project.project_id, quantity=1), empty_strategy, 0)
     return RFQExecutionResult(
         project_id=project.project_id,
         event_type=classification.event_type,
@@ -990,6 +955,6 @@ def _record_non_rfq_event(event: OpenClawEvent, classification: EventClassificat
         strategy=empty_strategy,
         requirement={},
         giraffe_context=empty_context,
-        gltg_simulation=gltg,
+        gltg_simulation=None,
         supplier_routing=SupplierRoutingDecision(),
     )

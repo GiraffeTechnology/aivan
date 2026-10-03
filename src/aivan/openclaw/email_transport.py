@@ -48,6 +48,24 @@ def allowed_recipients() -> set[str]:
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
+def _required_text_setting(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"{name} is not configured")
+    return value
+
+
+def _required_port_setting(name: str) -> int:
+    raw = _required_text_setting(name)
+    try:
+        port = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError(f"{name} must be between 1 and 65535")
+    return port
+
+
 def redact_secret(text: str | None) -> str:
     if not text:
         return ""
@@ -142,13 +160,13 @@ def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessa
         raise ValueError("AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email receive")
     username = os.environ.get("AIVAN_POP3_USERNAME") or os.environ.get("AIVAN_SMTP_USERNAME", "")
     password = os.environ.get("AIVAN_POP3_PASSWORD") or os.environ.get("AIVAN_SMTP_PASSWORD", "")
-    host = os.environ.get("AIVAN_POP3_HOST", "pop.163.com")
-    port = int(os.environ.get("AIVAN_POP3_PORT", "995"))
-    use_ssl = env_bool("AIVAN_POP3_USE_SSL", True)
     if not username:
         raise ValueError("AIVAN_POP3_USERNAME is not configured")
     if not password:
         raise ValueError("AIVAN_POP3_PASSWORD is not configured")
+    host = _required_text_setting("AIVAN_POP3_HOST")
+    port = _required_port_setting("AIVAN_POP3_PORT")
+    use_ssl = env_bool("AIVAN_POP3_USE_SSL", True)
 
     pop_cls = poplib.POP3_SSL if use_ssl else poplib.POP3
     try:
@@ -187,11 +205,7 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
     username = os.environ.get("AIVAN_SMTP_USERNAME", "")
     password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
-    host = os.environ.get("AIVAN_SMTP_HOST", "smtp.gmail.com")
-    port = int(os.environ.get("AIVAN_SMTP_PORT", "587"))
-    use_ssl = env_bool("AIVAN_SMTP_USE_SSL", port == 465)
-    use_tls = env_bool("AIVAN_SMTP_USE_TLS", True)
-
+    submitted = False
     try:
         if real_test_email_gateway() != "openclaw_real_test":
             raise ValueError("AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email sending")
@@ -204,6 +218,10 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             raise ValueError("real_test sender must match SMTP username")
         if not password:
             raise ValueError("AIVAN_SMTP_PASSWORD is not configured")
+        host = _required_text_setting("AIVAN_SMTP_HOST")
+        port = _required_port_setting("AIVAN_SMTP_PORT")
+        use_ssl = env_bool("AIVAN_SMTP_USE_SSL", False)
+        use_tls = env_bool("AIVAN_SMTP_USE_TLS", True)
 
         msg = EmailMessage()
         msg["From"] = sender
@@ -216,6 +234,7 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             if use_tls and not use_ssl:
                 smtp.starttls()
             smtp.login(username, password)
+            submitted = True
             refused = smtp.send_message(msg, from_addr=sender_address, to_addrs=[recipient_address])
         if refused:
             return OpenClawSendResponse(
@@ -228,4 +247,8 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
             sent_at=utcnow_iso(),
         )
     except Exception as exc:
-        return OpenClawSendResponse(success=False, error=redact_secret(str(exc)))
+        # SMTP recipient/data rejection is definitive; timeout/disconnect after
+        # submission may mean delivery succeeded and must never auto-retry.
+        uncertain = submitted and not isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError))
+        error = "Outbound delivery is unconfirmed" if uncertain else ("SMTP rejected the message" if submitted else redact_secret(str(exc)))
+        return OpenClawSendResponse(success=False, outcome_uncertain=uncertain, error=error)

@@ -61,6 +61,13 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .content > .view { grid-column: 1 / -1; }
 .view { display: none; }
 .view.active { display: block; animation: reveal .2s ease; }
+.conversation-panel { margin-bottom: 1rem; }
+.conversation-stream { display: flex; flex-direction: column; gap: .75rem; max-height: 45vh; overflow-y: auto; }
+.conversation-message { max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; padding: .85rem; border: 1px solid var(--line); border-radius: 12px; }
+.saved-message-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.attachment-preview { max-width: 100%; max-height: 360px; object-fit: contain; }
+.user-message { align-self: flex-end; background: var(--green-soft); }
+.assistant-message { align-self: flex-start; background: var(--surface); }
 @keyframes reveal { from { opacity: 0; transform: translateY(4px); } }
 .page-heading, .case-hero, .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .page-heading { margin-bottom: 1.5rem; }
@@ -156,3 +163,10 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
   .attachment-placeholder { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+
+.commercial-preview { max-width: 48rem; width: min(92vw, 48rem); border-radius: 1rem; border: 1px solid #cbd5e1; padding: 1.5rem; }
+.commercial-preview::backdrop { background: rgb(15 23 42 / 55%); }
+.commercial-preview textarea { width: 100%; box-sizing: border-box; white-space: pre-wrap; }
+.commercial-preview label { display: block; margin: .8rem 0; }
+.commercial-preview input[type="checkbox"] { width: auto; margin-right: .5rem; }
+.commercial-preview [data-preview="identity"] { overflow-wrap: anywhere; font-weight: 600; }

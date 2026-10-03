@@ -38,6 +38,7 @@ class OpenClawSendRequest(BaseModel):
 
 class OpenClawSendResponse(BaseModel):
     success: bool
+    outcome_uncertain: bool = False
     message_id: str = ""
     sent_at: str = ""
     error: str | None = None

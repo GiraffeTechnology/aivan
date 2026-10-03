@@ -11,6 +11,7 @@ reachable GLTG server (default http://localhost:8090).
 from __future__ import annotations
 
 import os
+from datetime import date
 
 import pytest
 
@@ -29,7 +30,7 @@ def test_live_health_and_estimate():
     assert health.data["service"] == "gltg"
 
     est = client.estimate_lead_time(
-        order={"product_type": "apparel", "quantity": 10000},
+        order={"product_type": "apparel", "quantity": 10000, "evaluation_date": "2026-10-03"},
         suppliers=[
             {
                 "supplier_id": "M1",
@@ -44,7 +45,19 @@ def test_live_health_and_estimate():
         ],
     )
     assert est.ok, est.error
-    assert est.data["estimated_lead_time_days"] == 28
+    # The current v1 adapter reports graph-engine dates, not the old sum of
+    # supplier stage hints. Verify its documented date/quantile mapping.
+    data = est.data
+    anchor = date(2026, 10, 3)
+    duration = lambda key: (date.fromisoformat(data[key]) - anchor).days
+    assert data["estimated_lead_time_days"] == duration("committable_date")
+    assert data["p50_days"] == duration("earliest_delivery_date")
+    assert data["p80_days"] == duration("most_likely_date")
+    assert data["p90_days"] == data["estimated_lead_time_days"]
+    assert 0 <= data["p50_days"] <= data["p80_days"] <= data["p90_days"]
+    assert data["selected_supplier_id"] == "M1"
+    assert data["calculation_trace"][0]["supplier_id"] == "M1"
+    assert data["calculation_trace"][0]["total_lead_time_days"] == data["estimated_lead_time_days"]
     assert est.data["feasible"] is True
 
 

@@ -34,6 +34,17 @@ class UISession:
     authorization_reference: str = ""
 
 
+def _ascii_digest_matches(provided: str, expected: str) -> bool:
+    """Compare protocol tokens after rejecting non-ASCII text explicitly."""
+
+    try:
+        provided_bytes = provided.encode("ascii")
+        expected_bytes = expected.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(provided_bytes, expected_bytes)
+
+
 def _b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
@@ -92,7 +103,7 @@ def configured_ui_identity(requested_role: str = "") -> tuple[str, tuple[str, ..
             (
                 configured_role
                 for configured_role in roles
-                if hmac.compare_digest(requested, configured_role)
+                if _ascii_digest_matches(requested, configured_role)
             ),
             "",
         )
@@ -310,7 +321,7 @@ def read_ui_session(request: Request) -> UISession | None:
         expected = _b64encode(
             hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
         )
-        if not hmac.compare_digest(signature, expected):
+        if not _ascii_digest_matches(signature, expected):
             raise ValueError("signature")
         payload = json.loads(_b64decode(encoded))
         session = UISession(

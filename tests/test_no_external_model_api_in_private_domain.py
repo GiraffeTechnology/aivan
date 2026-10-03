@@ -167,4 +167,5 @@ def test_private_domain_workflow_asks_confirmation_when_gates_fail(monkeypatch):
     gate = evaluate_requirement_readiness(req)
     assert not gate.ready
     assert gate.next_action.startswith("pending_")
-    assert "东京" in gate.operator_message or "目的地" in gate.operator_message
+    assert "destination" in gate.operator_message
+    assert gate.operator_message.isascii()

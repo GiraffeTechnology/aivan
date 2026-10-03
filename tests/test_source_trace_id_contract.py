@@ -20,7 +20,19 @@ def _mock_runtime(monkeypatch):
 
 
 def _call(supplier_id):
-    body = QuoteGuidanceRequest(sku="SKU-1", supplier_id=supplier_id, supplier_quote=4.5)
+    body = QuoteGuidanceRequest(
+        case_id="case-record-id",
+        quote_id="quote-record-id",
+        sku="SKU-1",
+        supplier_id=supplier_id,
+        supplier_quote=4.5,
+        buyer_unit_price=5.5,
+        buyer_total=55.0,
+        supplier_total=45.0,
+        margin_rate=0.1818,
+        gltg_run_id="gltg-record-id",
+        gltg_api_version="v2",
+    )
     return asyncio.run(create_quote_guidance(body, tenant_id="tenant-1"))
 
 
