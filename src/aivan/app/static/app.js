@@ -286,6 +286,20 @@ function buyerOptionRow(option) {
     ${warnings.length ? `<p class="error">${escapeHtml(warnings.join(' · '))}</p>` : ''}</article>`;
 }
 
+function savedMessageRow(message) {
+  const resolved = message.body_resolution === 'resolved'
+    && message.canonical_language === 'en'
+    && typeof message.message_text === 'string';
+  let body = 'Message body unavailable: the returned content could not be verified.';
+  if (resolved) body = message.message_text;
+  else if (message.body_resolution === 'missing_legacy_content') {
+    body = 'Message body unavailable: this legacy record contains no recoverable body.';
+  } else if (message.body_resolution === 'integrity_mismatch') {
+    body = 'Message body unavailable: the integrity check failed.';
+  }
+  return `<article><strong>${escapeHtml(roleLabel(message.actor_role))}</strong><p class="saved-message-body"${resolved ? ' lang="en"' : ''}>${escapeHtml(body)}</p><time>${escapeHtml(formatTime(message.created_at))}</time></article>`;
+}
+
 async function openCase(caseId) {
   setView('case-detail');
   $('#case-detail').innerHTML = `<div class="loading-card">${ht('正在读取共享 Core 数据…')}</div>`;
@@ -314,13 +328,13 @@ async function openCase(caseId) {
       <div><p class="eyebrow">${escapeHtml(item.case_id)}</p><h1 id="case-detail-title">${escapeHtml(item.requirement?.product_name || item.category || t('业务案例'))}</h1><p>${escapeHtml(item.customer_display_name || item.customer_id)}</p></div>
       <div class="hero-actions"><span class="status-pill state-${escapeHtml(item.case_state)}">${escapeHtml(stateLabel(item.case_state))}</span>${canExport ? `<a class="secondary button" href="/api/workbench/cases/${encodeURIComponent(item.case_id)}/export?format=markdown">${ht('导出审计')}</a>` : ''}</div>
     </section>
+    ${section('Saved conversation', payload.messages, savedMessageRow)}
     <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
     ${recommendation}
     ${confirmedOrder}
     ${section('Quote options', buyerOptions, buyerOptionRow)}
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
-    ${section(t('消息证据（仅摘要）'), payload.messages, (m) => `<article><strong>${escapeHtml(roleLabel(m.actor_role))}</strong><code>${escapeHtml(m.payload_digest)}</code><time>${escapeHtml(formatTime(m.created_at))}</time></article>`)}
     ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
     ${section(t('回执'), payload.receipts, (r) => `<article><strong>${escapeHtml(r.channel)} · ${escapeHtml(r.receipt_id)}</strong><span>${escapeHtml(r.receipt_reference || r.external_message_id || t('摘要回执'))}</span><time>${escapeHtml(formatTime(r.confirmed_at))}</time></article>`)}
     ${section(t('事件时间线'), payload.events, eventRow)}

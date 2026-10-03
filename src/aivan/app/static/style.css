@@ -64,6 +64,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .conversation-panel { margin-bottom: 1rem; }
 .conversation-stream { display: flex; flex-direction: column; gap: .75rem; max-height: 45vh; overflow-y: auto; }
 .conversation-message { max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; padding: .85rem; border: 1px solid var(--line); border-radius: 12px; }
+.saved-message-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .user-message { align-self: flex-end; background: var(--green-soft); }
 .assistant-message { align-self: flex-start; background: var(--surface); }
 @keyframes reveal { from { opacity: 0; transform: translateY(4px); } }
