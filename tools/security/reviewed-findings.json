@@ -17,9 +17,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-i18n-runtime.test.mjs",
-      "sha256": "b1cbb6aeaf1224bc3b8799cb8be52f124ff11f8aed1dbdcaa7c8708784804cab",
-      "count": 2,
-      "reason": "Exact reads at lines 8 and 192 resolve literal i18n.js and app.js URLs from import.meta.url through fileURLToPath. No request, environment, argument or fixture controls either filename."
+      "sha256": "0da4a9bcc1f1da2a1b39301cff24c7b908b14a57dc8ea8b7b593b9b536d3324c",
+      "count": 3,
+      "reason": "Re-reviewed after first-visit locale regressions. Exact reads at lines 8, 192 and 289 resolve literal i18n.js, app.js and index.html URLs relative to import.meta.url. No request, environment, argument or fixture controls these paths; saved locale values only select in-memory catalogs."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
@@ -69,6 +69,13 @@
       "sha256": "b53f5ec8a510f814b6a686ffd458c927784f3d4d2de2bf4201f2210862c22592",
       "count": 2,
       "reason": "Reads at lines 5 and 6 use literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-draft-preview-runtime.test.mjs",
+      "sha256": "1689e315231b6ecb4395e5a8983c739264b811ff73eb46ed65fab697558c96fa",
+      "count": 1,
+      "reason": "The line 5 source read uses a literal draft-preview.js URL relative to import.meta.url. Draft bodies, recipients, translation fixtures, clipboard responses and API payloads never control a filesystem path. This is an offline DOM runtime test, not application file access."
     }
   ],
   "zizmor": [
