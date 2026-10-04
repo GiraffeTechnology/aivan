@@ -221,8 +221,8 @@ def _create_rfq_from_event_inner(
 
         supplier_feasibility, suppliers_ready = evaluate_supplier_readiness(giraffe.suppliers)
         if not suppliers_ready:
-            # 0 suppliers -> selection; exactly 1 -> single-supplier confirmation.
-            # Neither is an error, and neither runs GLTG or creates drafts.
+            # No available supplier means selection is still needed. One real
+            # supplier may proceed; drafts retain ordinary human approval.
             return _pending_supplier_result(
                 project, event, classification, requirement, strategy,
                 supplier_feasibility, giraffe.suppliers, db,
@@ -233,6 +233,7 @@ def _create_rfq_from_event_inner(
             strategy,
             supplier_count=len(giraffe.suppliers),
             tenant_id=project.tenant_id or event.tenant_id,
+            source_trace_id=event.source_trace_id,
         )
     except (
         GiraffeDBContextError,
@@ -475,6 +476,9 @@ def _pending_supplier_result(project, event, classification, requirement, strate
     """
     from aivan.execution.safety import SUPPLIER_FEASIBILITY_ACTION
 
+    # Ready facts must survive supplier selection and a later conversation.
+    payload = {**(project.requirement_json or {}), **requirement.model_dump(), "strategy": strategy.model_dump()}
+    ProjectRepository(db).update_requirement(project.project_id, payload)
     action = SUPPLIER_FEASIBILITY_ACTION.get(feasibility, "pending_supplier_selection")
     zh = _should_use_chinese_user_message(requirement)
     if action == "pending_supplier_confirmation":
@@ -529,6 +533,9 @@ def _pending_supplier_result(project, event, classification, requirement, strate
 
 def _dependency_recovery_result(project, event, classification, requirement, exc, db):
     """Structured recovery for a dependency failure (never a generic backend error)."""
+    # Preserve parsed facts and prior case history; failure is not a saved result.
+    payload = {**(project.requirement_json or {}), **requirement.model_dump()}
+    ProjectRepository(db).update_requirement(project.project_id, payload)
     recovery = classify_exception(exc)
     zh = _should_use_chinese_user_message(requirement)
     message = recovery.operator_message(zh)
@@ -733,6 +740,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             supplier_reply=reply,
             supplier_id=reply.supplier_id or None,
             tenant_id=project.tenant_id or event.tenant_id,
+            source_trace_id=event.source_trace_id,
         )
     except GLTGUnavailableError as exc:
         _invalidate_stale_customer_quote_state(project.project_id, db)
@@ -783,6 +791,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             supplier_count=len(all_replies),
             supplier_id=reply.supplier_id or None,
             tenant_id=project.tenant_id or event.tenant_id,
+            source_trace_id=event.source_trace_id,
         )
     except GLTGUnavailableError as exc:
         _invalidate_stale_customer_quote_state(project.project_id, db)
@@ -910,7 +919,8 @@ def _create_customer_quote_email_draft(
         {
             "tenant_id": project.tenant_id or event.tenant_id or "legacy",
             "conversation_id": project.conversation_id or event.conversation_id,
-            "channel": "email",
+            "channel": project.channel or "email",
+            "channel_account_id": project.channel_account_id or "",
             "target_peer_id": project.customer_id or "",
             "target_role": "customer",
             "message_text": (

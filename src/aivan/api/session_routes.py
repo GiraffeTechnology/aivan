@@ -45,10 +45,13 @@ def _cookie_secure() -> bool:
     return os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
 
 
-def _configured_ui_tenant() -> str:
+def _configured_ui_tenant(authenticated_tenant: str = "") -> str:
+    """Resolve the UI tenant only from a verified deployment or tenant key."""
     tenant_id = os.environ.get("AIVAN_TENANT_ID", "").strip()
     if tenant_id:
         return tenant_id
+    if authenticated_tenant and authenticated_tenant in configured_tenant_ids():
+        return authenticated_tenant
     if _cookie_secure():
         raise HTTPException(
             status_code=503,
@@ -125,10 +128,10 @@ def _set_session_cookie(response: Response, token: str, csrf_token: str, expires
 
 @router.post("/login")
 def login(request: Request, response: Response, body: dict | None = None):
-    """Exchange the deployment credential for a short-lived HttpOnly UI session."""
+    """Exchange a verified tenant credential for a short-lived HttpOnly session."""
 
     context = resolve_request_context(request, allow_ui_session=False)
-    tenant_id = _configured_ui_tenant()
+    tenant_id = _configured_ui_tenant(context.tenant_id)
     if context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
     requested_role = str((body or {}).get("role") or "")
@@ -236,7 +239,7 @@ def switch_role(
     actor_id, allowed_roles, role = configured_ui_identity(str(body.get("role") or ""))
     if actor_id != context.actor_id or role not in session.allowed_roles:
         raise HTTPException(status_code=403, detail={"error": "ROLE_SWITCH_FORBIDDEN"})
-    tenant_id = _configured_ui_tenant()
+    tenant_id = _configured_ui_tenant(context.tenant_id)
     if tenant_id != session.tenant_id or tenant_id != context.tenant_id:
         raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
     token, csrf_token, expires_at = issue_ui_session(

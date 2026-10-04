@@ -1,0 +1,14 @@
+# Build-machine inputs. The delivered installer never invokes a package manager.
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-dotenv
+httpx
+jinja2
+alembic
+PyMySQL
+pydantic-settings
+py3langid==0.4.0
+ctranslate2
+sentencepiece

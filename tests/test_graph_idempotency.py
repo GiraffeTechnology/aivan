@@ -37,9 +37,15 @@ def test_graph_trace_metadata_is_deterministic():
     assert a["source_system"] == "aivan"
 
 
-def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatch):
+@pytest.mark.parametrize("tenant_id", ["", "tenant-alpha", "tenant-beta"])
+def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatch, tenant_id):
     monkeypatch.setenv("AIVAN_PERSIST_GIRAFFE_DB_GRAPH", "true")
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.test")
+    if tenant_id:
+        monkeypatch.setenv("AIVAN_ENV", "production")
+        monkeypatch.setenv("AIVAN_TEST_MODE", "false")
+        for name in ("AIVAN_TENANT_ID", "GIRAFFE_DB_TENANT_ID", "GIRAFFE_TENANT_ID"):
+            monkeypatch.delenv(name, raising=False)
 
     captured_payloads: list[dict] = []
     captured_headers: list[dict] = []
@@ -76,7 +82,7 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
     monkeypatch.setattr(httpx, "Client", _PatchedClient)
 
     result = persist_rfq_gltg_graph(
-        event=_event(), project_id="proj_1",
+        event=_event().model_copy(update={"tenant_id": tenant_id}), project_id="proj_1",
         requirement=BuyerRequirement(quantity=5000, destination="Osaka"),
         strategy=RFQStrategy(), gltg=_gltg(),
     )
@@ -94,6 +100,8 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
         assert lineage_container["source_trace_id"] == "aivan:proj_1:msg_graph_001"
     for headers in captured_headers:
         assert headers.get("idempotency-key", "").startswith("aivan:proj_1:msg_graph_001:")
+        if tenant_id:
+            assert headers["x-service-tenant-id"] == tenant_id
     assert len({headers["idempotency-key"] for headers in captured_headers}) == len(captured_headers)
 
     gltg_payload = next(payload for payload in captured_payloads if "final_p50_days" in payload)

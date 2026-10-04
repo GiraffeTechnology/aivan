@@ -25,6 +25,8 @@ Configuration (environment):
 from __future__ import annotations
 
 import os
+import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,7 +77,7 @@ class LanguageSkillClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.base_url = (
-            base_url or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL", DEFAULT_BASE_URL)
+            base_url or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL") or DEFAULT_BASE_URL
         ).rstrip("/")
         if timeout_seconds is not None:
             self.timeout = timeout_seconds
@@ -161,6 +163,17 @@ class LanguageSkillClient:
             isinstance(warning, dict) and warning.get("code") == "TRANSLATION_MODEL_MISSING"
             for warning in warnings
         )
+        language = data.get("language") if isinstance(data, dict) else None
+        detected = language.get("detected") if isinstance(language, dict) else None
+        confidence = language.get("confidence") if isinstance(language, dict) else None
+        detection_valid = (
+            isinstance(detected, str) and re.fullmatch(r"[a-z]{2,3}(?:-[A-Z]{2})?", detected)
+            and detected not in {"und", "zxx", "auto"}
+            and isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+            and math.isfinite(confidence) and 0.6 <= confidence <= 1.0
+            and (source_language in {"", "auto"} or detected == source_language)
+        )
+        passthrough = isinstance(translation, dict) and translation.get("model") == "passthrough"
         if (
             not isinstance(data, dict)
             or data.get("canonical_language") != canonical_language
@@ -169,10 +182,28 @@ class LanguageSkillClient:
             or (canonical_language == "en" and has_non_latin_text(text))
             or model_unavailable
             or model_missing
+            or not detection_valid
+            or (passthrough and detected != "en")
         ):
             return LanguageSkillResult(
                 False, None, "language-skill returned invalid canonical result", result.status_code
             )
+        if canonical_language == "en":
+            # Latin script and an English label do not prove English. The
+            # language service owns statistical identification: validate the
+            # actual canonical text through its existing read-only API, even
+            # for auto-detected passthrough. Never create a local translator or
+            # accept an old/unavailable validator as a successful fallback.
+            verification = self._request("POST", "/api/language/canonical-db/validate", json={
+                "repository": "aivan", "table_name": "aivan_normalized_intake",
+                "record": {"canonical_text": text}, "policy": "standard_english_canonical_db_v1",
+            })
+            verified = verification.data
+            if (not verification.ok or not isinstance(verified, dict)
+                    or verified.get("valid") is not True or verified.get("violations") != []):
+                return LanguageSkillResult(
+                    False, None, "language-skill could not verify canonical English", result.status_code
+                )
         return result
 
     def structure_rfq(

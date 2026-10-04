@@ -35,9 +35,19 @@ GLTG_API_VERSION=v1|v2
 Default for this iteration:
 
 ```text
-v1 remains default until GLTG service supports v2.
-v2 can be enabled in tests with mock transport.
+v2 is the default for the current authenticated workflow.
+GLTG_SERVICE_AUTH_SECRET and trusted tenant context are required for v2.
+Explicit v1 compatibility calls remain available; v2 failures never fall back to v1.
 ```
+
+The consumer forwards normalized `BuyerRequirement.extra.trade_processing_factors`
+and `source_observation_ids` without inventing observations or supplier confidence.
+The version is the existing v2 API contract, not a new calculation engine. Missing
+factor groups remain missing for the provider to interpret. Supplier candidates
+request private DB evidence under their actual tenant/supplier identity. Canonical
+quantiles retain their fractional values. P50 is central, not earliest delivery;
+the current v2 response does not supply a minimum/earliest field, so that field
+remains null. Returned lineage, warnings and persistence status stay visible.
 
 ### 12.2 v2 Request Schema
 

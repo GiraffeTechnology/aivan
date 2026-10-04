@@ -100,3 +100,42 @@ def test_provider_cannot_substitute_another_packet_identity_on_replay(boundary):
     assert response.status_code == 503
     assert response.json()["detail"]["error"] == "GPM_PERSISTENCE_OUTCOME_UNKNOWN"
     assert model.call_count == 1 and provider.create_packet.call_count == 1
+
+
+def test_explicit_zero_model_guidance_uses_totals_and_durable_replay(boundary, monkeypatch):
+    client, model, provider, _ = boundary
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
+    mock_analysis = MagicMock(side_effect=AssertionError("zero-model is not mock analysis"))
+    monkeypatch.setattr("aivan.gpm.router.mock_quote_analysis", mock_analysis)
+    monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "mock")
+    first = client.post("/api/gpm/quote-guidance", json=PAYLOAD, headers=HEADERS)
+    assert first.status_code == 201, first.text
+    packet = first.json()
+    assert packet["recommendation"] == "human_review_required"
+    assert packet["quote_position"] == "insufficient_data"
+    assert packet["confidence"] == "low"
+    assert packet["model_result"]["runtime_status"] == "disabled"
+    assert packet["model_result"]["model_provider"] == "none"
+    assert packet["model_result"]["model_name"] is None
+    assert packet["model_result"]["calculation"] == {
+        "supplied_supplier_total": 1250, "supplied_buyer_total": 1500,
+        "quoted_total_difference": 250, "quoted_total_difference_rate": .17,
+    }
+    assert packet["approval_status"] == "pending" and packet["dispatched"] is False
+    _reset_store(GPMPacketStore(provider))
+    repeated = client.post("/api/gpm/quote-guidance", json=PAYLOAD, headers=HEADERS)
+    assert repeated.status_code == 201 and repeated.json() == packet
+    assert repeated.headers["X-GPM-Replayed"] == "true"
+    model.assert_not_called()
+    mock_analysis.assert_not_called()
+    assert provider.create_packet.call_count == 1
+
+
+def test_explicit_zero_model_does_not_mask_persistence_failure(boundary, monkeypatch):
+    from aivan.gpm.giraffe_db_client import GiraffeDBClientError
+    client, model, provider, _ = boundary
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
+    provider.create_packet.side_effect = GiraffeDBClientError("synthetic provider outage")
+    response = client.post("/api/gpm/quote-guidance", json=PAYLOAD, headers=HEADERS)
+    assert response.status_code == 503
+    model.assert_not_called()

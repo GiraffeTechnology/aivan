@@ -158,13 +158,18 @@ async function establishSession() {
 async function login(event) {
   event.preventDefault();
   const keyInput = $('#access-key');
+  const tenantId = $('#tenant-id').value.trim();
   const button = event.submitter;
   button.disabled = true;
   try {
     const response = await fetch('/api/session/login', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'X-AIVAN-API-Key': keyInput.value },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-AIVAN-API-Key': keyInput.value,
+        ...(tenantId ? { 'X-AIVAN-Tenant-ID': tenantId } : {}),
+      },
       body: '{}',
     });
     const payload = await response.json();

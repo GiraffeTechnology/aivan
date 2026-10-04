@@ -68,6 +68,34 @@ def _client(monkeypatch, handler):
     )
 
 
+def _tenant_headers(tenant_id):
+    return GPMGuidanceClient._trusted_headers(
+        tenant_id=tenant_id, actor_id="operator", actor_role="buyer",
+        trace_id="trace-tenants", idempotency_key="guidance-tenants",
+    )
+
+
+def test_tenant_key_map_selects_only_authenticated_tenant_key(monkeypatch):
+    monkeypatch.setenv("GPM_TENANT_API_KEYS", json.dumps({
+        "tenant-alpha": "private-gpm-alpha", "tenant-beta": "private-gpm-beta",
+    }))
+    monkeypatch.setenv("GPM_API_KEY", "must-not-be-used")
+    for tenant, key in (("tenant-alpha", "private-gpm-alpha"), ("tenant-beta", "private-gpm-beta")):
+        headers = _tenant_headers(tenant)
+        assert headers["X-AIVAN-Tenant-ID"] == tenant
+        assert headers["X-AIVAN-API-Key"] == key
+    with pytest.raises(GPMGuidanceUnavailableError, match="GPM_TRUSTED_PROFILE_MISSING"):
+        _tenant_headers("unconfigured-tenant")
+
+
+@pytest.mark.parametrize("configured", ["invalid-json", "[]", '{"tenant-alpha": null}', '{"tenant-alpha": ""}'])
+def test_invalid_tenant_key_map_fails_closed(monkeypatch, configured):
+    monkeypatch.setenv("GPM_TENANT_API_KEYS", configured)
+    monkeypatch.setenv("GPM_API_KEY", "must-not-be-used")
+    with pytest.raises(GPMGuidanceUnavailableError, match="GPM_TENANT_AUTH_MISCONFIGURED"):
+        _tenant_headers("tenant-alpha")
+
+
 def test_test_transport_is_rejected_in_production(monkeypatch):
     monkeypatch.setenv("AIVAN_ENV", "production")
 

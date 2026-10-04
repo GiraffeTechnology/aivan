@@ -127,6 +127,37 @@ def _model_name(provider_name: str) -> str | None:
     return os.environ.get(env_name, "").strip() or None
 
 
+def deterministic_quote_analysis(*, supplier_total: float, buyer_total: float) -> dict:
+    """Compare supplied quote totals when model calls are explicitly disabled.
+
+    These are the caller's recorded quote amounts, not market evidence or a
+    complete landed-cost estimate. No benchmark or acceptance advice is inferred.
+    """
+    from aivan.pricing.margin import calculate_margin_breakdown
+
+    calculation = calculate_margin_breakdown(supplier_total, buyer_total)
+    return {
+        "human_approval_required": True,
+        "recommendation": "human_review_required",
+        "quote_position": "insufficient_data",
+        "confidence": "low",
+        "reasoning": (
+            "Model calls are disabled. The calculation compares the supplied buyer "
+            "and supplier totals only. It does not establish market value or include "
+            "unrecorded costs. No benchmark was supplied. Human review is required."
+        ),
+        "runtime_status": "disabled",
+        "model_provider": "none",
+        "model_name": None,
+        "calculation": {
+            "supplied_supplier_total": supplier_total,
+            "supplied_buyer_total": buyer_total,
+            "quoted_total_difference": calculation["margin_amount"],
+            "quoted_total_difference_rate": calculation["margin_rate"],
+        },
+    }
+
+
 def analyze_quote(
     sku: str,
     supplier_quote: float,
@@ -137,6 +168,13 @@ def analyze_quote(
     """Run LLM quote analysis. Returns validated dict or unavailable response."""
     from aivan.llm.config import get_llm_provider_name
     from aivan.llm.gateway import get_provider
+    from aivan.llm.policy import (
+        ExternalModelApiRequiresApprovalError, assert_provider_allowed, llm_api_enabled,
+    )
+
+    if not llm_api_enabled():
+        return {"runtime_status": "unavailable", "reason": "llm_api_disabled",
+                "operator_action_required": False}
 
     provider_name = get_llm_provider_name()
 
@@ -149,6 +187,7 @@ def analyze_quote(
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
+            assert_provider_allowed(provider_name, "gpm_quote_analysis")
             provider = get_provider()
             result = provider.complete_json(
                 task="gpm_quote_analysis",
@@ -181,6 +220,12 @@ def analyze_quote(
                     max_retries + 1,
                     exc,
                 )
+        except ExternalModelApiRequiresApprovalError:
+            return {
+                "runtime_status": "unavailable",
+                "reason": "external_model_approval_required",
+                "operator_action_required": True,
+            }
         except RuntimeError as exc:
             # Provider raised a RuntimeError (e.g. API key missing, HTTP error)
             msg = str(exc)

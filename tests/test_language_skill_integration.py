@@ -56,6 +56,8 @@ _STRUCTURE_RESPONSE = {
 def _handler(captured: dict):
     def handle(request: httpx.Request) -> httpx.Response:
         captured.setdefault("paths", []).append(request.url.path)
+        if request.url.path == "/api/language/canonical-db/validate":
+            return httpx.Response(200, json={"valid": True, "violations": []})
         if request.url.path == "/v1/inbound/normalize":
             return httpx.Response(200, json=_NORMALIZE_RESPONSE)
         if request.url.path == "/v1/structure/rfq":
@@ -83,7 +85,7 @@ def test_disabled_returns_none(monkeypatch):
 def test_canonicalize_calls_both_endpoints(enabled_service):
     canon = canonicalize_rfq(ZH_RFQ, source_channel="wechat")
     assert canon is not None
-    assert enabled_service["paths"] == ["/v1/inbound/normalize", "/v1/structure/rfq"]
+    assert enabled_service["paths"] == ["/v1/inbound/normalize", "/api/language/canonical-db/validate", "/v1/structure/rfq"]
     assert canon["structure"]["structured"]["destination"] == "Tokyo"
 
 
@@ -126,7 +128,7 @@ def test_requirement_agent_uses_language_skill_before_aivan_llm(enabled_service,
     req = requirement_agent.structure_customer_requirement_with_llm(
         raw_text=ZH_RFQ, project_id="p1", source_channel="wechat"
     )
-    assert enabled_service["paths"] == ["/v1/inbound/normalize", "/v1/structure/rfq"]
+    assert enabled_service["paths"] == ["/v1/inbound/normalize", "/api/language/canonical-db/validate", "/v1/structure/rfq"]
     assert req.quantity == 5000
     assert req.destination == "Tokyo"
     assert req.product_type == "plaid shirt"

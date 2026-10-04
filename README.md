@@ -120,7 +120,7 @@ GLTG is a standalone API dependency. Existing configuration includes:
 ```bash
 GLTG_API_BASE_URL=http://localhost:8090
 GLTG_API_TIMEOUT_SECONDS=30
-GLTG_API_VERSION=v1
+GLTG_API_VERSION=v2
 ```
 
 The selected version determines the estimate/simulation, path and reforecast contract. See [the GLTG integration requirements](docs/GLTG_BEHAVIORAL_STATISTICAL_MODEL_ITERATION_PRD.md). Do not silently calculate replacement lead times locally. GPM quotation/pricing guidance and durable decisions likewise use their chosen API/provider contract, with source, tenant and persisted process-state evidence.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -84,6 +85,20 @@ class GPMGuidanceClient:
         idempotency_key: str,
     ) -> dict[str, str]:
         api_key = os.environ.get("GPM_API_KEY", "").strip()
+        tenant_keys_json = os.environ.get("GPM_TENANT_API_KEYS", "").strip()
+        if tenant_keys_json:
+            try:
+                tenant_keys = json.loads(tenant_keys_json)
+            except json.JSONDecodeError as exc:
+                raise GPMGuidanceUnavailableError("GPM_TENANT_AUTH_MISCONFIGURED") from exc
+            if not isinstance(tenant_keys, dict) or not all(
+                isinstance(key, str) and key and isinstance(value, str) and value.strip()
+                for key, value in tenant_keys.items()
+            ):
+                raise GPMGuidanceUnavailableError("GPM_TENANT_AUTH_MISCONFIGURED")
+            # A configured map is authoritative; never substitute a shared key
+            # when the authenticated tenant has no downstream credential.
+            api_key = tenant_keys.get(tenant_id, "").strip()
         values = (tenant_id, actor_id, actor_role, trace_id, idempotency_key, api_key)
         if not all(values) or not all(_is_ascii(item) for item in values):
             raise GPMGuidanceUnavailableError("GPM_TRUSTED_PROFILE_MISSING")
