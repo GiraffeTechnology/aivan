@@ -89,6 +89,8 @@ def test_synthetic_normalization_precedes_intake_and_only_english_is_stored(
     def provider(request):
         payload = json.loads(request.content)
         requests.append((request.url.path, payload))
+        if request.url.path == "/api/language/canonical-db/validate":
+            return httpx.Response(200, json={"valid": True, "violations": []})
         if request.url.path.endswith("/normalize"):
             return httpx.Response(200, json={
                 "raw_text": text, "canonical_language": "en", "canonical_text": CANONICAL,

@@ -28,7 +28,9 @@ def test_normalize_rejects_invalid_canonical_response(changes):
 def test_normalize_preserves_english_unicode_punctuation_and_latin_names():
     text = "Please quote Café uniforms — 100 units for René."
     client = LanguageSkillClient(transport=httpx.MockTransport(lambda request: httpx.Response(
-        200, json={"canonical_language": "en", "canonical_text": text})))
+        200, json={"valid": True, "violations": []} if request.url.path.endswith("/validate")
+        else {"canonical_language": "en", "canonical_text": text,
+              "language": {"detected": "en", "confidence": 0.99}})))
     result = client.normalize("Synthetic inquiry")
     assert result.ok is True
     assert result.data["canonical_text"] == text
