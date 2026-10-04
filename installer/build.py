@@ -270,7 +270,7 @@ def main():
                 raise ValueError("Supplemental dependency license checksum mismatch")
         shutil.copytree(HERE / "licenses", licenses / "third-party")
         # Offline import smoke verifies installed wheels, never a source checkout.
-        run(payload / "runtime/bin/python3", "-B", "-I", "-c", "import aivan.api.main,aivan.gpm.server,gltg.api.main,giraffe_db.api.main,giraffe_language_skill.api.main,py3langid,ctranslate2,sentencepiece,transformers; print('Offline runtime imports passed')", cwd=work, env={"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+        run(payload / "runtime/bin/python3", "-B", "-I", "-c", "import aivan.api.main,aivan.gpm.server,gltg.api.main,giraffe_db.api.main,giraffe_language_skill.api.main,py3langid,ctranslate2,sentencepiece; print('Offline runtime imports passed')", cwd=work, env={"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
         sbom = []
         for dist in importlib.metadata.distributions(path=[str(site)]):
             sbom.append({"name": dist.metadata["Name"], "version": dist.version, "license": dist.metadata.get("License-Expression") or dist.metadata.get("License", "See bundled distribution metadata/licenses"), "license_files": [str(file) for file in (dist.files or []) if any(token in str(file).lower() for token in ("license", "copying", "notice"))]})

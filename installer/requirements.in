@@ -12,4 +12,3 @@ pydantic-settings
 py3langid==0.4.0
 ctranslate2
 sentencepiece
-transformers>=4.40,<5

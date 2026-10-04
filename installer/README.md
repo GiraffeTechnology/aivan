@@ -97,6 +97,10 @@ included; configure a verified existing model directory or compatible language
 service. Non-English workflow must fail closed without a functioning dynamic
 language provider. Do not select a mock provider to mark readiness green.
 
+The installed translation runtime uses CTranslate2 and SentencePiece directly.
+Model-conversion/training tools such as Transformers are not runtime dependencies
+and are not shipped in this installer.
+
 GPM is a real API service and uses the existing zero-model mode by default.
 That mode performs recorded-price arithmetic and returns low-confidence,
 insufficient-market-data guidance requiring human review; it does not claim model

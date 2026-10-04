@@ -17,6 +17,7 @@ def test_installer_inventory_covers_every_pinned_distribution():
     assert len(expected) == len(pinned)
     assert ("PyPI", "ctranslate2", "4.8.2") in expected
     assert ("PyPI", "py3langid", "0.4.0") in expected
+    assert not any(name == "transformers" for _ecosystem, name, _version in expected)
 
 
 @pytest.mark.parametrize("content", [

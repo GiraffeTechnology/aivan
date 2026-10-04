@@ -80,14 +80,14 @@
     {
       "rule": "python_crypto_rule-hash-sha1",
       "path": "installer/build.py",
-      "sha256": "9441aa42205c772e14729c66666635fa92b495ffb89d228d63b0047beaa1e1b0",
+      "sha256": "91106733e3b2d6dff35712bffad1566f3bc9b64595ce9a7cca0db99d9bc942bc",
       "count": 2,
       "reason": "SHA-1 is used only to reconstruct and compare the existing Git blob/tree object format, with usedforsecurity=False. It is not used for passwords, credentials, signatures or package integrity. The installed payload inventory, wheels, provenance and final installer use SHA-256."
     },
     {
       "rule": "python_exec_rule-subprocess-call",
       "path": "installer/build.py",
-      "sha256": "9441aa42205c772e14729c66666635fa92b495ffb89d228d63b0047beaa1e1b0",
+      "sha256": "91106733e3b2d6dff35712bffad1566f3bc9b64595ce9a7cca0db99d9bc942bc",
       "count": 2,
       "reason": "The two flagged calls execute the literal git binary with separate -C, operator-selected source path, ls-files and -z argv values. No shell is used, no application request can select the command, and the build verifies the selected source tree before staging its files."
     },
