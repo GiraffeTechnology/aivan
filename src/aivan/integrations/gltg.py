@@ -46,6 +46,7 @@ class GLTGClient:
         supplier_count: int,
         supplier_id: str | None = None,
         tenant_id: str | None = None,
+        source_trace_id: str | None = None,
     ) -> GLTGSimulation:
         data = self._estimate(
             product_type=requirement.product_type or requirement.category or "unspecified",
@@ -59,6 +60,7 @@ class GLTGClient:
             supplier_id=supplier_id,
             tenant_id=tenant_id,
             evidence_context=requirement.extra,
+            source_trace_id=source_trace_id,
         )
 
         p50 = float(data["p50_days"])
@@ -118,6 +120,7 @@ class GLTGClient:
         supplier_id: str | None = None,
         candidate_id: str | None = None,
         tenant_id: str | None = None,
+        source_trace_id: str | None = None,
     ) -> LeadTimeEstimate:
         capacity = getattr(supplier_reply, "capacity_per_day", None) if supplier_reply else None
         declared = getattr(supplier_reply, "lead_time_days", None) if supplier_reply else None
@@ -147,6 +150,7 @@ class GLTGClient:
             tenant_id=tenant_id,
             evidence_context=requirement.extra,
             supplier_stated_lead_time_days=declared,
+            source_trace_id=source_trace_id,
         )
 
         p50 = float(data["p50_days"])
@@ -246,6 +250,7 @@ class GLTGClient:
         tenant_id: str | None = None,
         evidence_context: dict | None = None,
         supplier_stated_lead_time_days: float | None = None,
+        source_trace_id: str | None = None,
     ) -> dict:
         order = {
             "product_type": product_type,
@@ -265,6 +270,9 @@ class GLTGClient:
         if api_version not in {"v1", "v2"}:
             raise GLTGUnavailableError("GLTG_API_VERSION_UNSUPPORTED")
         if api_version == "v2":
+            # No candidate exists at requirement-baseline scope. Do not invent
+            # a supplier identity that could be mistaken for a private DB key.
+            supplier["supplier_id"] = supplier_id
             context = evidence_context or {}
             factors = context.get("trade_processing_factors", {})
             observations = context.get("source_observation_ids", [])
@@ -280,7 +288,7 @@ class GLTGClient:
                     "tenant_id": tenant_id
                     or resolve_service_tenant(context="gltg_v2_simulation"),
                     "source_system": "aivan",
-                    "source_trace_id": new_estimate_id(),
+                    "source_trace_id": source_trace_id or new_estimate_id(),
                     "case_context": {
                         "assessment_scope": (
                             "supplier_candidate" if supplier_id else "requirement_baseline"
@@ -323,7 +331,7 @@ class GLTGClient:
 
     @staticmethod
     def _normalize_v2_result(data: dict) -> dict:
-        if not isinstance(data, dict) or data.get("ok") is False:
+        if not isinstance(data, dict) or data.get("ok") is not True:
             raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
         quantiles = data.get("quantiles") or {}
         risk = data.get("risk") or {}
@@ -336,6 +344,12 @@ class GLTGClient:
             if data.get(field) is not None and not isinstance(data[field], list):
                 raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
         p50 = quantiles.get("p50_days")
+        if any(not isinstance(row, dict) for row in (data.get("warnings") or [])):
+            raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
+        if any(not isinstance(row, str) or not row for row in (data.get("source_observation_ids") or [])):
+            raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
+        if risk.get("deadline_feasible") is not None and type(risk["deadline_feasible"]) is not bool:
+            raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
         p80 = quantiles.get("p80_days")
         p90 = quantiles.get("p90_days")
         selected = risk.get("selected_confidence_days")
@@ -393,6 +407,7 @@ def calculate_leadtime_for_requirement(
     supplier_id: str | None = None,
     candidate_id: str | None = None,
     tenant_id: str | None = None,
+    source_trace_id: str | None = None,
 ) -> LeadTimeEstimate:
     """Module-level helper kept for caller compatibility; routes through GLTG API."""
     return GLTGClient().estimate_for_requirement(
@@ -401,4 +416,5 @@ def calculate_leadtime_for_requirement(
         supplier_id=supplier_id,
         candidate_id=candidate_id,
         tenant_id=tenant_id,
+        source_trace_id=source_trace_id,
     )

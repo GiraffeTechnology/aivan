@@ -43,7 +43,7 @@ def test_default_facade_is_authenticated_v2_with_facts_and_lineage(monkeypatch):
         "trade_processing_factors": factors, "source_observation_ids": ["observation-actual-input"]})
     original = copy.deepcopy(req.model_dump())
     result = facade(monkeypatch, response(), captured).simulate(
-        req, RFQStrategy(), 1, supplier_id="actual-supplier", tenant_id="tenant-alpha")
+        req, RFQStrategy(), 1, supplier_id="actual-supplier", tenant_id="tenant-alpha", source_trace_id="actual-trace")
     call = captured[0]
     assert call["path"] == "/v2/lead-time/simulate"
     assert call["tenant"] == call["body"]["tenant_id"] == "tenant-alpha"
@@ -52,6 +52,7 @@ def test_default_facade_is_authenticated_v2_with_facts_and_lineage(monkeypatch):
     assert call["body"]["trade_processing_factors"] == factors
     assert call["body"]["source_observation_ids"] == ["observation-actual-input"]
     assert call["body"]["evidence"] == {"use_giraffe_db": True}
+    assert call["body"]["source_trace_id"] == "actual-trace"
     assert result.source_api_version == "v2"
     assert (result.p50_days, result.p80_days, result.p90_days) == (76.53, 91.3, 91.8)
     assert result.minimum_feasible_days is None
@@ -152,3 +153,20 @@ def test_transport_exception_never_returns_sensitive_context(monkeypatch):
         {"tenant_id": "tenant-alpha", "order": {"quantity": 1}})
     assert result.error == "GLTG_UNAVAILABLE"
     assert result.data is None
+
+
+def test_v2_requirement_baseline_does_not_invent_supplier_identity(monkeypatch):
+    calls = []
+    result = facade(monkeypatch, response(), calls).simulate(BuyerRequirement(quantity=1), RFQStrategy(), 0, tenant_id="tenant-alpha")
+    assert calls[0]["body"]["supplier"]["supplier_id"] is None
+    assert "evidence" not in calls[0]["body"]
+    assert result.supplier_ids == []
+    assert result.assessment_scope == "requirement_baseline"
+
+
+@pytest.mark.parametrize("field, value", [("warnings", ["invalid"]), ("source_observation_ids", [1]), ("ok", "true")])
+def test_invalid_provider_metadata_is_stable_failure(monkeypatch, field, value):
+    data = response()
+    data[field] = value
+    with pytest.raises(GLTGUnavailableError, match="GLTG_RESPONSE_INVALID"):
+        facade(monkeypatch, data, []).simulate(BuyerRequirement(quantity=1), RFQStrategy(), 0, tenant_id="tenant-alpha")
