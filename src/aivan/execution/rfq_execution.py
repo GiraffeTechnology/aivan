@@ -475,6 +475,9 @@ def _pending_supplier_result(project, event, classification, requirement, strate
     """
     from aivan.execution.safety import SUPPLIER_FEASIBILITY_ACTION
 
+    # Ready facts must survive supplier selection and a later conversation.
+    payload = {**(project.requirement_json or {}), **requirement.model_dump(), "strategy": strategy.model_dump()}
+    ProjectRepository(db).update_requirement(project.project_id, payload)
     action = SUPPLIER_FEASIBILITY_ACTION.get(feasibility, "pending_supplier_selection")
     zh = _should_use_chinese_user_message(requirement)
     if action == "pending_supplier_confirmation":
@@ -529,6 +532,9 @@ def _pending_supplier_result(project, event, classification, requirement, strate
 
 def _dependency_recovery_result(project, event, classification, requirement, exc, db):
     """Structured recovery for a dependency failure (never a generic backend error)."""
+    # Preserve parsed facts and prior case history; failure is not a saved result.
+    payload = {**(project.requirement_json or {}), **requirement.model_dump()}
+    ProjectRepository(db).update_requirement(project.project_id, payload)
     recovery = classify_exception(exc)
     zh = _should_use_chinese_user_message(requirement)
     message = recovery.operator_message(zh)
