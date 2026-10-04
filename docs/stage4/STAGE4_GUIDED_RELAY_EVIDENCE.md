@@ -36,8 +36,8 @@ WeChat delivery.
 
 ## Historical target-specific operational record
 
-- Do not stop, rebind, or modify AIVAN server ports `443` or `8443`; they are
-  reserved by existing SSH/mail services.
+- Do not stop, rebind, or modify AIVAN server ports `443` (SSH) or `8443`
+  (mail). Web traffic may use any other free port.
 - Any CTYun path to a non-China IP must traverse the existing `abcdyi-sin`
   Singapore bridge.
 - Inject channel credentials and API keys from the authorized secret store;

@@ -4,7 +4,7 @@ Reconciled: 2026-10-02. **NO DEPLOYMENT AUTHORIZED.** This file provides no exec
 
 The earlier runbook was quarantined because it contained stale host/model assumptions and unsafe service-changing instructions. Use the current authorized target inventory when an operation is requested. The [deployment safety notice](DEPLOY_OPENCLAW_AIVAN_SOP.md) preserves the existing port, service, bridge, credential and authorization boundaries.
 
-Aivan host ports 443/8443 and their existing services must not be taken over. CTYun external routing must use the authorized `abcdyi-sin` Singapore bridge. This documentation does not install/replace a model, change credentials or network policy, run migrations, mutate a production DB or restart services.
+On CTYun hosts, TCP 443 is owned by SSH and 8443 by the existing mail service; neither may be taken over or used for web traffic. HTTP/HTTPS may use any other free port, and the public HTTPS origin (`AIVAN_PUBLIC_ORIGIN`) must carry that explicit port, for example `https://myaivan.com:8444`. CTYun external routing must use the authorized `abcdyi-sin` Singapore bridge. This documentation does not install/replace a model, change credentials or network policy, run migrations, mutate a production DB or restart services.
 
 The historical environment note identified `qwen3.5:9b`. Verify the actually installed model for any authorized operation; that historical name does not mandate a model, authorize a download/replacement or redefine the product.
 

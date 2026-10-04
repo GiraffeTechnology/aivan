@@ -54,8 +54,13 @@ Before handoff: identify the exact scope and revision, run relevant checks, dist
 
 ## CTYun TCP port 443 reservation
 
-On CTYun hosts, TCP port 443 is reserved for SSH. Do not configure HTTP, HTTPS, web servers, reverse proxies, or TLS listeners to bind to TCP port 443. Do not stop, rebind, replace, or otherwise disrupt SSH to free that port.
+On CTYun hosts, TCP port 443 is owned by SSH. It is the only port excluded from web use; do not stop, rebind, replace, or otherwise disrupt SSH to free it.
 
-Before selecting a web or bridge port, inspect the existing deployment and operations configuration and reuse an explicitly confirmed allocation. Do not guess a replacement port. If the allocation is unclear, report the missing configuration rather than changing a service binding.
+- HTTP and HTTPS may use any other free port. Do not block work waiting for a "confirmed" web port: pick a free non-443 port, make it configurable, and record the choice.
+- Never bind HTTP, HTTPS, web servers, reverse proxies, or TLS listeners to 443, and never assume 443 as a default. Port 8443 is also in use by the existing mail service.
+- A public URL or browser origin without a port implies 443 for `https://`. On CTYun every HTTPS URL, origin, CORS entry, and example must carry an explicit non-443 port (for example `https://myaivan.com:8444`). Plain `http://host` (port 80) is acceptable.
+- Do not hard-code a public origin or port in code, tests, or gates; read it from configuration and reject an effective port of 443.
 
-This constraint applies only to CTYun hosts; do not extend it to SIN or other environments without an explicit instruction. Recording this rule does not authorize server access or changes to SSH, firewalls, credentials, network settings, or security settings.
+This constraint applies only to CTYun hosts; do not extend it to SIN or other environments without an explicit instruction. Recording this rule does not authorize changes to SSH, firewalls, credentials, network settings, or security settings.
+
+In this repository the public origin is `AIVAN_PUBLIC_ORIGIN` (validated by `aivan.observability.public_origin`). It must also appear exactly in `AIVAN_CORS_ORIGINS`. The Stage 7F topology records `protected_port_owners` as `{"443": "ssh", "8443": "stalwart"}`.

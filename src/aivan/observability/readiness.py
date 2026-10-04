@@ -14,6 +14,7 @@ from aivan.observability.dependency_probe import (
     critical_dependencies_ready,
     run_dependency_probes,
 )
+from aivan.observability.public_origin import public_origin_valid
 
 
 router = APIRouter(tags=["observability"])
@@ -54,6 +55,7 @@ def _readiness_snapshot(
         item.strip() for item in os.environ.get("AIVAN_CORS_ORIGINS", "").split(",") if item.strip()
     }
     port = os.environ.get("AIVAN_PORT", "").strip()
+    public_origin = os.environ.get("AIVAN_PUBLIC_ORIGIN", "").strip()
     roles = [
         item.strip()
         for item in os.environ.get("AIVAN_UI_ALLOWED_ROLES", "").split(",")
@@ -69,7 +71,8 @@ def _readiness_snapshot(
         "ui_session_secret_configured": len(os.environ.get("AIVAN_UI_SESSION_SECRET", "").strip())
         >= 32,
         "ui_identity_configured": _configured("AIVAN_UI_ACTOR_ID") and bool(roles),
-        "cors_myaivan_exact": any(origin == "https://myaivan.com" for origin in cors)
+        "public_origin_valid": public_origin_valid(public_origin),
+        "cors_public_origin_exact": bool(public_origin) and public_origin in cors
         and "*" not in cors,
         "protected_ports_avoided": bool(port) and port not in {"443", "8443"},
         "gpm_durable_configured": _configured("GIRAFFE_DB_BASE_URL"),

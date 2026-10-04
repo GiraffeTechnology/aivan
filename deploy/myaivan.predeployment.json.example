@@ -9,7 +9,7 @@
   "database_profile": "sqlite:///./data/aivan.db",
   "non_china_egress_bridge": "abcdyi-sin",
   "protected_port_owners": {
-    "443": "nginx",
+    "443": "ssh",
     "8443": "stalwart"
   },
   "reverse_bridge": {

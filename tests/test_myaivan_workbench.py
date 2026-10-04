@@ -271,7 +271,8 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setenv("AIVAN_UI_SESSION_SECRET", "s" * 40)
     monkeypatch.setenv("AIVAN_UI_ACTOR_ID", "operator-1")
     monkeypatch.setenv("AIVAN_UI_ALLOWED_ROLES", "sales,approver")
-    monkeypatch.setenv("AIVAN_CORS_ORIGINS", "https://myaivan.com")
+    monkeypatch.setenv("AIVAN_PUBLIC_ORIGIN", "https://myaivan.com:8444")
+    monkeypatch.setenv("AIVAN_CORS_ORIGINS", "https://myaivan.com:8444")
     monkeypatch.setenv("AIVAN_PORT", "8765")
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://127.0.0.1:9000")
     monkeypatch.setenv("OPENCLAW_BASE_URL", "http://127.0.0.1:3000")
@@ -323,6 +324,11 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
 
     monkeypatch.setattr(readiness, "run_dependency_probes", ready_probes)
     assert all(readiness_checks(correlation_id="corr-ready").values())
+
+    # CTYun TCP 443 belongs to SSH: a bare https origin implies 443 and fails.
+    monkeypatch.setenv("AIVAN_PUBLIC_ORIGIN", "https://myaivan.com")
+    monkeypatch.setenv("AIVAN_CORS_ORIGINS", "https://myaivan.com")
+    assert readiness_checks()["public_origin_valid"] is False
 
 
 def test_session_cookie_writer_rejects_unvalidated_values():

@@ -23,12 +23,13 @@ from dotenv import dotenv_values
 from sqlalchemy import create_engine
 
 from aivan.db.schema_validation import schema_issues
+from aivan.observability.public_origin import public_origin_valid
 
 
 EVIDENCE_CLASS = "production_predeployment"
 PRODUCTION_ACCEPTANCE = False
 DATABASE_PROFILE = "sqlite:///./data/aivan.db"
-REQUIRED_ORIGIN = "https://myaivan.com"
+PROTECTED_PORT_OWNERS = {"443": "ssh", "8443": "stalwart"}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CANDIDATE_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 LOCK_FILES = (
@@ -192,7 +193,12 @@ def run_predeployment_gate(
         for origin in (environment.get("AIVAN_CORS_ORIGINS") or "").split(",")
         if origin.strip()
     }
-    check("cors_exact_origin", REQUIRED_ORIGIN in origins and "*" not in origins)
+    public_origin = (environment.get("AIVAN_PUBLIC_ORIGIN") or "").strip()
+    check("public_origin_valid", public_origin_valid(public_origin))
+    check(
+        "cors_exact_origin",
+        bool(public_origin) and public_origin in origins and "*" not in origins,
+    )
     check("human_approval_required", _truthy(environment.get("AIVAN_REQUIRE_HUMAN_APPROVAL")))
     check(
         "external_model_api_disabled", _falsey(environment.get("AIVAN_EXTERNAL_MODEL_API_ENABLED"))
@@ -233,7 +239,7 @@ def run_predeployment_gate(
     check("topology_bridge", topology.get("non_china_egress_bridge") == "abcdyi-sin")
     check(
         "protected_port_owners",
-        topology.get("protected_port_owners") == {"443": "nginx", "8443": "stalwart"},
+        topology.get("protected_port_owners") == PROTECTED_PORT_OWNERS,
     )
     bridge = topology.get("reverse_bridge") or {}
     check(
@@ -339,7 +345,8 @@ def main() -> int:
                 {
                     "evidence_class": EVIDENCE_CLASS,
                     "production_acceptance": PRODUCTION_ACCEPTANCE,
-                    "required_origin": REQUIRED_ORIGIN,
+                    "public_origin_variable": "AIVAN_PUBLIC_ORIGIN",
+                    "protected_port_owners": PROTECTED_PORT_OWNERS,
                     "database_profile": DATABASE_PROFILE,
                     "required_observations": list(REQUIRED_OBSERVATIONS),
                 },

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from aivan.db.models import Base
 from scripts.run_stage7f_predeployment import (
     EVIDENCE_CLASS,
@@ -28,7 +30,7 @@ def _repository(tmp_path):
     return tmp_path
 
 
-def _environment(path, candidate, *, cors="https://myaivan.com"):
+def _environment(path, candidate, *, cors="https://myaivan.com:8444", public_origin="https://myaivan.com:8444"):
     secret = "must-not-enter-evidence"
     path.write_text(
         "\n".join(
@@ -39,6 +41,7 @@ def _environment(path, candidate, *, cors="https://myaivan.com"):
                 "AIVAN_PORT=8765",
                 "AIVAN_DB_URL=sqlite:///./data/aivan.db",
                 "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin",
+                f"AIVAN_PUBLIC_ORIGIN={public_origin}",
                 f"AIVAN_CORS_ORIGINS={cors}",
                 "AIVAN_REQUIRE_HUMAN_APPROVAL=true",
                 "AIVAN_EXTERNAL_MODEL_API_ENABLED=false",
@@ -80,7 +83,7 @@ def _topology(path, *, preserved=True):
         "bind_port": 8765,
         "database_profile": "sqlite:///./data/aivan.db",
         "non_china_egress_bridge": "abcdyi-sin",
-        "protected_port_owners": {"443": "nginx", "8443": "stalwart"},
+        "protected_port_owners": {"443": "ssh", "8443": "stalwart"},
         "reverse_bridge": {
             "remote_host_profile": "abcdyi-sin",
             "remote_bind": "127.0.0.1",
@@ -192,3 +195,26 @@ def test_predeployment_gate_fails_for_checkout_mismatch_or_empty_tenant_keys(tmp
     failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
     assert "candidate_matches_checkout" in failed
     assert "api_auth_configured" in failed
+
+
+@pytest.mark.parametrize("origin", ("https://myaivan.com", "https://myaivan.com:443"))
+def test_predeployment_gate_rejects_public_origin_on_port_443(tmp_path, monkeypatch, origin):
+    repository = _repository(tmp_path)
+    candidate = "f" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate, cors=origin, public_origin=origin)
+    _topology(topology)
+
+    result = run_predeployment_gate(
+        repository_root=repository,
+        candidate_commit=candidate,
+        environment_file=environment,
+        topology_file=topology,
+        output_path=tmp_path / "evidence.jsonl",
+    )
+
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert result["status"] == "failed_closed"
+    assert "public_origin_valid" in failed
