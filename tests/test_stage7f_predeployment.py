@@ -36,6 +36,7 @@ def _environment(
     *,
     cors="https://myaivan.test:9100",
     public_origin="https://myaivan.test:9100",
+    public_host="",
     port="9200",
 ):
     secret = "must-not-enter-evidence"
@@ -49,6 +50,7 @@ def _environment(
                 "AIVAN_DB_URL=sqlite:///./data/aivan.db",
                 "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin",
                 f"AIVAN_PUBLIC_ORIGIN={public_origin}",
+                f"AIVAN_PUBLIC_HOST={public_host}",
                 f"AIVAN_CORS_ORIGINS={cors}",
                 "AIVAN_REQUIRE_HUMAN_APPROVAL=true",
                 "AIVAN_EXTERNAL_MODEL_API_ENABLED=false",
@@ -273,3 +275,23 @@ def test_predeployment_gate_accepts_explicit_http_port_80_in_browser_form(tmp_pa
         environment_kwargs={"public_origin": "http://myaivan.test:80", "cors": "http://myaivan.test"},
     )
     assert result["status"] == "passed"
+
+
+def test_predeployment_gate_passes_with_all_ports_selected_automatically(tmp_path, monkeypatch):
+    result = _gate(
+        tmp_path,
+        monkeypatch,
+        environment_kwargs={"port": "", "public_origin": "", "public_host": "myaivan.test", "cors": ""},
+        topology_kwargs={"bind_port": None, "remote_port": None},
+    )
+    assert result["status"] == "passed", [c for c in result["checks"] if c["result"] == "failed"]
+
+
+def test_predeployment_gate_requires_a_public_host_or_origin(tmp_path, monkeypatch):
+    result = _gate(
+        tmp_path,
+        monkeypatch,
+        environment_kwargs={"public_origin": "", "public_host": ""},
+    )
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert "public_origin_valid" in failed

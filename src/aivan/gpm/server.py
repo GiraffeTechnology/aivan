@@ -12,12 +12,12 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from aivan.governance.runtime_policy import enforce_runtime_policy
 from aivan.gpm.router import _init_store, get_db_client, router
+from aivan.utils.ports import serve
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -141,15 +141,17 @@ app = create_app()
 def main() -> None:
     parser = argparse.ArgumentParser(description="AIVAN GPM Server")
     parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=8080)
+    # Optional; a free port (never 443) is chosen automatically.
+    parser.add_argument("--port", default=os.environ.get("AIVAN_GPM_PORT"))
     args = parser.parse_args()
     enforce_runtime_policy(component="aivan-gpm")
     validate_bind_host(args.host)
-    uvicorn.run(
+    serve(
         create_app(bind_host=args.host),
         host=args.host,
-        port=args.port,
-        reload=False,
+        requested=args.port,
+        env_var="AIVAN_GPM_PORT",
+        file_env_var="AIVAN_GPM_PORT_FILE",
     )
 
 

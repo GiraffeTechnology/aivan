@@ -15,11 +15,16 @@ def cmd_init(args):
     print("AIVAN ready. Run: uv run aivan serve")
 
 def cmd_serve(args):
-    import uvicorn
+    from aivan.utils.ports import serve
     host = os.environ.get("AIVAN_HOST", "127.0.0.1")
-    port = int(os.environ.get("AIVAN_PORT", "8765"))
-    print(f"Starting AIVAN on http://{host}:{port}/app")
-    uvicorn.run("aivan.api.main:app", host=host, port=port, reload=False)
+    # AIVAN_PORT is optional: a free port (never 443) is chosen automatically.
+    serve(
+        "aivan.api.main:app",
+        host=host,
+        requested=os.environ.get("AIVAN_PORT"),
+        env_var="AIVAN_PORT",
+        file_env_var="AIVAN_PORT_FILE",
+    )
 
 def cmd_import_suppliers(args):
     path = args.file

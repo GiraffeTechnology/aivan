@@ -23,11 +23,8 @@ from dotenv import dotenv_values
 from sqlalchemy import create_engine
 
 from aivan.db.schema_validation import schema_issues
-from aivan.observability.public_origin import (
-    RESERVED_PUBLIC_PORT,
-    browser_origin,
-    public_origin_valid,
-)
+from aivan.observability.public_origin import RESERVED_PUBLIC_PORT, public_origin_valid
+from aivan.utils.ports import usable_port
 
 
 EVIDENCE_CLASS = "production_predeployment"
@@ -84,13 +81,11 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _usable_port(value: Any) -> bool:
-    """Any TCP port except the SSH-owned 443; no specific port is required."""
-    try:
-        port = int(str(value).strip())
-    except (TypeError, ValueError):
-        return False
-    return 0 < port < 65536 and port != RESERVED_PUBLIC_PORT
+def _port_or_auto(value: Any) -> bool:
+    """Blank means the port is chosen automatically; otherwise any port but 443."""
+    if value is None or not str(value).strip():
+        return True
+    return usable_port(value) is not None
 
 
 def _truthy(value: str | None) -> bool:
@@ -195,7 +190,7 @@ def run_predeployment_gate(
         "candidate_matches_environment", environment.get("AIVAN_CANDIDATE_SHA") == candidate_commit
     )
     check("application_loopback_bind", environment.get("AIVAN_HOST") == "127.0.0.1")
-    check("application_port_usable", _usable_port(environment.get("AIVAN_PORT")))
+    check("application_port_usable", _port_or_auto(environment.get("AIVAN_PORT")))
     check("fixed_database_profile", environment.get("AIVAN_DB_URL") == DATABASE_PROFILE)
     check(
         "singapore_egress_policy",
@@ -206,12 +201,16 @@ def run_predeployment_gate(
         for origin in (environment.get("AIVAN_CORS_ORIGINS") or "").split(",")
         if origin.strip()
     }
+    # The public origin is either given or derived at startup from
+    # AIVAN_PUBLIC_HOST and the automatically selected port; it is always
+    # added to the CORS allowlist, so only a wildcard is rejected here.
     public_origin = (environment.get("AIVAN_PUBLIC_ORIGIN") or "").strip()
-    check("public_origin_valid", public_origin_valid(public_origin))
+    public_host = (environment.get("AIVAN_PUBLIC_HOST") or "").strip()
     check(
-        "cors_exact_origin",
-        bool(public_origin) and browser_origin(public_origin) in origins and "*" not in origins,
+        "public_origin_valid",
+        public_origin_valid(public_origin) if public_origin else bool(public_host),
     )
+    check("cors_exact_origin", "*" not in origins)
     check("human_approval_required", _truthy(environment.get("AIVAN_REQUIRE_HUMAN_APPROVAL")))
     check(
         "external_model_api_disabled", _falsey(environment.get("AIVAN_EXTERNAL_MODEL_API_ENABLED"))
@@ -247,10 +246,13 @@ def run_predeployment_gate(
     check("fixed_install_path", topology.get("install_path") == "/opt/giraffe/aivan")
     check("fixed_service_name", topology.get("service_name") == "myaivan.service")
     check("topology_loopback_bind", topology.get("bind_host") == "127.0.0.1")
-    check("topology_port_usable", _usable_port(topology.get("bind_port")))
+    check("topology_port_usable", _port_or_auto(topology.get("bind_port")))
+    environment_port = (environment.get("AIVAN_PORT") or "").strip()
     check(
         "topology_port_matches_environment",
-        str(topology.get("bind_port")) == (environment.get("AIVAN_PORT") or "").strip(),
+        topology.get("bind_port") is None
+        or not environment_port
+        or str(topology.get("bind_port")) == environment_port,
     )
     check("topology_database_profile", topology.get("database_profile") == DATABASE_PROFILE)
     check("topology_bridge", topology.get("non_china_egress_bridge") == "abcdyi-sin")
@@ -264,7 +266,7 @@ def run_predeployment_gate(
         set(bridge) == {"remote_host_profile", "remote_bind", "remote_port", "health_path"}
         and bridge.get("remote_host_profile") == "abcdyi-sin"
         and bridge.get("remote_bind") == "127.0.0.1"
-        and _usable_port(bridge.get("remote_port"))
+        and _port_or_auto(bridge.get("remote_port"))
         and bridge.get("health_path") == "/health",
     )
     check(

@@ -34,7 +34,6 @@ AIVAN_LLM_PROVIDER=mock
 OPENCLAW_MOCK_MODE=true
 AIVAN_DB_URL=sqlite:///./data/aivan.db
 AIVAN_HOST=127.0.0.1
-AIVAN_PORT=8765
 EOF
         echo "[OK] Created minimal .env (mock mode)"
     fi

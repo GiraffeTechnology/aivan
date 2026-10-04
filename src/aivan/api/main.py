@@ -35,6 +35,7 @@ from aivan.api.request_context import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.observability.metrics import record_request_metrics, router as _metrics_router
 from aivan.observability.readiness import router as _readiness_router
+from aivan.api.cors import cors_origins as _cors_origins
 from aivan.observability.dependency_probe import dependency_side_effect_gate
 from aivan.governance.runtime_policy import enforce_runtime_policy
 
@@ -79,22 +80,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AIVAN - Monitoring and Takeover Control Plane", version="0.3.0", lifespan=lifespan)
 
-
-def _cors_origins() -> list[str]:
-    """Return an explicit CORS allowlist; production defaults to no origins."""
-
-    configured = os.environ.get("AIVAN_CORS_ORIGINS", "")
-    origins = [value.strip() for value in configured.split(",") if value.strip()]
-    if "*" in origins:
-        raise RuntimeError("AIVAN_CORS_ORIGINS must not contain '*' ")
-    if origins:
-        return origins
-    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
-        return []
-    return [
-        "http://127.0.0.1:8765",
-        "http://localhost:8765",
-    ]
 
 app.add_middleware(
     CORSMiddleware,

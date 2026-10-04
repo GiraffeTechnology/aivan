@@ -88,7 +88,7 @@ uv run aivan serve
 uv run aivan demo
 ```
 
-The existing local app route is `http://127.0.0.1:8765/app`. The demo uses explicit mock providers. A successful mock demo is useful smoke evidence but does not prove the real DB/GLTG/GPM/channel integrations or the required first-web-iteration UI.
+`aivan serve` binds a free port automatically (never 443) and prints it; the app route is `http://127.0.0.1:<printed port>/app`. Set `AIVAN_PORT` only to request a specific port; if it is busy, another free port is chosen. The demo uses explicit mock providers. A successful mock demo is useful smoke evidence but does not prove the real DB/GLTG/GPM/channel integrations or the required first-web-iteration UI.
 
 ## Repository checks
 
@@ -134,7 +134,6 @@ The existing local profile includes:
 ```bash
 AIVAN_ENV=local
 AIVAN_HOST=127.0.0.1
-AIVAN_PORT=8765
 AIVAN_DB_URL=sqlite:///./data/aivan.db
 AIVAN_REQUIRE_HUMAN_APPROVAL=true
 OPENCLAW_MOCK_MODE=true

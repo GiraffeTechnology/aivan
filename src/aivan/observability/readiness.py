@@ -8,13 +8,18 @@ import uuid
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from aivan.api.cors import cors_origins
 from aivan.governance.runtime_policy import production_policy_checks
 from aivan.observability.dependency_probe import (
     DependencyProbeResult,
     critical_dependencies_ready,
     run_dependency_probes,
 )
-from aivan.observability.public_origin import browser_origin, public_origin_valid
+from aivan.observability.public_origin import (
+    browser_origin,
+    public_origin_valid,
+    resolved_public_origin,
+)
 
 
 router = APIRouter(tags=["observability"])
@@ -51,11 +56,12 @@ def _readiness_snapshot(
         return {"environment_non_production": True}, []
     candidate = os.environ.get("AIVAN_CANDIDATE_SHA", "").strip()
     database_url = os.environ.get("AIVAN_DB_URL", "").strip()
-    cors = {
-        item.strip() for item in os.environ.get("AIVAN_CORS_ORIGINS", "").split(",") if item.strip()
-    }
+    try:
+        cors = set(cors_origins())
+    except RuntimeError:
+        cors = {"*"}
     port = os.environ.get("AIVAN_PORT", "").strip()
-    public_origin = os.environ.get("AIVAN_PUBLIC_ORIGIN", "").strip()
+    public_origin = resolved_public_origin()
     roles = [
         item.strip()
         for item in os.environ.get("AIVAN_UI_ALLOWED_ROLES", "").split(",")
