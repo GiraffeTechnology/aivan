@@ -22,6 +22,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 SERVICES = {
     "language": ("giraffe_language_skill.api.main:app", "/healthz"),
@@ -29,9 +30,10 @@ SERVICES = {
     "gltg": ("gltg.api.main:app", "/health"),
     "gpm": ("aivan.gpm.server:app", "/api/gpm/healthz"),
     "web": ("aivan.api.main:app", "/healthz"),
+    "abcdyi": ("api.main:app", "/health"),
 }
 NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 
 
 def read_json(path: Path):
@@ -157,36 +159,85 @@ def new_config(tenants: list[str], port: int = 0) -> dict:
         while selected in ports.values():
             selected = reserve_port()
         ports[name] = selected
+    provider_id = "local-provider-" + secrets.token_hex(12)
     return {
         "version": CONFIG_VERSION,
+        "private_data_provider_id": provider_id,
+        "bundled_private_data_provider_id": provider_id,
         "host_profile": "isolated",
         "origin": "https://myaivan.com",
         "ports": ports,
         "tenants": {tenant: secrets.token_urlsafe(32) for tenant in tenants},
-        "secrets": {name: secrets.token_urlsafe(48) for name in ("session", "database", "gltg")},
+        "secrets": {name: secrets.token_urlsafe(48) for name in ("session", "database", "gltg", "abcdyi")},
+        "fulfillment": {"port": ports["abcdyi"], "tenants": fulfillment_tenants(tenants)},
         "external": {},
         "language": {"url": "", "provider": "ctranslate2", "model": "", "model_dir": ""},
         "model": {"url": "", "name": ""},
     }
 
 
+def fulfillment_tenants(tenants):
+    return {tenant: {"tenant_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "myaivan:abcdyi:tenant:" + tenant)),
+                     "operator_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "myaivan:abcdyi:operator:" + tenant))}
+            for tenant in tenants}
+
+
+def upgrade_config(config):
+    config = json.loads(json.dumps(config))
+    if config.get("version") == 1:
+        validate_config(config)
+        port = config.get("fulfillment", {}).get("port") or reserve_port()
+        while port in config["ports"].values():
+            port = reserve_port()
+        provider_id = config.get("private_data_provider_id") or "local-provider-" + secrets.token_hex(12)
+        config["private_data_provider_id"] = provider_id
+        config.setdefault("bundled_private_data_provider_id", provider_id)
+        config["version"] = CONFIG_VERSION
+        config["ports"]["abcdyi"] = port
+        config["secrets"].setdefault("abcdyi", secrets.token_urlsafe(48))
+        config["fulfillment"] = {"port": port, "tenants": fulfillment_tenants(config["tenants"])}
+    return config
+
+
+def config_for_release(config, target):
+    if "abcdyi" in read_json(target / "manifest.json").get("components", {}):
+        return upgrade_config(config)
+    config = json.loads(json.dumps(config))
+    config["version"] = 1
+    config["ports"].pop("abcdyi", None)
+    # Retain the dormant sixth-service identity/config and business DB so a
+    # later upgrade restores the same tenant association without data loss.
+    return config
+
+
 def validate_config(config: dict):
-    if config.get("version") != CONFIG_VERSION:
+    if config.get("version") not in {1, CONFIG_VERSION}:
         raise ValueError("Unsupported configuration version")
-    if not config.get("tenants") or any(not NAME.fullmatch(k) or len(k) > 36 or not isinstance(v, str) or len(v) < 32 for k, v in config["tenants"].items()):
+    if not config.get("tenants") or any(not NAME.fullmatch(k) or len(k) > 36 or not isinstance(v, str) or len(v) < 32 or not v.isascii() or any(ord(c) < 33 or ord(c) == 127 for c in v) for k, v in config["tenants"].items()):
         raise ValueError("Tenant IDs and credentials are invalid")
     if len(set(config["tenants"].values())) != len(config["tenants"]):
         raise ValueError("Every tenant must have a distinct frontend credential")
     ports = config.get("ports", {})
-    if set(ports) != set(SERVICES) or any(type(p) is not int or not 1024 <= p <= 65535 for p in ports.values()) or len(set(ports.values())) != len(ports):
+    expected_services = set(SERVICES) - ({"abcdyi"} if config["version"] == 1 else set())
+    if set(ports) != expected_services or any(type(p) is not int or not 1024 <= p <= 65535 for p in ports.values()) or len(set(ports.values())) != len(ports):
         raise ValueError("Distinct unprivileged ports are required for each bundled service")
     if config.get("host_profile") not in {"isolated", "ctyun", "sin", "other"}:
         raise ValueError("Unknown host profile")
     if config["host_profile"] == "ctyun" and 8443 in ports.values():
         raise ValueError("CTYun ports 443 and 8443 are reserved")
-    for name in ("session", "database", "gltg"):
-        if len(config.get("secrets", {}).get(name, "")) < 32:
-            raise ValueError("Missing local service secret")
+    for name in (("session", "database", "gltg") if config["version"] == 1 else ("session", "database", "gltg", "abcdyi")):
+        value = config.get("secrets", {}).get(name, "")
+        if not isinstance(value, str) or len(value) < 32 or not value.isascii() or any(ord(c) < 33 or ord(c) == 127 for c in value):
+            raise ValueError("Missing or invalid local service secret")
+    if config["version"] == CONFIG_VERSION:
+        if any(not isinstance(config.get(key), str) or not NAME.fullmatch(config[key])
+               for key in ("private_data_provider_id", "bundled_private_data_provider_id")):
+            raise ValueError("A stable logical private-data provider identity is required")
+        fulfillment = config.get("fulfillment", {})
+        if fulfillment.get("tenants") != fulfillment_tenants(config["tenants"]):
+            raise ValueError("Fulfillment tenant identities must match the installation tenant map")
+        if fulfillment.get("port") != ports["abcdyi"]:
+            raise ValueError("Fulfillment port does not match the managed service")
     external = config.get("external", {})
     if set(external) - {"database", "gltg", "gpm", "language", "aivan_database_url"}:
         raise ValueError("Unknown external dependency")
@@ -254,11 +305,22 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
         "GPM_TENANT_API_KEYS": json.dumps(config["tenants"]),
         "GPM_LLM_RUNTIME_MODE": "live",
     })
+    if "abcdyi" in config["ports"]:
+        mapping = config["fulfillment"]["tenants"]
+        env.update({
+            "DATABASE_URL": f"sqlite+aiosqlite:///{root}/data/abcdyi.db",
+            "SECRET_KEY": config["secrets"]["abcdyi"],
+            "ABCDYI_PRIVATE_DATA_PROVIDER_ID": config["private_data_provider_id"],
+            "ABCDYI_PRIVATE_DATA_TENANT_MAP": json.dumps({item["tenant_id"]: tenant for tenant, item in mapping.items()}),
+            "MYAIVAN_FULFILLMENT_TENANTS": json.dumps(mapping),
+            "MYAIVAN_FULFILLMENT_API_KEYS": json.dumps(config["tenants"]),
+            "ABCDYI_LANGUAGE_SKILL_BASE_URL": config["language"]["url"] or urls["language"],
+        })
     return env
 
 
 def active_services(config: dict):
-    return [name for name in SERVICES if name not in config["external"]]
+    return [name for name in SERVICES if name in config["ports"] and name not in config["external"]]
 
 
 def health(root: Path) -> dict:
@@ -266,6 +328,8 @@ def health(root: Path) -> dict:
     validate_config(config)
     report = {}
     for name, (_app, path) in SERVICES.items():
+        if name not in config["ports"]:
+            continue
         url = config["external"].get(name, f"http://127.0.0.1:{config['ports'][name]}")
         try:
             with urllib.request.urlopen(url + path, timeout=3) as response:
@@ -411,6 +475,8 @@ def _supervise(root: Path):
                 if time.monotonic() < retry_at.get(name, 0):
                     continue
                 command = [python(rel), "-B", "-I", "-m", "uvicorn", SERVICES[name][0], "--fd", str(sock.fileno()), "--no-access-log", "--no-proxy-headers"]
+                if name == "abcdyi":
+                    command = [python(rel), "-B", "-I", str(rel / "abcdyi_service.py"), "serve", "--fd", str(sock.fileno())]
                 child = subprocess.Popen(command, env=env, cwd=root, stdin=subprocess.DEVNULL, stdout=logs[name], stderr=logs[name], pass_fds=(sock.fileno(),))
                 children[name] = child
                 started[name] = time.monotonic()
@@ -442,8 +508,8 @@ def verify_payload(payload: Path):
     expected = manifest["files"]
     actual = set()
     for path in payload.rglob("*"):
-        if path.is_symlink():
-            raise ValueError("Package symlinks are not permitted")
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise ValueError("Package links and nonregular entries are not permitted")
         if path.is_file() and path != payload / "manifest.json":
             relative = str(path.relative_to(payload))
             actual.add(relative)
@@ -471,7 +537,7 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
     config_path = root / "config.json"
     if not config_path.exists():
         write_json(config_path, new_config(tenants, port))
-    config = read_json(config_path)
+    config = upgrade_config(read_json(config_path))
     validate_config(config)
     target = root / "releases" / version
     previous = release(root) if (root / "current").exists() else None
@@ -491,6 +557,7 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
         shutil.copytree(root / "data", snapshot / "data")
         shutil.copy2(config_path, snapshot / "config.json")
         write_json(root / "previous.json", {"release": previous.name, "snapshot": snapshot.name})
+    write_json(config_path, config)
     set_current(root, target)
     launcher = root / "myaivan"
     launcher.write_text('#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$ROOT/current/runtime/bin/python3" -B -I "$ROOT/current/runtime.py" --prefix "$ROOT" "$@"\n')
@@ -507,7 +574,7 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
                 shutil.copy2(snapshot / "config.json", config_path)
                 start(root)
             raise
-    return {"installed": version, "prefix": str(root), "started": not no_start, "web_url": f"http://127.0.0.1:{config['ports']['web']}", "credentials_file": str(config_path), "data_retained": True, "workflow_acceptance": "not_measured_by_installation", "pending_configuration": ["verified HTTPS ingress for public browser access"], "optional_capabilities": {"model": "disabled_deterministic_human_review_guidance", "non_English_translation": "requires_verified_models_or_provider"}}
+    return {"installed": version, "prefix": str(root), "started": not no_start, "web_url": f"http://127.0.0.1:{config['ports']['web']}", "fulfillment_url": f"http://127.0.0.1:{config['ports']['abcdyi']}", "fulfillment_auth": "reuse tenant API credential at /api/installation/session", "credentials_file": str(config_path), "data_retained": True, "workflow_acceptance": "not_measured_by_installation", "pending_configuration": ["verified HTTPS ingress for public browser access"], "optional_capabilities": {"model": "disabled_deterministic_human_review_guidance", "non_English_translation": "requires_verified_models_or_provider"}}
 
 
 def main(argv=None):
@@ -531,6 +598,7 @@ def main(argv=None):
     setup_parser.add_argument("--language-url")
     setup_parser.add_argument("--language-model-dir", type=Path)
     setup_parser.add_argument("--database-url")
+    setup_parser.add_argument("--database-provider-id", help="Logical data-store identity; retain only when moving the same records")
     setup_parser.add_argument("--restart", action="store_true")
     configure_parser = commands.add_parser("configure")
     configure_parser.add_argument("--file", type=Path, required=True)
@@ -589,9 +657,16 @@ def main(argv=None):
                     updated["language"]["model_dir"] = str(args.language_model_dir)
                 if args.database_url is not None:
                     if args.database_url:
+                        if args.database_url != existing["external"].get("database") and not args.database_provider_id:
+                            raise ValueError("Specify --database-provider-id for the selected store; retain an existing identity only when moving the same records")
                         updated["external"]["database"] = endpoint(args.database_url)
                     else:
                         updated["external"].pop("database", None)
+                        updated["private_data_provider_id"] = updated["bundled_private_data_provider_id"]
+                if args.database_provider_id is not None:
+                    if not updated["external"].get("database"):
+                        raise ValueError("The bundled store retains its installation-owned provider identity")
+                    updated["private_data_provider_id"] = args.database_provider_id
                 validate_config(updated)
                 was_running = status(root)["running"]
                 if was_running and not args.restart:
@@ -622,11 +697,14 @@ def main(argv=None):
                 verify_payload(target)
                 stop(root)
                 current = release(root)
+                previous_config = read_json(root / "config.json")
+                write_json(root / "config.json", config_for_release(previous_config, target))
                 set_current(root, target)
                 try:
                     result = start(root)
                 except Exception:
                     set_current(root, current)
+                    write_json(root / "config.json", previous_config)
                     start(root)
                     raise
                 result["rolled_back_to"] = target.name

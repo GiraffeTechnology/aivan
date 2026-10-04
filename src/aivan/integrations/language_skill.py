@@ -13,9 +13,11 @@ non-English text or nested raw evidence. No historical records are migrated here
 
 from __future__ import annotations
 
+import json
 import hashlib
 import unicodedata
 from typing import Any
+from pydantic import TypeAdapter, ValidationError
 
 from aivan.integrations.language_skill_client import (
     LanguageSkillClient,
@@ -92,6 +94,9 @@ _RFQ_TO_REQUIREMENT = {
     "product_category": "category",
     "destination": "destination",
     "lead_time_days": "delivery_days",
+    "fabric": "fabric_material", "fabric_material": "fabric_material", "material": "fabric_material",
+    "color": "color", "gsm": "gsm", "fabric_weight_gsm": "gsm",
+    "size_ratio": "size_ratio", "size_breakdown": "size_ratio", "packaging": "packaging",
 }
 
 
@@ -125,7 +130,8 @@ def canonicalize_rfq(
             raise LanguageSkillUnavailable(norm.error or "normalize failed")
         return None
 
-    normalize_data = norm.data
+    normalize_data = dict(norm.data)
+    normalize_data["source_text_sha256"] = source_digest(raw_text)
     struct = client.structure_rfq(
         raw_text=raw_text,
         canonical_text=normalize_data.get("canonical_text"),
@@ -148,6 +154,7 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
     corresponding requirement field. Values the service does not provide are
     left as-is (never nulled out).
     """
+    original_text = req.raw_text
     normalize_data = canon.get("normalize") or {}
     structure_data = canon.get("structure")
 
@@ -168,7 +175,7 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
         or "en"
     )
     ls_meta: dict[str, Any] = {
-        "source_text_sha256": source_digest(normalize_data.get("raw_text") or req.raw_text),
+        "source_text_sha256": normalize_data.get("source_text_sha256") or source_digest(normalize_data.get("raw_text") or original_text),
         "detected_language": detected,
         "source_language": detected,
         "canonical_english_text": canonical_text,
@@ -182,6 +189,21 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
         "field_sources": normalize_data.get("field_sources"),
         "warnings": normalize_data.get("warnings", []),
     }
+
+    # Normalization can supply explicit domain facts that trade_rfq.v1 does
+    # not repeat. Use only its canonical value, never parse original spans.
+    evidence_fields = {}
+    for name, evidence in (normalize_data.get("field_evidence") or {}).items():
+        if name in _RFQ_TO_REQUIREMENT and isinstance(evidence, dict) and evidence.get("value") is not None:
+            value = evidence["value"]
+            if has_non_latin_text(str(value)):
+                raise LanguageNormalizationRequired()
+            evidence_fields[name] = value
+    _overlay_fields(req, evidence_fields, None)
+    sources = req.extra.setdefault("field_sources", {})
+    for name, value in evidence_fields.items():
+        if value not in (None, "", []):
+            sources[_RFQ_TO_REQUIREMENT[name]] = "language_skill"
 
     if structure_data:
         structured = structure_data.get("structured") or {}
@@ -218,6 +240,12 @@ def _overlay_fields(req: BuyerRequirement, structured: dict[str, Any], confidenc
         value = structured.get(src_field)
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
+        if req_attr == "size_ratio" and isinstance(value, dict):
+            value = json.dumps(value, sort_keys=True, ensure_ascii=True)
+        try:
+            value = TypeAdapter(BuyerRequirement.model_fields[req_attr].annotation).validate_python(value)
+        except ValidationError as exc:
+            raise LanguageNormalizationRequired() from exc
         setattr(req, req_attr, value)
 
     # Preserve extra domain signals that have no dedicated requirement field.

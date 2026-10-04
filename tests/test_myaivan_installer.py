@@ -104,7 +104,7 @@ def test_installer_config_has_distinct_tenants_and_ports():
     config = m.new_config(["tenant-a", "tenant-b"])
     m.validate_config(config)
     assert len(set(config["tenants"].values())) == 2
-    assert len(set(config["ports"].values())) == 5
+    assert len(set(config["ports"].values())) == 6
     assert all(1024 <= port <= 65535 for port in config["ports"].values())
 
 
@@ -369,3 +369,117 @@ def test_registered_failed_health_stops_services_before_upgrade_restore(tmp_path
     with pytest.raises(RuntimeError, match="unhealthy"):
         m.start(tmp_path)
     assert stop.call_count == 2
+
+
+def test_five_service_upgrade_preserves_credentials_and_execution_identity():
+    legacy = m.new_config(['tenant-a', 'tenant-b'])
+    legacy['version'] = 1
+    legacy['ports'].pop('abcdyi')
+    legacy['secrets'].pop('abcdyi')
+    legacy.pop('fulfillment')
+    m.validate_config(legacy)
+    upgraded = m.upgrade_config(legacy)
+    m.validate_config(upgraded)
+    assert upgraded['tenants'] == legacy['tenants']
+    assert all(upgraded['ports'][key] == value for key, value in legacy['ports'].items())
+    assert all(upgraded['secrets'][key] == value for key, value in legacy['secrets'].items())
+    assert m.upgrade_config(upgraded) == upgraded
+    identities = upgraded['fulfillment']['tenants']
+    assert identities['tenant-a']['tenant_id'] != identities['tenant-b']['tenant_id']
+    assert identities['tenant-a']['operator_id'] != identities['tenant-b']['operator_id']
+
+
+def test_five_service_rollback_preserves_sixth_service_identity_for_reupgrade(tmp_path):
+    config = m.new_config(['tenant-a'])
+    old = tmp_path / 'old-release'; old.mkdir()
+    (old / 'manifest.json').write_text(json.dumps({'components': {'aivan': {}}}))
+    rolled_back = m.config_for_release(config, old)
+    m.validate_config(rolled_back)
+    assert rolled_back['version'] == 1
+    assert 'abcdyi' not in rolled_back['ports']
+    assert rolled_back['fulfillment'] == config['fulfillment']
+    assert m.upgrade_config(rolled_back) == config
+
+
+def test_fulfillment_provider_tenant_mapping_and_jwt_secret_are_independent(tmp_path):
+    config = m.new_config(['tenant-a', 'tenant-b'])
+    (tmp_path / 'manifest.json').write_text(json.dumps({'components': {'aivan': {'revision': 'a' * 40}}}))
+    env = m.environment(tmp_path, tmp_path, config)
+    mapping = json.loads(env['ABCDYI_PRIVATE_DATA_TENANT_MAP'])
+    assert set(mapping.values()) == {'tenant-a', 'tenant-b'}
+    assert env['SECRET_KEY'] != config['secrets']['database']
+    assert env['DATABASE_URL'].startswith('sqlite+aiosqlite:///')
+    assert json.loads(env['MYAIVAN_FULFILLMENT_API_KEYS']) == config['tenants']
+
+
+def test_invalid_fulfillment_identity_mapping_is_rejected():
+    config = m.new_config(['tenant-a', 'tenant-b'])
+    config['fulfillment']['tenants']['tenant-b'] = config['fulfillment']['tenants']['tenant-a']
+    import pytest
+    with pytest.raises(ValueError, match='identities'):
+        m.validate_config(config)
+
+
+def test_builder_keeps_independent_abcdyi_source_out_of_shared_wheels():
+    source = SOURCE.with_name('build.py').read_text()
+    launcher = SOURCE.with_name('abcdyi_service.py').read_text()
+    assert 'if component == "abcdyi"' in source
+    assert 'payload / "services/abcdyi"' in source
+    assert 'sys.path.insert(0, str(root))' in launcher
+    assert 'sys.path.insert(0, str(root /' not in launcher
+
+
+def test_payload_inventory_rejects_unlisted_fifo(tmp_path):
+    import os
+    import pytest
+    payload = tmp_path / 'payload'; payload.mkdir()
+    (payload / 'manifest.json').write_text(json.dumps({'files': {}}))
+    os.mkfifo(payload / 'unlisted-pipe')
+    with pytest.raises(ValueError, match='nonregular'):
+        m.verify_payload(payload)
+
+
+def test_configuration_rejects_non_header_safe_credentials():
+    import pytest
+    for value in ('é' * 32, 'a' * 31 + '\n', 'a' * 31 + ' '):
+        config = m.new_config(['tenant-a'])
+        config['tenants']['tenant-a'] = value
+        with pytest.raises(ValueError, match='credentials'):
+            m.validate_config(config)
+
+
+def test_build_git_pin_rejects_links_and_false_revision(tmp_path):
+    import subprocess
+    import pytest
+    spec = importlib.util.spec_from_file_location('build_safety_review', SOURCE.with_name('build.py'))
+    builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
+    root = tmp_path / 'source'; (root / 'src').mkdir(parents=True)
+    outside = tmp_path / 'outside.py'; outside.write_text('synthetic = 1\n')
+    (root / 'src/foreign.py').symlink_to(outside)
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'Synthetic source'], check=True)
+    revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    tree = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+    with pytest.raises(ValueError, match='revision'):
+        builder.source_evidence(root, 'a' * 40, tree)
+    with pytest.raises(ValueError, match='links'):
+        builder.source_evidence(root, revision, tree)
+
+
+def test_external_store_change_requires_explicit_logical_identity(tmp_path):
+    import pytest
+    root = tmp_path / 'server'; m.check_root(root, initialize=True)
+    for name in ('data', 'logs', 'run', 'releases'): (root / name).mkdir()
+    config = m.new_config(['tenant-a']); m.write_json(root / 'config.json', config)
+    with pytest.raises(ValueError, match='database-provider-id'):
+        m.main(['--prefix', str(root), 'setup', '--database-url', 'https://private-db.invalid'])
+    assert m.read_json(root / 'config.json') == config
+    with contextlib.redirect_stdout(io.StringIO()):
+        m.main(['--prefix', str(root), 'setup', '--database-url', 'https://private-db.invalid', '--database-provider-id', 'another-private-store'])
+    external = m.read_json(root / 'config.json')
+    assert external['private_data_provider_id'] == 'another-private-store'
+    assert external['tenants'] == config['tenants']
+    with contextlib.redirect_stdout(io.StringIO()):
+        m.main(['--prefix', str(root), 'setup', '--database-url', ''])
+    assert m.read_json(root / 'config.json')['private_data_provider_id'] == config['private_data_provider_id']

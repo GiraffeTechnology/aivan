@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 
 from alembic import command
 from alembic.config import Config
@@ -22,6 +23,8 @@ def initialize(root: Path):
         AivanBase.metadata.create_all(app)
     require_current_schema(app)
     app.dispose()
+    if "abcdyi" in config["ports"]:
+        subprocess.run([sys.executable, "-B", "-I", str(Path(__file__).with_name("abcdyi_service.py")), "bootstrap", str(root)], check=True)
     if "database" in config["external"]:
         return
     provider = create_engine(os.environ["GIRAFFE_DB_DATABASE_URL"])
