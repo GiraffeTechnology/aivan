@@ -233,6 +233,7 @@ def _create_rfq_from_event_inner(
             strategy,
             supplier_count=len(giraffe.suppliers),
             tenant_id=project.tenant_id or event.tenant_id,
+            source_trace_id=event.source_trace_id,
         )
     except (
         GiraffeDBContextError,
@@ -739,6 +740,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             supplier_reply=reply,
             supplier_id=reply.supplier_id or None,
             tenant_id=project.tenant_id or event.tenant_id,
+            source_trace_id=event.source_trace_id,
         )
     except GLTGUnavailableError as exc:
         _invalidate_stale_customer_quote_state(project.project_id, db)
@@ -789,6 +791,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             supplier_count=len(all_replies),
             supplier_id=reply.supplier_id or None,
             tenant_id=project.tenant_id or event.tenant_id,
+            source_trace_id=event.source_trace_id,
         )
     except GLTGUnavailableError as exc:
         _invalidate_stale_customer_quote_state(project.project_id, db)
