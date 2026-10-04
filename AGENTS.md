@@ -46,16 +46,26 @@ Credentials remain with authorized integration/configuration stores, never in re
 
 All new or edited repository prose must be English and suitable for public disclosure. Do not publish private discussions, counterparty details, credentials, host secrets or raw source attachments.
 
-Do not resume the original development tasks as a side effect of this cleanup; the product owner will direct their resumption. CI must be green before any authorized merge.
+CI must be green before any authorized merge.
 
 Follow [the current security scan policy](docs/SECURITY_SCANNING.md) for scanner coverage, failure thresholds, reviewed findings and evidence. The license-available scans differ from CodeQL security-extended; do not claim equivalence or hide failures. Historical CodeQL/Dependency Review references do not restore an unavailable paid service as a product requirement.
 
 Before handoff: identify the exact scope and revision, run relevant checks, distinguish passed/failed/skipped/not-run, record evidence and limitations, and avoid new gates. Draft PRs and docs do not prove code implementation, merge, functional acceptance or production deployment.
 
-## CTYun TCP port 443 reservation
+## Current authorization and continued execution
 
-On CTYun hosts, TCP port 443 is reserved for SSH. Do not configure HTTP, HTTPS, web servers, reverse proxies, or TLS listeners to bind to TCP port 443. Do not stop, rebind, replace, or otherwise disrupt SSH to free that port.
+Later explicit user instructions supersede conflicting historical task freezes and agent-authored approval gates. A past documentation-only pass is not a continuing development or deployment ban. Execute the current authorized delivery step within its scope; do not request a second approval solely because an older task or document prohibited it.
 
-Before selecting a web or bridge port, inspect the existing deployment and operations configuration and reuse an explicitly confirmed allocation. Do not guess a replacement port. If the allocation is unclear, report the missing configuration rather than changing a service binding.
+Distinguish missing configuration, tool/session failures, actual permission denials and product defects. A browser-tool failure is not proof that the user is logged out or that console access is forbidden. When a normal approval request was evaluated against obsolete instructions, present the precise current authorization through the supported review mechanism. Never bypass an actual platform denial or transfer credentials to evade it.
 
-This constraint applies only to CTYun hosts; do not extend it to SIN or other environments without an explicit instruction. Recording this rule does not authorize server access or changes to SSH, firewalls, credentials, network settings, or security settings.
+Resolve concrete issues within the authorized scope and continue independent executable work. Do not add formal-contract gates, same-schema requirements, dependency-product launch prerequisites or additional approval layers. Preserve required human commercial decisions, tenant isolation, data integrity, release conditions and truthful test evidence. Documentation edits alone do not authorize unrelated production actions, purchases, destructive changes or account/security changes.
+
+Do not recreate cancelled monitors, polling schedules or recovery tasks without a new explicit user request.
+
+## Protected ports and authorized allocation
+
+TCP port 443 remains reserved for SSH on the designated CTYun and Aliyun-SIN deployment hosts. Never stop or rebind SSH to make room for HTTP/HTTPS. Preserve port 8443, mail/MX configuration and occupied service ports.
+
+For an authorized deployment, inspect current listeners and configuration, then select a verified unused port other than 443. The user's unused-port authorization does not require a separate allocation approval. The approved MyAivan HTTPS entry on port 9444 remains a valid target; a failed route must be diagnosed rather than treated as a blanket prohibition on deployment.
+
+Server, console and network actions must match the current explicit authorization. Port selection does not authorize unrelated security/account changes, credential disclosure or disruption of existing services.
