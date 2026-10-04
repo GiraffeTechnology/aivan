@@ -77,7 +77,7 @@ class LanguageSkillClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.base_url = (
-            base_url or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL", DEFAULT_BASE_URL)
+            base_url or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL") or DEFAULT_BASE_URL
         ).rstrip("/")
         if timeout_seconds is not None:
             self.timeout = timeout_seconds
