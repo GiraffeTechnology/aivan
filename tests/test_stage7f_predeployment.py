@@ -30,7 +30,14 @@ def _repository(tmp_path):
     return tmp_path
 
 
-def _environment(path, candidate, *, cors="https://myaivan.com:8444", public_origin="https://myaivan.com:8444"):
+def _environment(
+    path,
+    candidate,
+    *,
+    cors="https://myaivan.test:9100",
+    public_origin="https://myaivan.test:9100",
+    port="9200",
+):
     secret = "must-not-enter-evidence"
     path.write_text(
         "\n".join(
@@ -38,7 +45,7 @@ def _environment(path, candidate, *, cors="https://myaivan.com:8444", public_ori
                 "AIVAN_ENV=production",
                 f"AIVAN_CANDIDATE_SHA={candidate}",
                 "AIVAN_HOST=127.0.0.1",
-                "AIVAN_PORT=8765",
+                f"AIVAN_PORT={port}",
                 "AIVAN_DB_URL=sqlite:///./data/aivan.db",
                 "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin",
                 f"AIVAN_PUBLIC_ORIGIN={public_origin}",
@@ -70,7 +77,7 @@ def _environment(path, candidate, *, cors="https://myaivan.com:8444", public_ori
     return secret
 
 
-def _topology(path, *, preserved=True):
+def _topology(path, *, preserved=True, bind_port=9200, remote_port=19200):
     observations = {name: True for name in REQUIRED_OBSERVATIONS}
     observations["protected_ports_preserved"] = preserved
     payload = {
@@ -80,14 +87,14 @@ def _topology(path, *, preserved=True):
         "install_path": "/opt/giraffe/aivan",
         "service_name": "myaivan.service",
         "bind_host": "127.0.0.1",
-        "bind_port": 8765,
+        "bind_port": bind_port,
         "database_profile": "sqlite:///./data/aivan.db",
         "non_china_egress_bridge": "abcdyi-sin",
-        "protected_port_owners": {"443": "ssh", "8443": "stalwart"},
+        "protected_port_owners": {"443": "ssh"},
         "reverse_bridge": {
             "remote_host_profile": "abcdyi-sin",
             "remote_bind": "127.0.0.1",
-            "remote_port": 18765,
+            "remote_port": remote_port,
             "health_path": "/health",
         },
         "expected_local_model": "qwen3.5:9b",
@@ -197,7 +204,7 @@ def test_predeployment_gate_fails_for_checkout_mismatch_or_empty_tenant_keys(tmp
     assert "api_auth_configured" in failed
 
 
-@pytest.mark.parametrize("origin", ("https://myaivan.com", "https://myaivan.com:443"))
+@pytest.mark.parametrize("origin", ("https://myaivan.test", "https://myaivan.test:443"))
 def test_predeployment_gate_rejects_public_origin_on_port_443(tmp_path, monkeypatch, origin):
     repository = _repository(tmp_path)
     candidate = "f" * 40
@@ -218,3 +225,51 @@ def test_predeployment_gate_rejects_public_origin_on_port_443(tmp_path, monkeypa
     failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
     assert result["status"] == "failed_closed"
     assert "public_origin_valid" in failed
+
+
+def _gate(tmp_path, monkeypatch, *, environment_kwargs=None, topology_kwargs=None):
+    repository = _repository(tmp_path)
+    candidate = "a" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate, **(environment_kwargs or {}))
+    _topology(topology, **(topology_kwargs or {}))
+    return run_predeployment_gate(
+        repository_root=repository,
+        candidate_commit=candidate,
+        environment_file=environment,
+        topology_file=topology,
+        output_path=tmp_path / "evidence.jsonl",
+    )
+
+
+@pytest.mark.parametrize("port", ("8443", "8765", "30001"))
+def test_predeployment_gate_accepts_any_application_port_except_443(tmp_path, monkeypatch, port):
+    result = _gate(
+        tmp_path,
+        monkeypatch,
+        environment_kwargs={"port": port},
+        topology_kwargs={"bind_port": int(port)},
+    )
+    assert result["status"] == "passed"
+
+
+def test_predeployment_gate_rejects_application_port_443(tmp_path, monkeypatch):
+    result = _gate(
+        tmp_path,
+        monkeypatch,
+        environment_kwargs={"port": "443"},
+        topology_kwargs={"bind_port": 443},
+    )
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert {"application_port_usable", "topology_port_usable"} <= failed
+
+
+def test_predeployment_gate_accepts_explicit_http_port_80_in_browser_form(tmp_path, monkeypatch):
+    result = _gate(
+        tmp_path,
+        monkeypatch,
+        environment_kwargs={"public_origin": "http://myaivan.test:80", "cors": "http://myaivan.test"},
+    )
+    assert result["status"] == "passed"

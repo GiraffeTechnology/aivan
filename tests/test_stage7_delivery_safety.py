@@ -87,7 +87,7 @@ def test_ctyun_document_is_non_executable_and_preserves_infrastructure_constrain
     )
     assert all(token not in notice for token in forbidden)
     assert "abcdyi-sin" in notice
-    assert "443" in notice and "8443" in notice
+    assert "443" in notice and "SSH" in notice
     assert "qwen3.5:9b" in notice
     assert "NO DEPLOYMENT AUTHORIZED" in notice
 

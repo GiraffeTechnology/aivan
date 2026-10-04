@@ -5,17 +5,16 @@
   "install_path": "/opt/giraffe/aivan",
   "service_name": "myaivan.service",
   "bind_host": "127.0.0.1",
-  "bind_port": 8765,
+  "bind_port": null,
   "database_profile": "sqlite:///./data/aivan.db",
   "non_china_egress_bridge": "abcdyi-sin",
   "protected_port_owners": {
-    "443": "ssh",
-    "8443": "stalwart"
+    "443": "ssh"
   },
   "reverse_bridge": {
     "remote_host_profile": "abcdyi-sin",
     "remote_bind": "127.0.0.1",
-    "remote_port": 18765,
+    "remote_port": null,
     "health_path": "/health"
   },
   "expected_local_model": "qwen3.5:9b",

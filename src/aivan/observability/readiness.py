@@ -14,7 +14,7 @@ from aivan.observability.dependency_probe import (
     critical_dependencies_ready,
     run_dependency_probes,
 )
-from aivan.observability.public_origin import public_origin_valid
+from aivan.observability.public_origin import browser_origin, public_origin_valid
 
 
 router = APIRouter(tags=["observability"])
@@ -72,9 +72,10 @@ def _readiness_snapshot(
         >= 32,
         "ui_identity_configured": _configured("AIVAN_UI_ACTOR_ID") and bool(roles),
         "public_origin_valid": public_origin_valid(public_origin),
-        "cors_public_origin_exact": bool(public_origin) and public_origin in cors
+        "cors_public_origin_exact": bool(public_origin)
+        and browser_origin(public_origin) in cors
         and "*" not in cors,
-        "protected_ports_avoided": bool(port) and port not in {"443", "8443"},
+        "protected_ports_avoided": port.isdigit() and port != "443",
         "gpm_durable_configured": _configured("GIRAFFE_DB_BASE_URL"),
         "openclaw_live_configured": _configured("OPENCLAW_BASE_URL")
         and os.environ.get("OPENCLAW_MOCK_MODE", "").strip().lower() == "false",

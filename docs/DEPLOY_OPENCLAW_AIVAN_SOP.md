@@ -8,7 +8,7 @@ Reconciled: 2026-10-02. The existing deployment workflow is quarantined: it reco
 
 ## Target-specific protections retained
 
-For authorized CTYun Aivan operations, respect the existing protected services/ports and Singapore bridge policy. Do not take over or modify host port 443 (SSH) or 8443 (mail). Web traffic may use any other free port; the public HTTPS origin must carry that explicit port. CTYun connections outside mainland China use the authorized `abcdyi-sin` route; do not invent a bypass. Resolve actual target identity/configuration through the authorized operations inventory rather than stale addresses in historical documents.
+For authorized CTYun Aivan operations, respect the existing protected services/ports and Singapore bridge policy. Do not take over or modify host port 443 (SSH) or ports used by existing services. Web traffic may use any port that is not in use; the public origin must state that port explicitly. CTYun connections outside mainland China use the authorized `abcdyi-sin` route; do not invent a bypass. Resolve actual target identity/configuration through the authorized operations inventory rather than stale addresses in historical documents.
 
 Secrets stay in the authorized configuration/secret store, not source, Action inputs, logs or evidence. Production deployment, migration, database mutation, service/network changes and external business/test messages each require the applicable authorization. A known channel or approved draft does not authorize arbitrary new sending.
 

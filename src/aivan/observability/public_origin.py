@@ -1,18 +1,16 @@
 """Validate the operator-configured public browser origin for myAIVAN.
 
-On CTYun hosts TCP 443 belongs to SSH, so an HTTPS web entry must carry an
-explicit non-443 port (for example ``https://myaivan.com:8444``). A bare
-``https://host`` origin implies port 443 and is rejected; ``http://host``
-implies port 80 and is allowed. Port 8443 is also rejected because it is owned
-by the existing mail service. Any other port may be used for HTTP or HTTPS.
+On CTYun hosts TCP 443 belongs to SSH. HTTP and HTTPS may use any other
+unoccupied port, but the port is never implied: the origin must state it
+explicitly, and an origin on port 443 is rejected.
 """
 
 from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-RESERVED_PUBLIC_PORTS = frozenset({443, 8443})
-_DEFAULT_PORTS = {"http": 80, "https": 443}
+RESERVED_PUBLIC_PORT = 443
+_SCHEME_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def public_origin_issue(origin: str) -> str | None:
@@ -26,17 +24,14 @@ def public_origin_issue(origin: str) -> str | None:
         port = parts.port
     except ValueError:
         return "AIVAN_PUBLIC_ORIGIN is not a valid URL"
-    if parts.scheme not in _DEFAULT_PORTS or not parts.hostname:
+    if parts.scheme not in _SCHEME_DEFAULT_PORTS or not parts.hostname:
         return "AIVAN_PUBLIC_ORIGIN must be an http or https origin with a host"
     if parts.username or parts.password or parts.path or parts.query or parts.fragment:
         return "AIVAN_PUBLIC_ORIGIN must be a bare origin without credentials or path"
-    default_port = _DEFAULT_PORTS[parts.scheme]
-    effective_port = default_port if port is None else port
-    if effective_port in RESERVED_PUBLIC_PORTS:
-        return f"AIVAN_PUBLIC_ORIGIN must not use reserved port {effective_port}"
-    if port == default_port:
-        # Browsers drop a scheme-default port from Origin, so it would never match.
-        return "AIVAN_PUBLIC_ORIGIN must omit the scheme-default port"
+    if port is None:
+        return "AIVAN_PUBLIC_ORIGIN must state its port explicitly"
+    if port == RESERVED_PUBLIC_PORT:
+        return f"AIVAN_PUBLIC_ORIGIN must not use port {RESERVED_PUBLIC_PORT}"
     if value != f"{parts.scheme}://{parts.netloc.lower()}":
         return "AIVAN_PUBLIC_ORIGIN must be lowercase and normalized"
     return None
@@ -44,3 +39,16 @@ def public_origin_issue(origin: str) -> str | None:
 
 def public_origin_valid(origin: str) -> bool:
     return public_origin_issue(origin) is None
+
+
+def browser_origin(origin: str) -> str:
+    """Return ``origin`` as a browser sends it, without a scheme-default port."""
+
+    parts = urlsplit(origin.strip())
+    try:
+        port = parts.port
+    except ValueError:
+        return origin.strip()
+    if port is not None and port == _SCHEME_DEFAULT_PORTS.get(parts.scheme):
+        return f"{parts.scheme}://{parts.hostname}"
+    return origin.strip()

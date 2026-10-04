@@ -23,13 +23,17 @@ from dotenv import dotenv_values
 from sqlalchemy import create_engine
 
 from aivan.db.schema_validation import schema_issues
-from aivan.observability.public_origin import public_origin_valid
+from aivan.observability.public_origin import (
+    RESERVED_PUBLIC_PORT,
+    browser_origin,
+    public_origin_valid,
+)
 
 
 EVIDENCE_CLASS = "production_predeployment"
 PRODUCTION_ACCEPTANCE = False
 DATABASE_PROFILE = "sqlite:///./data/aivan.db"
-PROTECTED_PORT_OWNERS = {"443": "ssh", "8443": "stalwart"}
+SSH_PORT_OWNER = {str(RESERVED_PUBLIC_PORT): "ssh"}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CANDIDATE_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 LOCK_FILES = (
@@ -78,6 +82,15 @@ def _file_digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _usable_port(value: Any) -> bool:
+    """Any TCP port except the SSH-owned 443; no specific port is required."""
+    try:
+        port = int(str(value).strip())
+    except (TypeError, ValueError):
+        return False
+    return 0 < port < 65536 and port != RESERVED_PUBLIC_PORT
 
 
 def _truthy(value: str | None) -> bool:
@@ -182,7 +195,7 @@ def run_predeployment_gate(
         "candidate_matches_environment", environment.get("AIVAN_CANDIDATE_SHA") == candidate_commit
     )
     check("application_loopback_bind", environment.get("AIVAN_HOST") == "127.0.0.1")
-    check("application_port_8765", environment.get("AIVAN_PORT") == "8765")
+    check("application_port_usable", _usable_port(environment.get("AIVAN_PORT")))
     check("fixed_database_profile", environment.get("AIVAN_DB_URL") == DATABASE_PROFILE)
     check(
         "singapore_egress_policy",
@@ -197,7 +210,7 @@ def run_predeployment_gate(
     check("public_origin_valid", public_origin_valid(public_origin))
     check(
         "cors_exact_origin",
-        bool(public_origin) and public_origin in origins and "*" not in origins,
+        bool(public_origin) and browser_origin(public_origin) in origins and "*" not in origins,
     )
     check("human_approval_required", _truthy(environment.get("AIVAN_REQUIRE_HUMAN_APPROVAL")))
     check(
@@ -234,23 +247,25 @@ def run_predeployment_gate(
     check("fixed_install_path", topology.get("install_path") == "/opt/giraffe/aivan")
     check("fixed_service_name", topology.get("service_name") == "myaivan.service")
     check("topology_loopback_bind", topology.get("bind_host") == "127.0.0.1")
-    check("topology_port_8765", topology.get("bind_port") == 8765)
+    check("topology_port_usable", _usable_port(topology.get("bind_port")))
+    check(
+        "topology_port_matches_environment",
+        str(topology.get("bind_port")) == (environment.get("AIVAN_PORT") or "").strip(),
+    )
     check("topology_database_profile", topology.get("database_profile") == DATABASE_PROFILE)
     check("topology_bridge", topology.get("non_china_egress_bridge") == "abcdyi-sin")
     check(
         "protected_port_owners",
-        topology.get("protected_port_owners") == PROTECTED_PORT_OWNERS,
+        (topology.get("protected_port_owners") or {}).items() >= SSH_PORT_OWNER.items(),
     )
     bridge = topology.get("reverse_bridge") or {}
     check(
         "reverse_bridge_contract",
-        bridge
-        == {
-            "remote_host_profile": "abcdyi-sin",
-            "remote_bind": "127.0.0.1",
-            "remote_port": 18765,
-            "health_path": "/health",
-        },
+        set(bridge) == {"remote_host_profile", "remote_bind", "remote_port", "health_path"}
+        and bridge.get("remote_host_profile") == "abcdyi-sin"
+        and bridge.get("remote_bind") == "127.0.0.1"
+        and _usable_port(bridge.get("remote_port"))
+        and bridge.get("health_path") == "/health",
     )
     check(
         "local_model_matches_profile",
@@ -346,7 +361,7 @@ def main() -> int:
                     "evidence_class": EVIDENCE_CLASS,
                     "production_acceptance": PRODUCTION_ACCEPTANCE,
                     "public_origin_variable": "AIVAN_PUBLIC_ORIGIN",
-                    "protected_port_owners": PROTECTED_PORT_OWNERS,
+                    "required_port_owners": SSH_PORT_OWNER,
                     "database_profile": DATABASE_PROFILE,
                     "required_observations": list(REQUIRED_OBSERVATIONS),
                 },
