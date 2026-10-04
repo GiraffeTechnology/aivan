@@ -14,7 +14,7 @@ class LeadTimeComponent(BaseModel):
     name: str
     days: float
     source: str = "estimated"
-    confidence: float = 0.7
+    confidence: float | None = None
     notes: str | None = None
 
 
@@ -43,6 +43,12 @@ class LeadTimeEstimate(BaseModel):
     missing_inputs: list[str] = Field(default_factory=list)
     supplier_questions: list[str] = Field(default_factory=list)
     explanation: str = ""
+    gltg_run_id: str | None = None
+    source_api_version: str = "v1"
+    source_observation_ids: list[str] = Field(default_factory=list)
+    persistence: dict = Field(default_factory=dict)
+    explanation_json: dict = Field(default_factory=dict)
+    warnings: list[dict] = Field(default_factory=list)
 
 
 __all__ = ["LeadTimeComponent", "LeadTimeEstimate"]

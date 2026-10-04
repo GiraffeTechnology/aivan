@@ -1,8 +1,8 @@
-"""Faithful in-memory fake of the standalone GLTG HTTP API for tests.
+"""Synthetic GLTG transport contracts for isolated consumer tests.
 
 Provides an ``httpx.MockTransport`` that mirrors the GLTG endpoints
-deterministically, so AIVAN's unit tests exercise the real HTTP client and
-mapping code without a live GLTG server.
+deterministically, so AIVAN's unit tests exercise the HTTP client and mapping.
+This is not current-provider calculation, DB persistence or live acceptance.
 """
 
 from __future__ import annotations
@@ -118,6 +118,25 @@ def handler(request: httpx.Request) -> httpx.Response:
     if path == "/version":
         return httpx.Response(200, json={"service": "gltg", "version": "1.0.0", "api_version": "v1"})
     payload = json.loads(request.content.decode() or "{}")
+    if path == "/v2/lead-time/simulate":
+        if not request.headers.get("x-service-auth"):
+            return httpx.Response(401, json={"code": "CALLER_AUTH_REQUIRED"})
+        if request.headers.get("x-service-tenant-id") != payload.get("tenant_id"):
+            return httpx.Response(403, json={"code": "TENANT_CONTEXT_MISMATCH"})
+        # Preserve existing synthetic scenario values, not GLTG's algorithm.
+        estimate = _estimate({"order": payload["order"], "suppliers": [payload.get("supplier") or {}]})
+        quantiles = {key: estimate[key] for key in ("p50_days", "p80_days", "p90_days")}
+        confidence = payload.get("constraints", {}).get("lead_time_confidence", "P80").lower()
+        return httpx.Response(200, json={
+            "ok": True, "gltg_run_id": "synthetic-unit-run",
+            "quantiles": quantiles,
+            "risk": {"selected_confidence_days": quantiles[f"{confidence}_days"],
+                     "deadline_feasible": estimate["feasible"],
+                     "deadline_risk_level": estimate["risk_level"]},
+            "source_observation_ids": payload.get("source_observation_ids", []),
+            "components": {}, "warnings": [],
+            "persistence": {"status": "unavailable", "persisted_to_giraffe_db": False},
+        })
     if path == "/v1/lead-time/estimate":
         return httpx.Response(200, json=_estimate(payload))
     if path == "/v1/reforecast":
