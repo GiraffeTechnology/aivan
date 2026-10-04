@@ -31,7 +31,9 @@
       <h1 id="login-title">Sign in to myAIVAN</h1>
       <p class="muted">The access credential is exchanged only for an HttpOnly session and is never stored in browser storage.</p>
       <form id="login-form">
-        <label for="access-key">Deployment access credential</label>
+        <label for="tenant-id">Tenant ID (required for multi-tenant hosting)</label>
+        <input id="tenant-id" name="tenant-id" type="text" autocomplete="organization" maxlength="255">
+        <label for="access-key">Tenant access credential</label>
         <input id="access-key" name="access-key" type="password" autocomplete="current-password" required>
         <button class="primary full" type="submit">Secure sign in</button>
       </form>

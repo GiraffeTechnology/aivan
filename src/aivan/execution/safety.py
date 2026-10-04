@@ -128,7 +128,7 @@ def _assert_ready(requirement: BuyerRequirement, step: str) -> None:
 def evaluate_supplier_readiness(suppliers: list[dict]) -> tuple[str, bool]:
     """Classify a supplier candidate set. Returns (feasibility, ready).
 
-    0 -> ("none", False); 1 -> ("single", False -> ask confirmation, not error);
+    0 -> ("none", False); 1 -> ("single", True);
     2 -> ("thin", True); 3+ -> ("sufficient", True). AIVAN never fabricates
     suppliers, and a count below 3 must never raise.
     """
@@ -136,14 +136,14 @@ def evaluate_supplier_readiness(suppliers: list[dict]) -> tuple[str, bool]:
     if n == 0:
         return "none", False
     if n == 1:
-        return "single", False
+        return "single", True
     if n == 2:
         return "thin", True
     return "sufficient", True
 
 
-# Feasibility -> operator action. A thin/sufficient set proceeds; a single
-# supplier is a confirmation (single-supplier risk), never a hard error.
+# Historical pending-action labels remain available for existing recovery data.
+# Current readiness permits a single real supplier and supplier_action proceeds.
 SUPPLIER_FEASIBILITY_ACTION = {
     "none": "pending_supplier_selection",
     "single": "pending_supplier_confirmation",
@@ -153,7 +153,9 @@ SUPPLIER_FEASIBILITY_ACTION = {
 
 
 def supplier_action(suppliers: list[dict]) -> str:
-    feasibility, _ = evaluate_supplier_readiness(suppliers)
+    feasibility, ready = evaluate_supplier_readiness(suppliers)
+    if ready:
+        return "proceed"
     return SUPPLIER_FEASIBILITY_ACTION[feasibility]
 
 

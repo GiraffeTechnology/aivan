@@ -186,6 +186,8 @@ def resolve_request_context(request: Request, *, allow_ui_session: bool = True) 
                         detail={"error": "TEST_ACCOUNT_ROUTE_FORBIDDEN"},
                     )
                 tenant_id = test_tenant
+            elif production and tenant_keys and session.tenant_id not in tenant_keys:
+                raise HTTPException(status_code=403, detail={"error": "TENANT_NOT_CONFIGURED"})
             elif tenant_id and session.tenant_id != tenant_id:
                 raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH"})
             else:

@@ -14,7 +14,7 @@ from aivan.schemas.requirement import BuyerRequirement
 from aivan.utils.env import env_bool
 from aivan.schemas.rfq import GiraffeContext
 from aivan.sourcing.supplier_models import SupplierProfile
-from aivan.utils.tenant import resolve_service_tenant
+from aivan.utils.tenant import resolve_service_tenant, resolve_tenant
 
 # Demo stub suppliers live in data/demo (never in production src) and load only
 # when explicitly enabled. Production must not fabricate supplier candidates.
@@ -367,7 +367,11 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         )
 
     # Fail closed: never stamp giraffe-db business facts under a guessed tenant.
-    tenant_id = resolve_service_tenant(context="giraffe_db_rfq_graph_write")
+    event_tenant = getattr(event, "tenant_id", None)
+    tenant_id = (
+        resolve_tenant(explicit=event_tenant, context="giraffe_db_rfq_graph_write")
+        if event_tenant else resolve_service_tenant(context="giraffe_db_rfq_graph_write")
+    )
     trace = build_graph_trace_metadata(event, project_id)
     timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
 

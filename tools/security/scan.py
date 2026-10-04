@@ -137,6 +137,27 @@ def package_key(name: str, version: str, ecosystem: str) -> tuple[str, str, str]
 
 def expected_packages(path: str) -> set[tuple[str, str, str]]:
     file = Path(path)
+    if file.name == "requirements.lock":
+        # The offline installer ships a separate, hash-locked runtime inventory.
+        # Reject unparsed lines rather than silently omitting a dependency.
+        logical = re.sub(r"\\\n\s*", " ", file.read_text())
+        result = set()
+        names = set()
+        for line in logical.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = re.fullmatch(
+                r"([A-Za-z0-9][A-Za-z0-9_.-]*)==([A-Za-z0-9][A-Za-z0-9.+!-]*)"
+                r"(?:\s+--hash=sha256:[0-9a-f]{64})+", line,
+            )
+            require(match is not None, f"Unpinned or unparsed installer dependency in {path}")
+            key = package_key(match[1], match[2], "PyPI")
+            require(key[1] not in names, f"Duplicate installer dependency in {path}: {key[1]}")
+            names.add(key[1])
+            result.add(key)
+        require(bool(result), f"Empty installer dependency inventory: {path}")
+        return result
     if file.name == "uv.lock":
         data = tomllib.loads(file.read_text())
         packages = data["package"]
@@ -198,7 +219,7 @@ def offline_databases(reports: Path) -> list[dict]:
 def osv(paths: list[str], reports: Path) -> dict:
     check_version("osv-scanner", reports)
     snapshots = offline_databases(reports)
-    targets = [p for p in paths if Path(p).name in {"uv.lock", "package-lock.json"}]
+    targets = [p for p in paths if Path(p).name in {"uv.lock", "package-lock.json", "requirements.lock"}]
     require(targets and any(Path(p).name == "uv.lock" for p in targets) and any(Path(p).name == "package-lock.json" for p in targets),
             "Expected both Python uv.lock and npm package-lock.json coverage")
     expected = {p: expected_packages(p) for p in targets}
@@ -207,7 +228,9 @@ def osv(paths: list[str], reports: Path) -> dict:
     command = ["osv-scanner", "scan", "source", "--offline", "--config", str(TOOLS / "osv-scanner.toml"),
                "--all-packages", "--all-vulns", "--format", "json"]
     for path in targets:
-        command.extend(["--lockfile", path])
+        # Explicit upstream-supported parser selection preserves the .lock name.
+        argument = f"requirements.txt:{path}" if Path(path).name == "requirements.lock" else path
+        command.extend(["--lockfile", argument])
     code = run(command, reports, "osv", stdout=reports / "osv.json")
     data = read_json(reports / "osv.json")
     require(code in (0, 1), f"OSV scanner error, exit {code}")

@@ -16,7 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aivan.gpm.auth import require_auth
 from aivan.gpm.giraffe_db_client import GPM_PACKET_API_VERSION
-from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
+from aivan.gpm.llm_runtime import analyze_quote, deterministic_quote_analysis, mock_quote_analysis
+from aivan.llm.policy import llm_api_enabled
 from aivan.gpm.packet_store import GPMPacketStore
 from aivan.gpm.request_identity import matches_request, request_fingerprint
 from aivan.gpm.record_id import validation_error as record_id_validation_error
@@ -173,7 +174,11 @@ async def create_quote_guidance(
             })
 
     runtime_mode = os.environ.get("GPM_LLM_RUNTIME_MODE", "").lower()
-    if runtime_mode == "mock":
+    if not llm_api_enabled():
+        analysis = deterministic_quote_analysis(
+            supplier_total=body.supplier_total, buyer_total=body.buyer_total,
+        )
+    elif runtime_mode == "mock":
         analysis = mock_quote_analysis(body.sku, body.supplier_quote)
     else:
         analysis = analyze_quote(

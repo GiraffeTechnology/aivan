@@ -130,3 +130,19 @@ def test_analyze_quote_returns_unavailable_on_runtime_error():
 
     assert result["runtime_status"] == "unavailable"
     assert result["reason"] == "invalid_token"
+
+
+def test_disabled_model_never_constructs_or_calls_provider(monkeypatch):
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
+    with patch("aivan.llm.gateway.get_provider", side_effect=AssertionError("model must stay unused")):
+        assert analyze_quote("SKU-001", 3.75)["reason"] == "llm_api_disabled"
+
+
+def test_enabled_external_model_preserves_explicit_approval_policy(monkeypatch):
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "true")
+    monkeypatch.setenv("AIVAN_LLM_PROVIDER", "openai")
+    monkeypatch.delenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", raising=False)
+    with patch("aivan.llm.gateway.get_provider", side_effect=AssertionError("unapproved provider")):
+        result = analyze_quote("SKU-001", 3.75)
+    assert result["runtime_status"] == "unavailable"
+    assert result["reason"] == "external_model_approval_required"

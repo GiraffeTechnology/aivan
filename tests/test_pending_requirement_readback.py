@@ -14,7 +14,7 @@ from tests.test_inbound_english_persistence import ENGLISH, RAW, translator  # n
 
 @pytest.mark.parametrize("mode, action", [
     ("none", "pending_supplier_selection"),
-    ("single", "pending_supplier_confirmation"),
+    ("uncontactable", "pending_supplier_selection"),
     ("dependency", "pending_dependency_recovery"),
 ])
 def test_ready_requirement_survives_pending_path_and_session_reopen(
@@ -24,7 +24,7 @@ def test_ready_requirement_survives_pending_path_and_session_reopen(
     def context(*args, **kwargs):
         if mode == "dependency":
             raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_UNAVAILABLE")
-        suppliers = [{"supplier_id": "synthetic-supplier", "name": "Synthetic supplier", "email": "supplier@example.test"}] if mode == "single" else []
+        suppliers = [{"supplier_id": "synthetic-supplier", "name": "Synthetic supplier", "email": ""}] if mode == "uncontactable" else []
         return GiraffeContext(suppliers=suppliers)
     monkeypatch.setattr(rfq_execution.GiraffeDBClient, "build_context", context)
     def forbidden(*args, **kwargs):

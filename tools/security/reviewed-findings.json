@@ -76,6 +76,34 @@
       "sha256": "1689e315231b6ecb4395e5a8983c739264b811ff73eb46ed65fab697558c96fa",
       "count": 1,
       "reason": "The line 5 source read uses a literal draft-preview.js URL relative to import.meta.url. Draft bodies, recipients, translation fixtures, clipboard responses and API payloads never control a filesystem path. This is an offline DOM runtime test, not application file access."
+    },
+    {
+      "rule": "python_crypto_rule-hash-sha1",
+      "path": "installer/build.py",
+      "sha256": "9441aa42205c772e14729c66666635fa92b495ffb89d228d63b0047beaa1e1b0",
+      "count": 2,
+      "reason": "SHA-1 is used only to reconstruct and compare the existing Git blob/tree object format, with usedforsecurity=False. It is not used for passwords, credentials, signatures or package integrity. The installed payload inventory, wheels, provenance and final installer use SHA-256."
+    },
+    {
+      "rule": "python_exec_rule-subprocess-call",
+      "path": "installer/build.py",
+      "sha256": "9441aa42205c772e14729c66666635fa92b495ffb89d228d63b0047beaa1e1b0",
+      "count": 2,
+      "reason": "The two flagged calls execute the literal git binary with separate -C, operator-selected source path, ls-files and -z argv values. No shell is used, no application request can select the command, and the build verifies the selected source tree before staging its files."
+    },
+    {
+      "rule": "python_urlopen_rule-urllib-urlopen",
+      "path": "installer/runtime.py",
+      "sha256": "d8bd021fd07945111d67a319e9b95ce5e515f30ac5f41860d173cd288e33b453",
+      "count": 1,
+      "reason": "Health probes use recorded loopback URLs or an installing operator-selected private configuration endpoint, validated as HTTP(S) without embedded credentials/query/fragment. No application request input or tenant API key reaches the URL; probes carry no credential headers, use a three-second timeout, and retain default TLS certificate verification."
+    },
+    {
+      "rule": "python_crypto_rule-hash-sha1",
+      "path": "tests/test_myaivan_installer.py",
+      "sha256": "536a131b588ed7aa5863aa72def2ee31eadc6b9cd1625ebd60c812db32559b46",
+      "count": 1,
+      "reason": "The test constructs the known Git blob object identifier to compare the source manifest against git write-tree. SHA-1 is required by this existing Git object format and is not a package-integrity, password or credential mechanism. Production payload digests remain SHA-256."
     }
   ],
   "zizmor": [

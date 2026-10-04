@@ -221,8 +221,8 @@ def _create_rfq_from_event_inner(
 
         supplier_feasibility, suppliers_ready = evaluate_supplier_readiness(giraffe.suppliers)
         if not suppliers_ready:
-            # 0 suppliers -> selection; exactly 1 -> single-supplier confirmation.
-            # Neither is an error, and neither runs GLTG or creates drafts.
+            # No available supplier means selection is still needed. One real
+            # supplier may proceed; drafts retain ordinary human approval.
             return _pending_supplier_result(
                 project, event, classification, requirement, strategy,
                 supplier_feasibility, giraffe.suppliers, db,
@@ -919,7 +919,8 @@ def _create_customer_quote_email_draft(
         {
             "tenant_id": project.tenant_id or event.tenant_id or "legacy",
             "conversation_id": project.conversation_id or event.conversation_id,
-            "channel": "email",
+            "channel": project.channel or "email",
+            "channel_account_id": project.channel_account_id or "",
             "target_peer_id": project.customer_id or "",
             "target_role": "customer",
             "message_text": (
