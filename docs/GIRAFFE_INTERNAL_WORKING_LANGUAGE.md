@@ -10,6 +10,16 @@ Do not give raw non-English business input to Aivan's requirement LLM or determi
 
 English inputs may use the applicable normal English workflow. Keep original source identifiers and permitted evidence references so translation/extraction can be traced without redefining inference as an observed fact.
 
+The Aivan HTTP consumer validates normalized English text using the language
+module's existing read-only `/api/language/canonical-db/validate` operation with
+`standard_english_canonical_db_v1`. An English label or Latin script alone is
+not proof of English, including auto-detected passthrough. Acceptance requires
+HTTP 200, boolean `valid: true`, and an empty `violations` list. An unavailable
+or older service without this operation blocks intake with the existing
+language-normalization correction/retry path; it must not silently bypass the
+check. Verified English passthrough remains valid. This validation does not
+translate text, persist a business record, or establish live model availability.
+
 ## Database rule
 
 Except for **enterprise/user profile information**, the DB may store only standard-English textual business content. This applies to business history and process state, requirements, messages, drafts, quotations, order details, dependency explanations, events, audit descriptions and free-text metadata.

@@ -20,7 +20,7 @@ def packet():
     return {
         "normalize": {
             "raw_text": RAW,
-            "language": {"detected": "zh"},
+            "language": {"detected": "zh", "confidence": 0.99},
             "canonical_language": "en",
             "canonical_text": ENGLISH,
             "field_evidence": {"destination": {"value": "Tokyo", "span": "交东京"}},
@@ -47,6 +47,8 @@ def translator(monkeypatch):
 
     def handle(request):
         requests.append(json.loads(request.content))
+        if request.url.path.endswith("/validate"):
+            return httpx.Response(200, json={"valid": True, "violations": []})
         key = "normalize" if request.url.path.endswith("normalize") else "structure"
         return httpx.Response(200, json=packet()[key])
 

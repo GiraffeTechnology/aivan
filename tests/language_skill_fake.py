@@ -11,6 +11,9 @@ import httpx
 
 def mock_transport() -> httpx.MockTransport:
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/language/canonical-db/validate":
+            # Assumed English fixture, not real statistical identification.
+            return httpx.Response(200, json={"valid": True, "violations": []})
         if request.url.path == "/v1/inbound/normalize":
             body = json.loads(request.content)
             return httpx.Response(200, json={
