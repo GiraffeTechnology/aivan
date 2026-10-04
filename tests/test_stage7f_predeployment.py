@@ -38,6 +38,7 @@ def _environment(
     public_origin="https://myaivan.test:9100",
     public_host="",
     port="9200",
+    reserved="9300",
 ):
     secret = "must-not-enter-evidence"
     path.write_text(
@@ -47,6 +48,7 @@ def _environment(
                 f"AIVAN_CANDIDATE_SHA={candidate}",
                 "AIVAN_HOST=127.0.0.1",
                 f"AIVAN_PORT={port}",
+                f"AIVAN_RESERVED_PORTS={reserved}",
                 "AIVAN_DB_URL=sqlite:///./data/aivan.db",
                 "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin",
                 f"AIVAN_PUBLIC_ORIGIN={public_origin}",
@@ -92,7 +94,7 @@ def _topology(path, *, preserved=True, bind_port=9200, remote_port=19200):
         "bind_port": bind_port,
         "database_profile": "sqlite:///./data/aivan.db",
         "non_china_egress_bridge": "abcdyi-sin",
-        "protected_port_owners": {"443": "ssh"},
+        "protected_port_owners": {"9300": "existing-service"},
         "reverse_bridge": {
             "remote_host_profile": "abcdyi-sin",
             "remote_bind": "127.0.0.1",
@@ -206,8 +208,8 @@ def test_predeployment_gate_fails_for_checkout_mismatch_or_empty_tenant_keys(tmp
     assert "api_auth_configured" in failed
 
 
-@pytest.mark.parametrize("origin", ("https://myaivan.test", "https://myaivan.test:443"))
-def test_predeployment_gate_rejects_public_origin_on_port_443(tmp_path, monkeypatch, origin):
+@pytest.mark.parametrize("origin", ("https://myaivan.test:9300", "http://myaivan.test:9300"))
+def test_predeployment_gate_rejects_public_origin_on_reserved_port(tmp_path, monkeypatch, origin):
     repository = _repository(tmp_path)
     candidate = "f" * 40
     monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
@@ -247,7 +249,7 @@ def _gate(tmp_path, monkeypatch, *, environment_kwargs=None, topology_kwargs=Non
 
 
 @pytest.mark.parametrize("port", ("8443", "8765", "30001"))
-def test_predeployment_gate_accepts_any_application_port_except_443(tmp_path, monkeypatch, port):
+def test_predeployment_gate_accepts_any_non_reserved_application_port(tmp_path, monkeypatch, port):
     result = _gate(
         tmp_path,
         monkeypatch,
@@ -257,12 +259,12 @@ def test_predeployment_gate_accepts_any_application_port_except_443(tmp_path, mo
     assert result["status"] == "passed"
 
 
-def test_predeployment_gate_rejects_application_port_443(tmp_path, monkeypatch):
+def test_predeployment_gate_rejects_reserved_application_port(tmp_path, monkeypatch):
     result = _gate(
         tmp_path,
         monkeypatch,
-        environment_kwargs={"port": "443"},
-        topology_kwargs={"bind_port": 443},
+        environment_kwargs={"port": "9300"},
+        topology_kwargs={"bind_port": 9300},
     )
     failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
     assert {"application_port_usable", "topology_port_usable"} <= failed
@@ -295,3 +297,9 @@ def test_predeployment_gate_requires_a_public_host_or_origin(tmp_path, monkeypat
     )
     failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
     assert "public_origin_valid" in failed
+
+
+def test_predeployment_gate_requires_protected_ports_to_be_reserved(tmp_path, monkeypatch):
+    result = _gate(tmp_path, monkeypatch, environment_kwargs={"reserved": ""})
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert "protected_port_owners" in failed

@@ -37,7 +37,7 @@ WeChat delivery.
 ## Historical target-specific operational record
 
 - Do not stop, rebind, or modify port `443` (SSH) or ports used by existing
-  services. Services choose free ports automatically and never use 443.
+  services. Services choose free ports automatically and skip reserved ports.
 - Any CTYun path to a non-China IP must traverse the existing `abcdyi-sin`
   Singapore bridge.
 - Inject channel credentials and API keys from the authorized secret store;

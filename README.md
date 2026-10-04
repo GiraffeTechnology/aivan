@@ -88,7 +88,7 @@ uv run aivan serve
 uv run aivan demo
 ```
 
-`aivan serve` binds a free port automatically (never 443) and prints it; the app route is `http://127.0.0.1:<printed port>/app`. Set `AIVAN_PORT` only to request a specific port; if it is busy, another free port is chosen. The demo uses explicit mock providers. A successful mock demo is useful smoke evidence but does not prove the real DB/GLTG/GPM/channel integrations or the required first-web-iteration UI.
+`aivan serve` binds a free port automatically (skipping any in `AIVAN_RESERVED_PORTS`) and prints it; the app route is `http://127.0.0.1:<printed port>/app`. Set `AIVAN_PORT` only to request a specific port; if it is busy, another free port is chosen. The demo uses explicit mock providers. A successful mock demo is useful smoke evidence but does not prove the real DB/GLTG/GPM/channel integrations or the required first-web-iteration UI.
 
 ## Repository checks
 

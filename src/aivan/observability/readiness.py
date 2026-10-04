@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from aivan.api.cors import cors_origins
 from aivan.governance.runtime_policy import production_policy_checks
+from aivan.utils.ports import usable_port
 from aivan.observability.dependency_probe import (
     DependencyProbeResult,
     critical_dependencies_ready,
@@ -81,7 +82,7 @@ def _readiness_snapshot(
         "cors_public_origin_exact": bool(public_origin)
         and browser_origin(public_origin) in cors
         and "*" not in cors,
-        "protected_ports_avoided": port.isdigit() and port != "443",
+        "protected_ports_avoided": usable_port(port) is not None,
         "gpm_durable_configured": _configured("GIRAFFE_DB_BASE_URL"),
         "openclaw_live_configured": _configured("OPENCLAW_BASE_URL")
         and os.environ.get("OPENCLAW_MOCK_MODE", "").strip().lower() == "false",

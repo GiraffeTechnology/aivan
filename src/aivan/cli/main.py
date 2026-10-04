@@ -17,7 +17,7 @@ def cmd_init(args):
 def cmd_serve(args):
     from aivan.utils.ports import serve
     host = os.environ.get("AIVAN_HOST", "127.0.0.1")
-    # AIVAN_PORT is optional: a free port (never 443) is chosen automatically.
+    # AIVAN_PORT is optional: a free, non-reserved port is chosen automatically.
     serve(
         "aivan.api.main:app",
         host=host,

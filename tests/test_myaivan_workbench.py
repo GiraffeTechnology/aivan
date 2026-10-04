@@ -325,14 +325,15 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setattr(readiness, "run_dependency_probes", ready_probes)
     assert all(readiness_checks(correlation_id="corr-ready").values())
 
-    # The port is never implied, and 443 belongs to SSH on CTYun.
-    for origin in ("https://myaivan.test", "https://myaivan.test:443"):
+    # Ports reserved by the host are never accepted.
+    monkeypatch.setenv("AIVAN_RESERVED_PORTS", "9300")
+    for origin in ("https://myaivan.test:9300", "http://myaivan.test:9300"):
         monkeypatch.setenv("AIVAN_PUBLIC_ORIGIN", origin)
         monkeypatch.setenv("AIVAN_CORS_ORIGINS", origin)
         assert readiness_checks()["public_origin_valid"] is False
     monkeypatch.setenv("AIVAN_PUBLIC_ORIGIN", "https://myaivan.test:9100")
     monkeypatch.setenv("AIVAN_CORS_ORIGINS", "https://myaivan.test:9100")
-    monkeypatch.setenv("AIVAN_PORT", "443")
+    monkeypatch.setenv("AIVAN_PORT", "9300")
     assert readiness_checks()["protected_ports_avoided"] is False
 
 

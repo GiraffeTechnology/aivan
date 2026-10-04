@@ -141,7 +141,7 @@ app = create_app()
 def main() -> None:
     parser = argparse.ArgumentParser(description="AIVAN GPM Server")
     parser.add_argument("--host", default=DEFAULT_HOST)
-    # Optional; a free port (never 443) is chosen automatically.
+    # Optional; a free, non-reserved port is chosen automatically.
     parser.add_argument("--port", default=os.environ.get("AIVAN_GPM_PORT"))
     args = parser.parse_args()
     enforce_runtime_policy(component="aivan-gpm")

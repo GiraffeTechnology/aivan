@@ -1,9 +1,8 @@
-"""Validate the operator-configured public browser origin for myAIVAN.
+"""Validate and resolve the public browser origin for myAIVAN.
 
-On CTYun hosts TCP 443 belongs to SSH. HTTP and HTTPS may use any other
-unoccupied port, but the port is never implied: the origin must state it
-explicitly, and an origin on port 443 is rejected. The origin can be derived
-from the automatically selected port (see ``resolved_public_origin``).
+The origin can be configured explicitly or derived from ``AIVAN_PUBLIC_HOST``
+and the automatically selected port. Its effective port must not be one of the
+ports the environment reserves (``AIVAN_RESERVED_PORTS``).
 """
 
 from __future__ import annotations
@@ -11,36 +10,36 @@ from __future__ import annotations
 import os
 from urllib.parse import urlsplit
 
-RESERVED_PUBLIC_PORT = 443
+from aivan.utils.ports import reserved_ports
+
 _SCHEME_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
-def public_origin_issue(origin: str) -> str | None:
+def public_origin_issue(origin: str, reserved: frozenset[int] | None = None) -> str | None:
     """Return why ``origin`` is not an acceptable public origin, or ``None``."""
 
     value = origin.strip()
     if not value:
-        return "AIVAN_PUBLIC_ORIGIN is not configured"
+        return "public origin is not configured"
     try:
         parts = urlsplit(value)
         port = parts.port
     except ValueError:
-        return "AIVAN_PUBLIC_ORIGIN is not a valid URL"
+        return "public origin is not a valid URL"
     if parts.scheme not in _SCHEME_DEFAULT_PORTS or not parts.hostname:
-        return "AIVAN_PUBLIC_ORIGIN must be an http or https origin with a host"
+        return "public origin must be an http or https origin with a host"
     if parts.username or parts.password or parts.path or parts.query or parts.fragment:
-        return "AIVAN_PUBLIC_ORIGIN must be a bare origin without credentials or path"
-    if port is None:
-        return "AIVAN_PUBLIC_ORIGIN must state its port explicitly"
-    if port == RESERVED_PUBLIC_PORT:
-        return f"AIVAN_PUBLIC_ORIGIN must not use port {RESERVED_PUBLIC_PORT}"
+        return "public origin must be a bare origin without credentials or path"
+    effective_port = _SCHEME_DEFAULT_PORTS[parts.scheme] if port is None else port
+    if effective_port in (reserved_ports() if reserved is None else reserved):
+        return f"public origin uses reserved port {effective_port}"
     if value != f"{parts.scheme}://{parts.netloc.lower()}":
-        return "AIVAN_PUBLIC_ORIGIN must be lowercase and normalized"
+        return "public origin must be lowercase and normalized"
     return None
 
 
-def public_origin_valid(origin: str) -> bool:
-    return public_origin_issue(origin) is None
+def public_origin_valid(origin: str, reserved: frozenset[int] | None = None) -> bool:
+    return public_origin_issue(origin, reserved) is None
 
 
 def browser_origin(origin: str) -> str:

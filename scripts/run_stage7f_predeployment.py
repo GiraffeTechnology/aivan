@@ -23,14 +23,13 @@ from dotenv import dotenv_values
 from sqlalchemy import create_engine
 
 from aivan.db.schema_validation import schema_issues
-from aivan.observability.public_origin import RESERVED_PUBLIC_PORT, public_origin_valid
-from aivan.utils.ports import usable_port
+from aivan.observability.public_origin import public_origin_valid
+from aivan.utils.ports import RESERVED_PORTS_ENV, parse_reserved_ports, usable_port
 
 
 EVIDENCE_CLASS = "production_predeployment"
 PRODUCTION_ACCEPTANCE = False
 DATABASE_PROFILE = "sqlite:///./data/aivan.db"
-SSH_PORT_OWNER = {str(RESERVED_PUBLIC_PORT): "ssh"}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CANDIDATE_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 LOCK_FILES = (
@@ -81,11 +80,11 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _port_or_auto(value: Any) -> bool:
-    """Blank means the port is chosen automatically; otherwise any port but 443."""
+def _port_or_auto(value: Any, reserved: frozenset[int]) -> bool:
+    """Blank means the port is chosen automatically; otherwise any non-reserved port."""
     if value is None or not str(value).strip():
         return True
-    return usable_port(value) is not None
+    return usable_port(value, reserved) is not None
 
 
 def _truthy(value: str | None) -> bool:
@@ -177,6 +176,7 @@ def run_predeployment_gate(
     checkout_commit = _checkout_commit(repository_root)
 
     environment = dict(dotenv_values(environment_file, interpolate=False))
+    reserved = parse_reserved_ports(environment.get(RESERVED_PORTS_ENV))
     topology = _load_topology(topology_file)
     checks: list[dict[str, str]] = []
 
@@ -190,7 +190,7 @@ def run_predeployment_gate(
         "candidate_matches_environment", environment.get("AIVAN_CANDIDATE_SHA") == candidate_commit
     )
     check("application_loopback_bind", environment.get("AIVAN_HOST") == "127.0.0.1")
-    check("application_port_usable", _port_or_auto(environment.get("AIVAN_PORT")))
+    check("application_port_usable", _port_or_auto(environment.get("AIVAN_PORT"), reserved))
     check("fixed_database_profile", environment.get("AIVAN_DB_URL") == DATABASE_PROFILE)
     check(
         "singapore_egress_policy",
@@ -208,7 +208,7 @@ def run_predeployment_gate(
     public_host = (environment.get("AIVAN_PUBLIC_HOST") or "").strip()
     check(
         "public_origin_valid",
-        public_origin_valid(public_origin) if public_origin else bool(public_host),
+        public_origin_valid(public_origin, reserved) if public_origin else bool(public_host),
     )
     check("cors_exact_origin", "*" not in origins)
     check("human_approval_required", _truthy(environment.get("AIVAN_REQUIRE_HUMAN_APPROVAL")))
@@ -246,7 +246,7 @@ def run_predeployment_gate(
     check("fixed_install_path", topology.get("install_path") == "/opt/giraffe/aivan")
     check("fixed_service_name", topology.get("service_name") == "myaivan.service")
     check("topology_loopback_bind", topology.get("bind_host") == "127.0.0.1")
-    check("topology_port_usable", _port_or_auto(topology.get("bind_port")))
+    check("topology_port_usable", _port_or_auto(topology.get("bind_port"), reserved))
     environment_port = (environment.get("AIVAN_PORT") or "").strip()
     check(
         "topology_port_matches_environment",
@@ -258,7 +258,12 @@ def run_predeployment_gate(
     check("topology_bridge", topology.get("non_china_egress_bridge") == "abcdyi-sin")
     check(
         "protected_port_owners",
-        (topology.get("protected_port_owners") or {}).items() >= SSH_PORT_OWNER.items(),
+        # Ports owned by other services on the target must be reserved, so
+        # automatic selection never lands on them.
+        all(
+            str(port).isdigit() and int(port) in reserved
+            for port in (topology.get("protected_port_owners") or {})
+        ),
     )
     bridge = topology.get("reverse_bridge") or {}
     check(
@@ -266,7 +271,7 @@ def run_predeployment_gate(
         set(bridge) == {"remote_host_profile", "remote_bind", "remote_port", "health_path"}
         and bridge.get("remote_host_profile") == "abcdyi-sin"
         and bridge.get("remote_bind") == "127.0.0.1"
-        and _port_or_auto(bridge.get("remote_port"))
+        and _port_or_auto(bridge.get("remote_port"), reserved)
         and bridge.get("health_path") == "/health",
     )
     check(
@@ -363,7 +368,7 @@ def main() -> int:
                     "evidence_class": EVIDENCE_CLASS,
                     "production_acceptance": PRODUCTION_ACCEPTANCE,
                     "public_origin_variable": "AIVAN_PUBLIC_ORIGIN",
-                    "required_port_owners": SSH_PORT_OWNER,
+                    "reserved_ports_variable": RESERVED_PORTS_ENV,
                     "database_profile": DATABASE_PROFILE,
                     "required_observations": list(REQUIRED_OBSERVATIONS),
                 },

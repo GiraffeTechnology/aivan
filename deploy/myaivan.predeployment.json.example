@@ -8,9 +8,7 @@
   "bind_port": null,
   "database_profile": "sqlite:///./data/aivan.db",
   "non_china_egress_bridge": "abcdyi-sin",
-  "protected_port_owners": {
-    "443": "ssh"
-  },
+  "protected_port_owners": {},
   "reverse_bridge": {
     "remote_host_profile": "abcdyi-sin",
     "remote_bind": "127.0.0.1",
