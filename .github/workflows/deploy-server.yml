@@ -62,7 +62,7 @@ jobs:
             echo "- deployment_performed: \`false\`"
             echo "- secrets_read: \`false\`"
             echo "- remote_connections_opened: \`false\`"
-            echo "- protected_ports_443_8443_touched: \`false\`"
+            echo "- reserved_ports_touched: \`false\`"
             echo "- non_china_traffic_emitted: \`false\`"
             echo ""
             echo "Production deployment remains blocked until Stage 7F approval,"
