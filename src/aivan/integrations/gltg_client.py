@@ -97,10 +97,10 @@ class GLTGClient:
                 follow_redirects=False,
             ) as client:
                 resp = client.request(method, url, json=json, headers=headers)
-        except httpx.TimeoutException as exc:
-            return GLTGClientResult(False, None, f"GLTG request timed out: {exc}", None)
-        except httpx.HTTPError as exc:
-            return GLTGClientResult(False, None, f"GLTG connection error: {exc}", None)
+        except httpx.TimeoutException:
+            return GLTGClientResult(False, None, "GLTG_TIMEOUT", None)
+        except httpx.HTTPError:
+            return GLTGClientResult(False, None, "GLTG_UNAVAILABLE", None)
 
         if resp.status_code != 200:
             return GLTGClientResult(
@@ -115,8 +115,8 @@ class GLTGClient:
             )
         try:
             return GLTGClientResult(True, resp.json(), None, resp.status_code)
-        except ValueError as exc:
-            return GLTGClientResult(False, None, f"GLTG returned invalid JSON: {exc}", resp.status_code)
+        except ValueError:
+            return GLTGClientResult(False, None, "GLTG_RESPONSE_INVALID", resp.status_code)
 
     # ------------------------------------------------------------------ #
     # endpoints

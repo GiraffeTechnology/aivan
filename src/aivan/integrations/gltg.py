@@ -13,6 +13,8 @@ it never silently substitutes a locally computed estimate.
 from __future__ import annotations
 
 import os
+import math
+from typing import Any
 
 from aivan.integrations.gltg_client import GLTGClient as GLTGHttpClient
 from aivan.schemas.leadtime import LeadTimeComponent, LeadTimeEstimate
@@ -56,6 +58,7 @@ class GLTGClient:
             lead_time_confidence=strategy.lead_time_confidence,
             supplier_id=supplier_id,
             tenant_id=tenant_id,
+            evidence_context=requirement.extra,
         )
 
         p50 = float(data["p50_days"])
@@ -101,6 +104,10 @@ class GLTGClient:
                 "supplier_candidate" if supplier_id else "requirement_baseline"
             ),
             supplier_ids=[supplier_id] if supplier_id else [],
+            source_observation_ids=data.get("source_observation_ids") or [],
+            persistence=data.get("persistence") or {},
+            explanation_json=data.get("explanation_json") or {},
+            warnings=data.get("warnings") or [],
         )
 
     # ------------------------------------------------------------------ #
@@ -138,6 +145,8 @@ class GLTGClient:
             lead_time_confidence="P80",
             supplier_id=supplier_anchor,
             tenant_id=tenant_id,
+            evidence_context=requirement.extra,
+            supplier_stated_lead_time_days=declared,
         )
 
         p50 = float(data["p50_days"])
@@ -154,6 +163,9 @@ class GLTGClient:
         trace_rows = data.get("calculation_trace") or []
         trace = trace_rows[0] if trace_rows and isinstance(trace_rows[0], dict) else {}
         components: list[LeadTimeComponent] = []
+        for name, value in (data.get("components") or {}).items():
+            if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                components.append(LeadTimeComponent(name=name, days=value, source="gltg", confidence=None))
         component_fields = (
             ("material_ready", "material_ready_days"),
             ("production", "capacity_adjusted_production_days"),
@@ -211,6 +223,12 @@ class GLTGClient:
                 f"GLTG estimate via standalone service for {quantity} pcs to "
                 f"{destination or 'destination'}: calculated={calculated}d, p80={p80}d, risk={risk}."
             ),
+            gltg_run_id=data.get("gltg_run_id"),
+            source_api_version=data.get("source_api_version", "v1"),
+            source_observation_ids=data.get("source_observation_ids") or [],
+            persistence=data.get("persistence") or {},
+            explanation_json=data.get("explanation_json") or {},
+            warnings=data.get("warnings") or [],
         )
 
     # ------------------------------------------------------------------ #
@@ -226,6 +244,8 @@ class GLTGClient:
         lead_time_confidence: str = "P80",
         supplier_id: str | None = None,
         tenant_id: str | None = None,
+        evidence_context: dict | None = None,
+        supplier_stated_lead_time_days: float | None = None,
     ) -> dict:
         order = {
             "product_type": product_type,
@@ -237,12 +257,22 @@ class GLTGClient:
         }
         # A single requirement-level supplier (no stage data) -> GLTG applies its
         # own baseline stage estimates. AIVAN never computes stages locally.
-        supplier = {
+        supplier: dict[str, Any] = {
             "supplier_id": supplier_id or "requirement-baseline",
             "capacity_per_day": capacity_per_day,
-            "confidence": 0.7,
         }
-        if os.environ.get("GLTG_API_VERSION", "v1").lower() == "v2":
+        api_version = os.environ.get("GLTG_API_VERSION", "v2").strip().lower()
+        if api_version not in {"v1", "v2"}:
+            raise GLTGUnavailableError("GLTG_API_VERSION_UNSUPPORTED")
+        if api_version == "v2":
+            context = evidence_context or {}
+            factors = context.get("trade_processing_factors", {})
+            observations = context.get("source_observation_ids", [])
+            if (not isinstance(factors, dict) or not isinstance(observations, list)
+                or any(not isinstance(item, str) or not item.strip() for item in observations)):
+                raise GLTGUnavailableError("GLTG_INPUT_EVIDENCE_INVALID")
+            if supplier_stated_lead_time_days is not None:
+                supplier["supplier_stated_lead_time_days"] = supplier_stated_lead_time_days
             evidence = {"use_giraffe_db": True} if supplier_id else None
             result = self._http.simulate_lead_time_v2(
                 {
@@ -266,12 +296,16 @@ class GLTGClient:
                         "deadline_days": deadline_days,
                     },
                     "supplier": supplier,
+                    "trade_processing_factors": factors,
+                    "source_observation_ids": observations,
                     **({"evidence": evidence} if evidence is not None else {}),
                     "constraints": {"lead_time_confidence": lead_time_confidence},
                 }
             )
             if not result.ok or result.data is None:
                 raise GLTGUnavailableError(result.error or "GLTG v2 returned no data")
+            if not isinstance(result.data, dict):
+                raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
             if supplier_id:
                 warning_codes = {
                     str(item.get("code") or "")
@@ -289,14 +323,29 @@ class GLTGClient:
 
     @staticmethod
     def _normalize_v2_result(data: dict) -> dict:
+        if not isinstance(data, dict) or data.get("ok") is False:
+            raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
         quantiles = data.get("quantiles") or {}
         risk = data.get("risk") or {}
+        if not isinstance(quantiles, dict) or not isinstance(risk, dict):
+            raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
+        for field in ("components", "persistence", "explanation_json"):
+            if data.get(field) is not None and not isinstance(data[field], dict):
+                raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
+        for field in ("warnings", "source_observation_ids"):
+            if data.get(field) is not None and not isinstance(data[field], list):
+                raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
         p50 = quantiles.get("p50_days")
         p80 = quantiles.get("p80_days")
         p90 = quantiles.get("p90_days")
-        selected = risk.get("selected_confidence_days") or p80
-        if p50 is None or p80 is None or p90 is None or selected is None:
-            raise GLTGUnavailableError("GLTG v2 response missing quantiles")
+        selected = risk.get("selected_confidence_days")
+        if selected is None:
+            selected = p80
+        p50, p80, p90, selected = (
+            GLTGClient._canonical_days(value) for value in (p50, p80, p90, selected)
+        )
+        if not p50 <= p80 <= p90:
+            raise GLTGUnavailableError("GLTG_RESPONSE_QUANTILES_INVALID")
         return {
             "source_api_version": "v2",
             "gltg_run_id": data.get("gltg_run_id"),
@@ -312,7 +361,20 @@ class GLTGClient:
             "risk_level": risk.get("deadline_risk_level", "unknown"),
             "feasible": risk.get("deadline_feasible"),
             "calculation_trace": [],
+            "components": data.get("components") or {},
+            "source_observation_ids": data.get("source_observation_ids") or [],
+            "persistence": data.get("persistence") or {},
+            "explanation_json": data.get("explanation_json") or {},
+            "warnings": data.get("warnings") or [],
         }
+
+    @staticmethod
+    def _canonical_days(value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise GLTGUnavailableError("GLTG_RESPONSE_QUANTILES_INVALID")
+        if not math.isfinite(value) or value < 0:
+            raise GLTGUnavailableError("GLTG_RESPONSE_QUANTILES_INVALID")
+        return float(value)
 
     @staticmethod
     def _feasibility(confidence_days: float, deadline_days: int | None) -> str:

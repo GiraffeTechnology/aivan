@@ -90,6 +90,10 @@ class GLTGSimulation(BaseModel):
         "requirement_baseline"
     )
     supplier_ids: list[str] = Field(default_factory=list)
+    source_observation_ids: list[str] = Field(default_factory=list)
+    persistence: dict = Field(default_factory=dict)
+    explanation_json: dict = Field(default_factory=dict)
+    warnings: list[dict] = Field(default_factory=list)
 
 
 class SupplierRoutingDecision(BaseModel):
