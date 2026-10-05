@@ -1,0 +1,1441 @@
+{
+  "publication_date": "2026-10-05",
+  "original_archive_count": 51,
+  "source_identity_is_not_publication_commit": true,
+  "archives": [
+    {
+      "original_filename": "01-ArtFi-Wallet-Handoff-20261003.zip",
+      "original_size": 13169357,
+      "original_sha256": "bcef7acbc598048dc3d061bec6b3bb3066f110d9279cf68abf5c4edc8e558d3b",
+      "repository": "GiraffeTechnology/ArtFi",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/01-ArtFi-Wallet-Handoff-20261003-github-safe.zip",
+          "size": 8814894,
+          "sha256": "fcc44b25898c9e8f88ee1b44c15ca2510fd454ff9840bc7144be4f1614d3bb1f",
+          "git_blob_sha1": "30dbe9db764cb4cf25799ecca3f9bc4b02cb5947"
+        }
+      ],
+      "mirror_full_filename": "01-ArtFi-Wallet-Handoff-20261003-github-safe.zip",
+      "mirror_full_size": 8814894,
+      "mirror_full_sha256": "fcc44b25898c9e8f88ee1b44c15ca2510fd454ff9840bc7144be4f1614d3bb1f"
+    },
+    {
+      "original_filename": "03-Operations-Complete-Handoff-2026-10-03.zip",
+      "original_size": 263286,
+      "original_sha256": "5e4739284db84538b58a266e57b36e32863484a9ea64f93a44ebb45695abe5f2",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/03-Operations-Complete-Handoff-2026-10-03-github-safe.zip",
+          "size": 23461,
+          "sha256": "a94f469eeb36b6ee026ce1b43c79dd55e577d0c7426a9e845daef5641d47b50e",
+          "git_blob_sha1": "06e427896c8314b2c57fa774bbeafc2c05f5a644"
+        }
+      ],
+      "mirror_full_filename": "03-Operations-Complete-Handoff-2026-10-03-github-safe.zip",
+      "mirror_full_size": 23461,
+      "mirror_full_sha256": "a94f469eeb36b6ee026ce1b43c79dd55e577d0c7426a9e845daef5641d47b50e"
+    },
+    {
+      "original_filename": "8415wallet-UI-Beta-CANDIDATE-bc203c72.zip",
+      "original_size": 3593561,
+      "original_sha256": "5c1937dbe2b020176bc0b650327c3ad4442eafe7f9fc773d11244a190e300b57",
+      "repository": "GiraffeTechnology/8415Wallet",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/8415wallet-UI-Beta-CANDIDATE-bc203c72-github-safe.zip",
+          "size": 3595261,
+          "sha256": "91ea937f37cd1a7702761107d1b2ec8a68019c8559f7f2c44a2d94f849380b7b",
+          "git_blob_sha1": "b20b11ff654631ef84af492cce7dd2398f2f67ce"
+        }
+      ],
+      "mirror_full_filename": "8415wallet-UI-Beta-CANDIDATE-bc203c72-github-safe.zip",
+      "mirror_full_size": 3595261,
+      "mirror_full_sha256": "91ea937f37cd1a7702761107d1b2ec8a68019c8559f7f2c44a2d94f849380b7b",
+      "source_commit": "bc203c7225e5e8898cdff3303981c9ef63b8f931"
+    },
+    {
+      "original_filename": "8415wallet-V2-V3-DApp-Beta-Handoff-1f4a9ae6-20261004.zip",
+      "original_size": 11015079,
+      "original_sha256": "df5058bec9d5c12cffb9ca10cd7ea991e46696207a50f3d2ccf47ac375681838",
+      "repository": "GiraffeTechnology/8415Wallet",
+      "archive_status": "historical",
+      "representation": "existing_immutable_original",
+      "files": [
+        {
+          "path": "releases/2026-10-04-login-beta/8415wallet-V2-V3-DApp-Beta-Handoff-1f4a9ae6-20261004.zip",
+          "size": 11015079,
+          "sha256": "df5058bec9d5c12cffb9ca10cd7ea991e46696207a50f3d2ccf47ac375681838",
+          "git_blob_sha1": "95d454e833ce70c107c50f4dda15a90c16c94089"
+        }
+      ],
+      "source_commit": "1f4a9ae6dd5b8b062ab4f903920cf4b39d158e36",
+      "source_tree": "366a1b4e744d6414dce6a1feab390a3fe1a99095",
+      "first_publication_commit": "909a2b39590467da326ac7e120e431319f75f8f9"
+    },
+    {
+      "original_filename": "8415wallet-v3-beta-review.zip",
+      "original_size": 368186,
+      "original_sha256": "121ea692fb7f3878ee4432a325894f79a17848838e4698d920924e6b066dd0a9",
+      "repository": "GiraffeTechnology/8415Wallet",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/8415wallet-v3-beta-review-github-safe.zip",
+          "size": 352250,
+          "sha256": "7866a40b412ce13ee232577499a7c12c3f9f63ba8333b11ea0263b7f3d48dee9",
+          "git_blob_sha1": "f2b33edb69edcca9670376bbac3e72688d8971cf"
+        }
+      ],
+      "mirror_full_filename": "8415wallet-v3-beta-review-github-safe.zip",
+      "mirror_full_size": 352250,
+      "mirror_full_sha256": "7866a40b412ce13ee232577499a7c12c3f9f63ba8333b11ea0263b7f3d48dee9"
+    },
+    {
+      "original_filename": "ArtFi-Coding-Handoff-13f9b6b7-20261003.zip",
+      "original_size": 1545898,
+      "original_sha256": "6ddaf09fbd6b93abc726b2ceb0fce5badec8103bc71ee7d69bc7931eab82b4c0",
+      "repository": "GiraffeTechnology/ArtFi",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/ArtFi-Coding-Handoff-13f9b6b7-20261003-github-safe.zip",
+          "size": 1546934,
+          "sha256": "dc9469f39c9acf187b1fda2cc00a31460dd06488a1af6fdf52b0a0546fe10418",
+          "git_blob_sha1": "29704186525fa5576392c6f87a3c2c81af515009"
+        }
+      ],
+      "mirror_full_filename": "ArtFi-Coding-Handoff-13f9b6b7-20261003-github-safe.zip",
+      "mirror_full_size": 1546934,
+      "mirror_full_sha256": "dc9469f39c9acf187b1fda2cc00a31460dd06488a1af6fdf52b0a0546fe10418"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-linux-x86_64-installation.zip",
+      "original_size": 112738248,
+      "original_sha256": "3bd0c328a1ea0496ccc14939a5ab9fca710a0bb13d305ec1044712b2596191e3",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive_reconstructed_from_zip_wrappers",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part001-of-014.zip",
+          "size": 8388854,
+          "sha256": "b7543bb1adcc57ca107d69807ae5dff7ea3bf64df274a0761cab8ef81e05c079",
+          "git_blob_sha1": "c2b4a7a23370bf05f156469f8ae4b84b1a422e84"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part002-of-014.zip",
+          "size": 8388854,
+          "sha256": "f34874bd107232377dde5dc10a2543eea7873f6b347195066d6bc5dccba0e4b5",
+          "git_blob_sha1": "2b2d52b534c2567718cd2d6003a966966d78da66"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part003-of-014.zip",
+          "size": 8388854,
+          "sha256": "ebbb3124590c12b2ed54daa6d09156af8e1654a62ccbba7d8afed55340d52a9c",
+          "git_blob_sha1": "e9c9bf557dded61d8d339cc6302123d9b09ed5b4"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part004-of-014.zip",
+          "size": 8388854,
+          "sha256": "49226503b64b702b4e459cd25eb0aa090521699694da1bc4ff2a30e497e84ed1",
+          "git_blob_sha1": "065087c46dfff95f7f5f5a49cd8eb396b4e642d6"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part005-of-014.zip",
+          "size": 8388854,
+          "sha256": "6156b689029a0049f9d81019472dc9dbb97ff4625e001e11992d9f6e33ef53cb",
+          "git_blob_sha1": "f04c68331c85da8ce35d3bfcd5fd1337961d2ee0"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part006-of-014.zip",
+          "size": 8388854,
+          "sha256": "ff025134b80effe2609c2b0b18fee32897e5c7957c04090f46b24c072e96a734",
+          "git_blob_sha1": "342e3297473898885f958c9ff74379ede2c4c734"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part007-of-014.zip",
+          "size": 8388854,
+          "sha256": "2c3fb8c301e9559ae40e2e3f943dd0b01db6d6e95a66637374ae82839b454c79",
+          "git_blob_sha1": "fc2539bbbe28f9169bc731762cc265e3b40b3e2b"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part008-of-014.zip",
+          "size": 8388854,
+          "sha256": "9c4c6d6b18f446f701a6645d42a869245d397f14630cbedf5796b2b7f0f24695",
+          "git_blob_sha1": "f1278b488367d82ca09309e740e1bd98f862aea6"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part009-of-014.zip",
+          "size": 8388854,
+          "sha256": "e17d806997ae9699f114c23deb4c4153788fed3e2f8903ca315b2fb1097c2751",
+          "git_blob_sha1": "30afcb0c252abe23a696b7ebf8fc79926d11b6f1"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part010-of-014.zip",
+          "size": 8388854,
+          "sha256": "f7aadeeec02c45ed81994fa46d1898868e36695a6a8176c59791985808538fd9",
+          "git_blob_sha1": "54c0c36e3c2d292aac26a4eb1f651327722544b8"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part011-of-014.zip",
+          "size": 8388854,
+          "sha256": "9f49409ff3e0fb55a41eb7a0fbd0a9695590be991e9b41d4fcf1fdcd44716a5b",
+          "git_blob_sha1": "fd10c488a207dcd108a0d3956e8b270076453930"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part012-of-014.zip",
+          "size": 8388854,
+          "sha256": "edf6bfc295354abbe4a2d33056674f3cfcc1d60fa395f7c048200a5e787b4686",
+          "git_blob_sha1": "44ab65b18a39e808949e32a2cbd6a23fe7dc652a"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part013-of-014.zip",
+          "size": 8388854,
+          "sha256": "ea50adbe4fd9919fee964262d0ed7a733698ee2a4b9f8fac4e41cb3a5e959c4f",
+          "git_blob_sha1": "18f011abb2030d979a33e4a92c3886dbd0ed6dfc"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/MyAivan-2026.10.04-linux-x86_64-installation-github-safe.part014-of-014.zip",
+          "size": 2760101,
+          "sha256": "e5c88b335299a1175e53fa23baf1684235c3de7f719f4449db57a2031214e6b4",
+          "git_blob_sha1": "9d126f1a9a3fea7e94485916ae5e37a94b5fd7ba"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-linux-x86_64-installation-github-safe.zip",
+      "mirror_full_size": 111811759,
+      "mirror_full_sha256": "1b37eee6bff2a92bb7163d0bf7fa0620b723aa2bdb4d8b4e22bd83c8ac84b4b0",
+      "reassembly_manifest": "releases/2026-10-05-delivery-archive/large-archives/MyAivan-2026.10.04-linux-x86_64-installation-github-safe/manifest.json"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part01.zip",
+      "original_size": 8387784,
+      "original_sha256": "d2da38cd9768715f844ae04dd7876352f351d620929a3ea50408143cfa269efa",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part01-github-safe.zip",
+          "size": 8387784,
+          "sha256": "d2da38cd9768715f844ae04dd7876352f351d620929a3ea50408143cfa269efa",
+          "git_blob_sha1": "a703116204dfbd4e1bc4dd4f3d27ad5c2ecefa68"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part01-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "d2da38cd9768715f844ae04dd7876352f351d620929a3ea50408143cfa269efa"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part02.zip",
+      "original_size": 8387784,
+      "original_sha256": "b3eafd7884f942ed850805da7d0f679b0201957307f41c91261320c8cc7729d0",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part02-github-safe.zip",
+          "size": 8387784,
+          "sha256": "b3eafd7884f942ed850805da7d0f679b0201957307f41c91261320c8cc7729d0",
+          "git_blob_sha1": "c3d2033e531a9d01384f9279a9072dccef2aab3e"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part02-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "b3eafd7884f942ed850805da7d0f679b0201957307f41c91261320c8cc7729d0"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part03.zip",
+      "original_size": 8387784,
+      "original_sha256": "cf0ba4743f2b5c31ddd4e27b4fdb274e2e0a6a0988772c8b686ef3ed125ac1e8",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part03-github-safe.zip",
+          "size": 8387784,
+          "sha256": "cf0ba4743f2b5c31ddd4e27b4fdb274e2e0a6a0988772c8b686ef3ed125ac1e8",
+          "git_blob_sha1": "adea5c21eb1fd4fed64c812f1b221590e5596392"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part03-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "cf0ba4743f2b5c31ddd4e27b4fdb274e2e0a6a0988772c8b686ef3ed125ac1e8"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part04.zip",
+      "original_size": 8387784,
+      "original_sha256": "44cb46d0916ae2815bcd2294e68281f838441d821ffb2e3ca7dd5341d97db61e",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part04-github-safe.zip",
+          "size": 8387784,
+          "sha256": "44cb46d0916ae2815bcd2294e68281f838441d821ffb2e3ca7dd5341d97db61e",
+          "git_blob_sha1": "3339c296fe4bed526d65bf73c5f5c2a464288ca5"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part04-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "44cb46d0916ae2815bcd2294e68281f838441d821ffb2e3ca7dd5341d97db61e"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part05.zip",
+      "original_size": 8387784,
+      "original_sha256": "413e04f33ad1f1acd46a51881c9d72f7571a59ded4a580e9b2edb80a1929a794",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part05-github-safe.zip",
+          "size": 8387784,
+          "sha256": "413e04f33ad1f1acd46a51881c9d72f7571a59ded4a580e9b2edb80a1929a794",
+          "git_blob_sha1": "8a524c37911cba729b4ec42b215a3c2934490ff6"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part05-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "413e04f33ad1f1acd46a51881c9d72f7571a59ded4a580e9b2edb80a1929a794"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part06.zip",
+      "original_size": 8387784,
+      "original_sha256": "2fa76dd81981861deafa445b8d7ccb0ba246cd691dcdc4977f762a40e8b8ecf6",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part06-github-safe.zip",
+          "size": 8387784,
+          "sha256": "2fa76dd81981861deafa445b8d7ccb0ba246cd691dcdc4977f762a40e8b8ecf6",
+          "git_blob_sha1": "922d563a20e5764c02de13f521b12cbf3f0fd541"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part06-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "2fa76dd81981861deafa445b8d7ccb0ba246cd691dcdc4977f762a40e8b8ecf6"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part07.zip",
+      "original_size": 8387784,
+      "original_sha256": "26d00c8a1d422f1346b1e8181b3527a06e174ac0d1b221b3563e298269b8239b",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part07-github-safe.zip",
+          "size": 8387784,
+          "sha256": "26d00c8a1d422f1346b1e8181b3527a06e174ac0d1b221b3563e298269b8239b",
+          "git_blob_sha1": "76943c4e31b414336f103dfdd4fb1b711533744c"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part07-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "26d00c8a1d422f1346b1e8181b3527a06e174ac0d1b221b3563e298269b8239b"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part08.zip",
+      "original_size": 8387784,
+      "original_sha256": "07e3685b8756662bfe170bda41abacaae2dd55be4f6665c9e238c9dcddbe462c",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part08-github-safe.zip",
+          "size": 8387784,
+          "sha256": "07e3685b8756662bfe170bda41abacaae2dd55be4f6665c9e238c9dcddbe462c",
+          "git_blob_sha1": "732818ec9d9969d82cf6cb82ed9a1450e8bb6a91"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part08-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "07e3685b8756662bfe170bda41abacaae2dd55be4f6665c9e238c9dcddbe462c"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part09.zip",
+      "original_size": 8387784,
+      "original_sha256": "1091ea728b57f3e46f93ad6ddbe4ddaf6e4f1e36f5464483b0372af4f9873b44",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part09-github-safe.zip",
+          "size": 8387784,
+          "sha256": "1091ea728b57f3e46f93ad6ddbe4ddaf6e4f1e36f5464483b0372af4f9873b44",
+          "git_blob_sha1": "eb6be1569adda6a2c573aa38f3572cc2bb781601"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part09-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "1091ea728b57f3e46f93ad6ddbe4ddaf6e4f1e36f5464483b0372af4f9873b44"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part10.zip",
+      "original_size": 8387784,
+      "original_sha256": "20ae589e781aa6a90e71ab64c9135ed5fb2e203becd4f87c76af8324f74032cd",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part10-github-safe.zip",
+          "size": 8387784,
+          "sha256": "20ae589e781aa6a90e71ab64c9135ed5fb2e203becd4f87c76af8324f74032cd",
+          "git_blob_sha1": "33904a496ffb10fc2255f5988c42490f0f2cceac"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part10-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "20ae589e781aa6a90e71ab64c9135ed5fb2e203becd4f87c76af8324f74032cd"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part11.zip",
+      "original_size": 8387784,
+      "original_sha256": "49f23f0498c6b6baee28b5fa5332ce078bfd9a380d198aa62744d3e94dfb582f",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part11-github-safe.zip",
+          "size": 8387784,
+          "sha256": "49f23f0498c6b6baee28b5fa5332ce078bfd9a380d198aa62744d3e94dfb582f",
+          "git_blob_sha1": "f0f3f0d44ba6c2fd2dd7bba098f5050cc552058d"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part11-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "49f23f0498c6b6baee28b5fa5332ce078bfd9a380d198aa62744d3e94dfb582f"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part12.zip",
+      "original_size": 8387784,
+      "original_sha256": "e2c5cf4ed1fd25865ae63fcdf7bd9e03c16c655c1e7958afc014ccb78787e31d",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part12-github-safe.zip",
+          "size": 8387784,
+          "sha256": "e2c5cf4ed1fd25865ae63fcdf7bd9e03c16c655c1e7958afc014ccb78787e31d",
+          "git_blob_sha1": "8c243f4c2fd1f349a2b4f9fb669d1fd88cfde688"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part12-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "e2c5cf4ed1fd25865ae63fcdf7bd9e03c16c655c1e7958afc014ccb78787e31d"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part13.zip",
+      "original_size": 8387784,
+      "original_sha256": "3d28b4899babfd356965845d5fdc408f4b0c9ef38b38ea4068e5fb3b056d8bf6",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part13-github-safe.zip",
+          "size": 8387784,
+          "sha256": "3d28b4899babfd356965845d5fdc408f4b0c9ef38b38ea4068e5fb3b056d8bf6",
+          "git_blob_sha1": "de08bed4bd675bba42c80032777f96f1fcaf5411"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part13-github-safe.zip",
+      "mirror_full_size": 8387784,
+      "mirror_full_sha256": "3d28b4899babfd356965845d5fdc408f4b0c9ef38b38ea4068e5fb3b056d8bf6"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-runtime-part14.zip",
+      "original_size": 3514693,
+      "original_sha256": "3ddae03a71b1a139d07ee8615c3a2db95baeab73512ec4d89d2b1255c6a5256b",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-runtime-part14-github-safe.zip",
+          "size": 3514693,
+          "sha256": "3ddae03a71b1a139d07ee8615c3a2db95baeab73512ec4d89d2b1255c6a5256b",
+          "git_blob_sha1": "2d1a6b852476422938d12790c9025afd1941da6a"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-runtime-part14-github-safe.zip",
+      "mirror_full_size": 3514693,
+      "mirror_full_sha256": "3ddae03a71b1a139d07ee8615c3a2db95baeab73512ec4d89d2b1255c6a5256b"
+    },
+    {
+      "original_filename": "MyAivan-2026.10.04-start-here.zip",
+      "original_size": 186634,
+      "original_sha256": "e4346c8b70dfae80a7914e8de7ba1417abd3afd86a45b74cb0b3717998a097f3",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-2026.10.04-start-here-github-safe.zip",
+          "size": 187588,
+          "sha256": "6083fbe786c6888fbf9ff41f127ce8c4445edadd224e3254e2972b9da7b62b3f",
+          "git_blob_sha1": "ff56da8cb13eb4491fb6cefd59ef8fa3f15ea32a"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-2026.10.04-start-here-github-safe.zip",
+      "mirror_full_size": 187588,
+      "mirror_full_sha256": "6083fbe786c6888fbf9ff41f127ce8c4445edadd224e3254e2972b9da7b62b3f"
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part001-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "dfed7db6e27c2d45aa4712d201e4d9d445d545bb52add8348364c24efe4aec44",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part001-of-016-github-safe.zip",
+          "size": 8326261,
+          "sha256": "ac890a0b1a6abb468b48ac3fcce89fb81344a8c29cc64d2a9c9a360ddf33f609",
+          "git_blob_sha1": "d63ef11c0ea9e9d04b2c19c48323b06d7f957d2b"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part001-of-016-github-safe.zip",
+      "mirror_full_size": 8326261,
+      "mirror_full_sha256": "ac890a0b1a6abb468b48ac3fcce89fb81344a8c29cc64d2a9c9a360ddf33f609",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 1,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part002-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "79d3b5ee3f7bcdf64666e519147db04a3257a75ef321166b7e9b66f253901912",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part002-of-016-github-safe.zip",
+          "size": 8326375,
+          "sha256": "de3ab1bca78c3cc9fe0ae5a82d0baa5c5e51c752f91f483b60ce7cf081bcf9ae",
+          "git_blob_sha1": "c4afae95317e7e24f9968ac71b2b8261389f8a41"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part002-of-016-github-safe.zip",
+      "mirror_full_size": 8326375,
+      "mirror_full_sha256": "de3ab1bca78c3cc9fe0ae5a82d0baa5c5e51c752f91f483b60ce7cf081bcf9ae",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 2,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part003-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "7a4396742fb3f17a837a96eaafd48d61a87a09b8fe2e201eeafae642c5671449",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part003-of-016-github-safe.zip",
+          "size": 8326375,
+          "sha256": "bccee581595bd0cba7799e65462ae028e422e90cb080d0b2ee50c7a2c9710f50",
+          "git_blob_sha1": "35dedbda9a7fb0ce5a68477714f5cf7da0524236"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part003-of-016-github-safe.zip",
+      "mirror_full_size": 8326375,
+      "mirror_full_sha256": "bccee581595bd0cba7799e65462ae028e422e90cb080d0b2ee50c7a2c9710f50",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 3,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part004-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "75a6b1b1342c3d3ba8d98af7959832b74ef616cdad76ed940a07037a1888a9b6",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part004-of-016-github-safe.zip",
+          "size": 8326371,
+          "sha256": "da147f578fb9e62fd6d5b9f353e6169a04d2ac00ba2d4a0c34f42434d64821a7",
+          "git_blob_sha1": "947fa242429a130df0a50951b98e1cc172e22dad"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part004-of-016-github-safe.zip",
+      "mirror_full_size": 8326371,
+      "mirror_full_sha256": "da147f578fb9e62fd6d5b9f353e6169a04d2ac00ba2d4a0c34f42434d64821a7",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 4,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part005-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "00e3f1dd545c043a007f7f2791e2062f3250cdd7a6ddca9862c69d9495d76075",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part005-of-016-github-safe.zip",
+          "size": 8326406,
+          "sha256": "1d8f60131f1ef32abd98274b720278432265e4e65d11db6e81562621892cebaa",
+          "git_blob_sha1": "015e53a733cef360abac5f72885039272de62c2a"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part005-of-016-github-safe.zip",
+      "mirror_full_size": 8326406,
+      "mirror_full_sha256": "1d8f60131f1ef32abd98274b720278432265e4e65d11db6e81562621892cebaa",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 5,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part006-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "95f54ebfa2c3922b0117eb520a2f014ae298e1985d3da4384fed393a8ff818e2",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part006-of-016-github-safe.zip",
+          "size": 8326370,
+          "sha256": "531a51f812d786c2e554d4b25fe00c672ba7a2e44fdab110931d82770a45c1ec",
+          "git_blob_sha1": "6471cbb4d76fe636bd1a7212e801bf088d43af8c"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part006-of-016-github-safe.zip",
+      "mirror_full_size": 8326370,
+      "mirror_full_sha256": "531a51f812d786c2e554d4b25fe00c672ba7a2e44fdab110931d82770a45c1ec",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 6,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part007-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "144ce4de78ba9db719e43f6a307ff10b66c9ee4358ca718802f3ed21894ff3d5",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part007-of-016-github-safe.zip",
+          "size": 8326391,
+          "sha256": "fc625f4ff0ce9dd8d93d352d2a32593bf1ad458b4f2dcf67d99a454748db7611",
+          "git_blob_sha1": "4fb8a8297a59e8d6202a7d7359b5d7d730cbd6a2"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part007-of-016-github-safe.zip",
+      "mirror_full_size": 8326391,
+      "mirror_full_sha256": "fc625f4ff0ce9dd8d93d352d2a32593bf1ad458b4f2dcf67d99a454748db7611",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 7,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part008-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "0118b82ce27e35c83a0b260d54e951663a390e40c9b9e9a257d14f5b8a347905",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part008-of-016-github-safe.zip",
+          "size": 8326390,
+          "sha256": "4d99d9b00db131b4a6148d32574d4f669b2815be2d00074a3e5afc2f2adc069b",
+          "git_blob_sha1": "570a6921da978478cfa329417eb490ab8f3b219a"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part008-of-016-github-safe.zip",
+      "mirror_full_size": 8326390,
+      "mirror_full_sha256": "4d99d9b00db131b4a6148d32574d4f669b2815be2d00074a3e5afc2f2adc069b",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 8,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part009-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "914530fd3c3a168db04d8d080593561f6af801984d5bb86a26ab7fc23ae666c6",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part009-of-016-github-safe.zip",
+          "size": 8326381,
+          "sha256": "a33c2a38c9382f382ac7b1b237e9699a9c56c41111720beef6f19aa619b7c1d6",
+          "git_blob_sha1": "2c440a8cad1b7934bd7ed2b1d48db40caca6271e"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part009-of-016-github-safe.zip",
+      "mirror_full_size": 8326381,
+      "mirror_full_sha256": "a33c2a38c9382f382ac7b1b237e9699a9c56c41111720beef6f19aa619b7c1d6",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 9,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part010-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "759c4323b0650ef9a4efdbb1f4c39f3ec90ae1aee5fce71878e9b960d962d510",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part010-of-016-github-safe.zip",
+          "size": 8326396,
+          "sha256": "a4bb1e3be379fab5c96ea412bbfe420d0927e136293fa2ca154057eb9e980b3a",
+          "git_blob_sha1": "84bfbae73a42f4f8be2c3115e0c1565814c0933e"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part010-of-016-github-safe.zip",
+      "mirror_full_size": 8326396,
+      "mirror_full_sha256": "a4bb1e3be379fab5c96ea412bbfe420d0927e136293fa2ca154057eb9e980b3a",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 10,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part011-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "0cf12a64f1fa719e73687e25eaee522dc62029bed099223199bc43f5945b1c9f",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part011-of-016-github-safe.zip",
+          "size": 8326397,
+          "sha256": "a5276b95c2a529e38c490292ae4b56f2967f7cfee5ec14bf4da9e49e517a355d",
+          "git_blob_sha1": "a7ea8252139370b2f32a64b6b509ccb1f304b65c"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part011-of-016-github-safe.zip",
+      "mirror_full_size": 8326397,
+      "mirror_full_sha256": "a5276b95c2a529e38c490292ae4b56f2967f7cfee5ec14bf4da9e49e517a355d",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 11,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part012-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "c8be7f72892b2a54657ff82258b3c00665ed856b7a86a5419c2b0740ec844428",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part012-of-016-github-safe.zip",
+          "size": 8326390,
+          "sha256": "b64dbb9260be9703b75732ac8e1cfe62672b12f09ad49ebb21803a6701c4dee7",
+          "git_blob_sha1": "a0cb7b8d1a158b660c93c76fdf458add25a8d078"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part012-of-016-github-safe.zip",
+      "mirror_full_size": 8326390,
+      "mirror_full_sha256": "b64dbb9260be9703b75732ac8e1cfe62672b12f09ad49ebb21803a6701c4dee7",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 12,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part013-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "dcafb85a92fba4c0d8dbed2f5b6b841881a182c4d9b851d1ec74c4e1ae26f654",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part013-of-016-github-safe.zip",
+          "size": 8326393,
+          "sha256": "c031b2de791ac4fec1edede865157f51d63d2fb1a0552eb20681ed21b75573d9",
+          "git_blob_sha1": "bc38b40acdfc0a77c51df981ce8a9ef4d865cb88"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part013-of-016-github-safe.zip",
+      "mirror_full_size": 8326393,
+      "mirror_full_sha256": "c031b2de791ac4fec1edede865157f51d63d2fb1a0552eb20681ed21b75573d9",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 13,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part014-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "b8adb81f4b18bb1f6395abc280353222644fc3c35f11eec73448192e4d466f88",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part014-of-016-github-safe.zip",
+          "size": 8326410,
+          "sha256": "870c4732ca6340bd2b046b7b01e986f2615a423c05ec60049b59b41f038643be",
+          "git_blob_sha1": "1deb02a7f9b1ce32f93d14c702291a326b44d3c2"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part014-of-016-github-safe.zip",
+      "mirror_full_size": 8326410,
+      "mirror_full_sha256": "870c4732ca6340bd2b046b7b01e986f2615a423c05ec60049b59b41f038643be",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 14,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part015-of-016.zip",
+      "original_size": 8323286,
+      "original_sha256": "25095ae68509e4fe36010ae9183796952640267b2aa7be1f2a07f28db9036f79",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part015-of-016-github-safe.zip",
+          "size": 8326107,
+          "sha256": "df9003c1675a99c1c5aa1d41adac9ec8c8bf960adee9a35e7540a1223bf96b4f",
+          "git_blob_sha1": "2837cd77c8a33b5a57bc7afc2f2e727f51432160"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part015-of-016-github-safe.zip",
+      "mirror_full_size": 8326107,
+      "mirror_full_sha256": "df9003c1675a99c1c5aa1d41adac9ec8c8bf960adee9a35e7540a1223bf96b4f",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 15,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part016-of-016.zip",
+      "original_size": 6704228,
+      "original_sha256": "5f8209c46bdeb3465a1eecb313245017992507977232e03795129e55e0bd44ee",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part016-of-016-github-safe.zip",
+          "size": 6654550,
+          "sha256": "23c9781bb7d6fef243dbb11d9723d9f4e6d9b4ed91704bb05ae2ed8ef7af08c4",
+          "git_blob_sha1": "e648aa83f4e91d2933b8fbcd1ea3b59d52ca10fc"
+        }
+      ],
+      "mirror_full_filename": "MyAivan-MySQL-Verified-Delivery-20261004.part016-of-016-github-safe.zip",
+      "mirror_full_size": 6654550,
+      "mirror_full_sha256": "23c9781bb7d6fef243dbb11d9723d9f4e6d9b4ed91704bb05ae2ed8ef7af08c4",
+      "reconstructs": {
+        "filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+        "sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+        "size": 131516976,
+        "part": 16,
+        "count": 16
+      }
+    },
+    {
+      "original_filename": "MyAivan-MySQL-Verified-Delivery-20261004.zip",
+      "original_size": 131550094,
+      "original_sha256": "1b2f3421ebc6fcffa1524b6fb0b63f98cf72facd86d1b1b58863eba29285d33b",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive_reconstructed_from_16_shared_zip_wrappers",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part001-of-016-github-safe.zip",
+          "size": 8326261,
+          "sha256": "ac890a0b1a6abb468b48ac3fcce89fb81344a8c29cc64d2a9c9a360ddf33f609",
+          "git_blob_sha1": "d63ef11c0ea9e9d04b2c19c48323b06d7f957d2b"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part002-of-016-github-safe.zip",
+          "size": 8326375,
+          "sha256": "de3ab1bca78c3cc9fe0ae5a82d0baa5c5e51c752f91f483b60ce7cf081bcf9ae",
+          "git_blob_sha1": "c4afae95317e7e24f9968ac71b2b8261389f8a41"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part003-of-016-github-safe.zip",
+          "size": 8326375,
+          "sha256": "bccee581595bd0cba7799e65462ae028e422e90cb080d0b2ee50c7a2c9710f50",
+          "git_blob_sha1": "35dedbda9a7fb0ce5a68477714f5cf7da0524236"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part004-of-016-github-safe.zip",
+          "size": 8326371,
+          "sha256": "da147f578fb9e62fd6d5b9f353e6169a04d2ac00ba2d4a0c34f42434d64821a7",
+          "git_blob_sha1": "947fa242429a130df0a50951b98e1cc172e22dad"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part005-of-016-github-safe.zip",
+          "size": 8326406,
+          "sha256": "1d8f60131f1ef32abd98274b720278432265e4e65d11db6e81562621892cebaa",
+          "git_blob_sha1": "015e53a733cef360abac5f72885039272de62c2a"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part006-of-016-github-safe.zip",
+          "size": 8326370,
+          "sha256": "531a51f812d786c2e554d4b25fe00c672ba7a2e44fdab110931d82770a45c1ec",
+          "git_blob_sha1": "6471cbb4d76fe636bd1a7212e801bf088d43af8c"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part007-of-016-github-safe.zip",
+          "size": 8326391,
+          "sha256": "fc625f4ff0ce9dd8d93d352d2a32593bf1ad458b4f2dcf67d99a454748db7611",
+          "git_blob_sha1": "4fb8a8297a59e8d6202a7d7359b5d7d730cbd6a2"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part008-of-016-github-safe.zip",
+          "size": 8326390,
+          "sha256": "4d99d9b00db131b4a6148d32574d4f669b2815be2d00074a3e5afc2f2adc069b",
+          "git_blob_sha1": "570a6921da978478cfa329417eb490ab8f3b219a"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part009-of-016-github-safe.zip",
+          "size": 8326381,
+          "sha256": "a33c2a38c9382f382ac7b1b237e9699a9c56c41111720beef6f19aa619b7c1d6",
+          "git_blob_sha1": "2c440a8cad1b7934bd7ed2b1d48db40caca6271e"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part010-of-016-github-safe.zip",
+          "size": 8326396,
+          "sha256": "a4bb1e3be379fab5c96ea412bbfe420d0927e136293fa2ca154057eb9e980b3a",
+          "git_blob_sha1": "84bfbae73a42f4f8be2c3115e0c1565814c0933e"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part011-of-016-github-safe.zip",
+          "size": 8326397,
+          "sha256": "a5276b95c2a529e38c490292ae4b56f2967f7cfee5ec14bf4da9e49e517a355d",
+          "git_blob_sha1": "a7ea8252139370b2f32a64b6b509ccb1f304b65c"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part012-of-016-github-safe.zip",
+          "size": 8326390,
+          "sha256": "b64dbb9260be9703b75732ac8e1cfe62672b12f09ad49ebb21803a6701c4dee7",
+          "git_blob_sha1": "a0cb7b8d1a158b660c93c76fdf458add25a8d078"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part013-of-016-github-safe.zip",
+          "size": 8326393,
+          "sha256": "c031b2de791ac4fec1edede865157f51d63d2fb1a0552eb20681ed21b75573d9",
+          "git_blob_sha1": "bc38b40acdfc0a77c51df981ce8a9ef4d865cb88"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part014-of-016-github-safe.zip",
+          "size": 8326410,
+          "sha256": "870c4732ca6340bd2b046b7b01e986f2615a423c05ec60049b59b41f038643be",
+          "git_blob_sha1": "1deb02a7f9b1ce32f93d14c702291a326b44d3c2"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part015-of-016-github-safe.zip",
+          "size": 8326107,
+          "sha256": "df9003c1675a99c1c5aa1d41adac9ec8c8bf960adee9a35e7540a1223bf96b4f",
+          "git_blob_sha1": "2837cd77c8a33b5a57bc7afc2f2e727f51432160"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/MyAivan-MySQL-Verified-Delivery-20261004.part016-of-016-github-safe.zip",
+          "size": 6654550,
+          "sha256": "23c9781bb7d6fef243dbb11d9723d9f4e6d9b4ed91704bb05ae2ed8ef7af08c4",
+          "git_blob_sha1": "e648aa83f4e91d2933b8fbcd1ea3b59d52ca10fc"
+        }
+      ],
+      "mirror_full_filename": "GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip",
+      "mirror_full_size": 131516976,
+      "mirror_full_sha256": "805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b",
+      "reassembly_instructions": "releases/2026-10-05-delivery-archive/GITHUB-SAFE-MYSQL-REASSEMBLY.txt"
+    },
+    {
+      "original_filename": "MySQL-SQL-Delivery-20261004.zip",
+      "original_size": 137151,
+      "original_sha256": "6efb7ddf4ec7cfdba4b7d284dd09321bfb8b2a06911743a7efc674534d9ae099",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "candidate",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/MySQL-SQL-Delivery-20261004-github-safe.zip",
+          "size": 139005,
+          "sha256": "82f1efa5fa872d148c194945dfe53ba012112c104c21ecac4631d222b6d23fca",
+          "git_blob_sha1": "16c9989ea47c039c51fd13c2a80313d7fafcf90d"
+        }
+      ],
+      "mirror_full_filename": "MySQL-SQL-Delivery-20261004-github-safe.zip",
+      "mirror_full_size": 139005,
+      "mirror_full_sha256": "82f1efa5fa872d148c194945dfe53ba012112c104c21ecac4631d222b6d23fca"
+    },
+    {
+      "original_filename": "Project-Deliverables-28-ZIPs-20261004.zip",
+      "original_size": 147228586,
+      "original_sha256": "cc92e07c6f2dcd3d123eba05083bcc996f546d6eb36767744b61e4524b4159a8",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive_reconstructed_from_zip_wrappers",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part001-of-017.zip",
+          "size": 8388840,
+          "sha256": "7b72b9a22610eb749fb91f4d7851a9d7e3363ce20edd2fdcb80b881ef0b69680",
+          "git_blob_sha1": "7c817f3aecb202c1b5f223e368473e7b82abaea8"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part002-of-017.zip",
+          "size": 8388840,
+          "sha256": "c1c7365265299b3ade932de59a5eea84ff0c3fd3d5f81b0fd3f6150a2b1f0fe5",
+          "git_blob_sha1": "3a3f3e124027bad9b90a8c775d70ff989722473f"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part003-of-017.zip",
+          "size": 8388840,
+          "sha256": "c2320153b89dd88df9c5edf6c133cacf875c6a06ddc0a57715d0f87d3b606319",
+          "git_blob_sha1": "fca78ef02c031ecc83726966bcb2919889c74f7b"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part004-of-017.zip",
+          "size": 8388840,
+          "sha256": "08923951d6786832ab07b6de38aa33f8741b5a8bc67d01c6bf8280b7a2a3a987",
+          "git_blob_sha1": "616ee07868a2a89281d30d24ff9d2e8e61e459de"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part005-of-017.zip",
+          "size": 8388840,
+          "sha256": "980703f326091cfb82036a8f41ea4f3d188d0294131a519c2468e7e80bcb5451",
+          "git_blob_sha1": "38069916d214c6dd74d58961549abd2c0e4cf399"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part006-of-017.zip",
+          "size": 8388840,
+          "sha256": "468bf46bee11b9b0e17fd53a37f91c92b9f6bd91431021037fd39f70663691fe",
+          "git_blob_sha1": "5f53228c20e720680af9f27af9015139ae2a9641"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part007-of-017.zip",
+          "size": 8388840,
+          "sha256": "24ecd9847b154b912e301d6015326ddc1825f1eaa4b7acf56067d66ba3707aa2",
+          "git_blob_sha1": "69ff9bb2897474c151077bd103b0b0b076fd02a7"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part008-of-017.zip",
+          "size": 8388840,
+          "sha256": "e86f36cbd1897c18c86a207c6674a9531f625d343e787c8d03ae04d145bb6d66",
+          "git_blob_sha1": "38e608bf13f2d5c3c4601243cc982a3f7d3a5a0d"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part009-of-017.zip",
+          "size": 8388840,
+          "sha256": "f0942b2e48aca4036b2eaed9935ddfd059d13462bc0fbd0ba9be85d3e7fe978e",
+          "git_blob_sha1": "99770343ee0faee35d7248cfec898d631bc29ad4"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part010-of-017.zip",
+          "size": 8388840,
+          "sha256": "0edef5ec6db665ff41d61c4a8a650138daa66ed3488da796ee4a8787a36515e1",
+          "git_blob_sha1": "6574ea7e799f66c17ff9a800ebbd515466540528"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part011-of-017.zip",
+          "size": 8388840,
+          "sha256": "b12d94dfc8db087c38e4d76ddda4e72dc7e16194a43fe474cd697b2322e13b9d",
+          "git_blob_sha1": "90264ad57d738120ee26b745a59328b6a44cd462"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part012-of-017.zip",
+          "size": 8388840,
+          "sha256": "172ed786b9b092f64c17269cc2e1337ea6eaea2099e0e0786ecd4d04d98ae2c6",
+          "git_blob_sha1": "a40ff1918dc8a79d73f93975fcfd547f79d7c69b"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part013-of-017.zip",
+          "size": 8388840,
+          "sha256": "e2aab92da9845a9740f55d429789a34801d19166745500e235f76cce04339887",
+          "git_blob_sha1": "b7a56d42cd8d9d40fe577bc9a35609bb3fa0c42f"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part014-of-017.zip",
+          "size": 8388840,
+          "sha256": "93364138e86d72f8ba3ba667e8c0aa327f4dde19524c95fdb5abd0d0f96f7c38",
+          "git_blob_sha1": "212a66a57dc274adce302a8360a0c31a36e3af0f"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part015-of-017.zip",
+          "size": 8388840,
+          "sha256": "38b56798e052488f9c658035a5540d87589f7edd6cab25e4261164e5cb24bee0",
+          "git_blob_sha1": "3eaad54cdd0a358ed554063ac5747e5b5331a5df"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part016-of-017.zip",
+          "size": 8388840,
+          "sha256": "cda4a1e2f9c200d8d985f4096c8440ac3da0be24437710fecb2622b34dd2e0d8",
+          "git_blob_sha1": "57726dc70129313e922624be77ced401dee6a2c8"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/Project-Deliverables-28-ZIPs-20261004-github-safe.part017-of-017.zip",
+          "size": 6489022,
+          "sha256": "40e00c46b677454754331c60aeb6fbb55e4412653caacff3ab39e2eec089586c",
+          "git_blob_sha1": "3fc770226c8bd6dbe09448f2692a9c760229cdf6"
+        }
+      ],
+      "mirror_full_filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.zip",
+      "mirror_full_size": 140706518,
+      "mirror_full_sha256": "b44385cf974dae8f991ec3fb45983edd29abf0bcf1a87f96289aa37ca5e74da4",
+      "reassembly_manifest": "releases/2026-10-05-delivery-archive/large-archives/Project-Deliverables-28-ZIPs-20261004-github-safe/manifest.json"
+    },
+    {
+      "original_filename": "Task3-abcdyi-Control-Handoff-20261003.zip",
+      "original_size": 370539,
+      "original_sha256": "3f0e6b5473bec91650bfaad0c95a345315246bc68467d898a2248e85c434cef9",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/Task3-abcdyi-Control-Handoff-20261003-github-safe.zip",
+          "size": 321261,
+          "sha256": "8508699a56a1dda862b7474eaf627f45976071d5666fb981be1e9fdf9cc8136f",
+          "git_blob_sha1": "87b83e4c5043ac406f43e7153a987ac9a48b61ac"
+        }
+      ],
+      "mirror_full_filename": "Task3-abcdyi-Control-Handoff-20261003-github-safe.zip",
+      "mirror_full_size": 321261,
+      "mirror_full_sha256": "8508699a56a1dda862b7474eaf627f45976071d5666fb981be1e9fdf9cc8136f"
+    },
+    {
+      "original_filename": "Xiongan-DApp-Branch-Sync-Recovery-8c786de7-20261003.zip",
+      "original_size": 185794,
+      "original_sha256": "b71946a5f3786c2f292f0be8bbe6b81549391fcd03f8c51be7d4752dffa4a568",
+      "repository": "GiraffeTechnology/8415Wallet",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/Xiongan-DApp-Branch-Sync-Recovery-8c786de7-20261003-github-safe.zip",
+          "size": 191046,
+          "sha256": "921dcacd2455ced895d0f0cb4df31dcea2aac83cb0dfa68ffc73532e58b8884b",
+          "git_blob_sha1": "a160931add5de41f8be0c7da40a9dd9d01750770"
+        }
+      ],
+      "mirror_full_filename": "Xiongan-DApp-Branch-Sync-Recovery-8c786de7-20261003-github-safe.zip",
+      "mirror_full_size": 191046,
+      "mirror_full_sha256": "921dcacd2455ced895d0f0cb4df31dcea2aac83cb0dfa68ffc73532e58b8884b"
+    },
+    {
+      "original_filename": "Xiongan-Wallet-Checksum-Repair-Recovery-93934f9-20261003.zip",
+      "original_size": 958147,
+      "original_sha256": "26b9aea081492e5e9f7425535850d71739aa13df411a44a9a278a31a1f67cb55",
+      "repository": "GiraffeTechnology/8415Wallet",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/Xiongan-Wallet-Checksum-Repair-Recovery-93934f9-20261003-github-safe.zip",
+          "size": 977625,
+          "sha256": "03043c74c34417039528250ee6e8e5aeb15c4200b625c6c4cc6794828a085cb4",
+          "git_blob_sha1": "36e3852ddca6325f15c39f3bef96d932be8d6ab9"
+        }
+      ],
+      "mirror_full_filename": "Xiongan-Wallet-Checksum-Repair-Recovery-93934f9-20261003-github-safe.zip",
+      "mirror_full_size": 977625,
+      "mirror_full_sha256": "03043c74c34417039528250ee6e8e5aeb15c4200b625c6c4cc6794828a085cb4"
+    },
+    {
+      "original_filename": "Xiongan-Wallet-SIN-Handoff-763b0067.zip",
+      "original_size": 106467,
+      "original_sha256": "2781d8db19b99c1f12f337674847033186940188b0c5317b5afe722cd4b320e6",
+      "repository": "GiraffeTechnology/8415Wallet",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/Xiongan-Wallet-SIN-Handoff-763b0067-github-safe.zip",
+          "size": 108756,
+          "sha256": "8f59bac7e5aacf1b286f8b6be28507f95e6469623aa16ee3b5c77711526e7f48",
+          "git_blob_sha1": "58a02895cf744dc46153cbfdca8d26f98e5284ec"
+        }
+      ],
+      "mirror_full_filename": "Xiongan-Wallet-SIN-Handoff-763b0067-github-safe.zip",
+      "mirror_full_size": 108756,
+      "mirror_full_sha256": "8f59bac7e5aacf1b286f8b6be28507f95e6469623aa16ee3b5c77711526e7f48"
+    },
+    {
+      "original_filename": "artfi-deployment-contract-20261003.zip",
+      "original_size": 1469647,
+      "original_sha256": "0a819d30edf2d85c310fd7a33890c4917049b46d9cba7a4aa0c145154142de9c",
+      "repository": "GiraffeTechnology/ArtFi",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/artfi-deployment-contract-20261003-github-safe.zip",
+          "size": 1472263,
+          "sha256": "a2fc10f7b02a643a0fa293a6add2aac357208615db5ddb0a9eb7fcbaabf8a096",
+          "git_blob_sha1": "d0763ace0e9283be4d73425dc38d24a4cf74b742"
+        }
+      ],
+      "mirror_full_filename": "artfi-deployment-contract-20261003-github-safe.zip",
+      "mirror_full_size": 1472263,
+      "mirror_full_sha256": "a2fc10f7b02a643a0fa293a6add2aac357208615db5ddb0a9eb7fcbaabf8a096"
+    },
+    {
+      "original_filename": "artfi-mint-vault-recovery-candidate-20261003.zip",
+      "original_size": 1595968,
+      "original_sha256": "f0f81fbe45921812a4f7fb6d442dabd4c20bb619c9707b416f884b4441cbfb69",
+      "repository": "GiraffeTechnology/ArtFi",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/artfi-mint-vault-recovery-candidate-20261003-github-safe.zip",
+          "size": 1599136,
+          "sha256": "17991804831bdbf306c84a3b0d18a885607be9a13b7bcf23d0d28f7d68405671",
+          "git_blob_sha1": "2ab109026d29122b7e7f24fecd296ac6b7892424"
+        }
+      ],
+      "mirror_full_filename": "artfi-mint-vault-recovery-candidate-20261003-github-safe.zip",
+      "mirror_full_size": 1599136,
+      "mirror_full_sha256": "17991804831bdbf306c84a3b0d18a885607be9a13b7bcf23d0d28f7d68405671"
+    },
+    {
+      "original_filename": "artfi-native-rebuilt-candidate-20261003.zip",
+      "original_size": 1739662,
+      "original_sha256": "b825d3528cd2880601d8a17039987159bdc7ee4956e0e36764f4bba6cba33160",
+      "repository": "GiraffeTechnology/ArtFi",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/artfi-native-rebuilt-candidate-20261003-github-safe.zip",
+          "size": 1742918,
+          "sha256": "af086167d5cf26e440b98f8464215e34867e9a028a6e6a69f0c42b65400f606a",
+          "git_blob_sha1": "ed3ad50497e4b0333bab54d24d3f4d4d5cc4cd2c"
+        }
+      ],
+      "mirror_full_filename": "artfi-native-rebuilt-candidate-20261003-github-safe.zip",
+      "mirror_full_size": 1742918,
+      "mirror_full_sha256": "af086167d5cf26e440b98f8464215e34867e9a028a6e6a69f0c42b65400f606a"
+    },
+    {
+      "original_filename": "artfi-portfolio-read-models-20261003.zip",
+      "original_size": 1483020,
+      "original_sha256": "edc6799d414ac6b26b82b5e1c4513b587df9021f0daab47815c6298586c3c13e",
+      "repository": "GiraffeTechnology/ArtFi",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/artfi-portfolio-read-models-20261003-github-safe.zip",
+          "size": 1485185,
+          "sha256": "d08ce6b96ab59e1db4fe75a6a8000ecb2ebf7a5e6192a6b8197bd0ee3721b9a2",
+          "git_blob_sha1": "2334cfa3d338aaeaa9afa2c2819297c24384dd8d"
+        }
+      ],
+      "mirror_full_filename": "artfi-portfolio-read-models-20261003-github-safe.zip",
+      "mirror_full_size": 1485185,
+      "mirror_full_sha256": "d08ce6b96ab59e1db4fe75a6a8000ecb2ebf7a5e6192a6b8197bd0ee3721b9a2"
+    },
+    {
+      "original_filename": "ctyun-port-443-agents-sync-20261003.zip",
+      "original_size": 558683,
+      "original_sha256": "14199658a2041d2e8fca83cf5ab2765324d03e136d1f5848d3960490522a5279",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/ctyun-port-443-agents-sync-20261003-github-safe.zip",
+          "size": 561341,
+          "sha256": "319719f36ebe705149de59e52f733bdf89916f436d4f86b6b332024c97aaf0fa",
+          "git_blob_sha1": "4e633c11c84e146833dd7ead047105517c7a7d0e"
+        }
+      ],
+      "mirror_full_filename": "ctyun-port-443-agents-sync-20261003-github-safe.zip",
+      "mirror_full_size": 561341,
+      "mirror_full_sha256": "319719f36ebe705149de59e52f733bdf89916f436d4f86b6b332024c97aaf0fa"
+    },
+    {
+      "original_filename": "myaivan-reviewed-candidate-20261004-0201fcab.zip",
+      "original_size": 118234592,
+      "original_sha256": "207eb59550b897d03d9cae601f22e5a03831340ff78222189a21b723b99fd22b",
+      "repository": "GiraffeTechnology/aivan",
+      "archive_status": "historical",
+      "representation": "github_safe_archive_reconstructed_from_zip_wrappers",
+      "files": [
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part001-of-015.zip",
+          "size": 8388854,
+          "sha256": "db24ccb2d2afc1da395c09d537358d84998d3d0337c11636b8775efdec4ca7a2",
+          "git_blob_sha1": "6887df9aa3b83faadb5aa32807c61d64e6682064"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part002-of-015.zip",
+          "size": 8388854,
+          "sha256": "e244d2c6b4da8a5a2b70f5386b340e0fe96f410a7e424f7e64c62877ec462938",
+          "git_blob_sha1": "25f595fd54bc9517b61a601d73d61328e9accbc3"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part003-of-015.zip",
+          "size": 8388854,
+          "sha256": "a2ee89ab155c57f5b674d7d446cfd044aada706c58e53f0f2b2359aaa2003180",
+          "git_blob_sha1": "f3449d525579c0e1f97ef87583a7049fb0f36c33"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part004-of-015.zip",
+          "size": 8388854,
+          "sha256": "883d8466160780ad5c32c3592442c858e9861bd818225818985422f48be2143b",
+          "git_blob_sha1": "c0204befff5bd0e83af1352ba0a68a9c83a06cfe"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part005-of-015.zip",
+          "size": 8388854,
+          "sha256": "9773e8bf63d1ef714a89123efce1643b2347bedd26e732205b5bcaa4399f925e",
+          "git_blob_sha1": "e041b54f966b51d3d77452acc77df9e82ce11219"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part006-of-015.zip",
+          "size": 8388854,
+          "sha256": "da9ff5a72f63efa58cf1f043eef714b90657c456c74ea21c0dde0f3b677bcd05",
+          "git_blob_sha1": "031b25b7862ce16f173aaa68e84974f81fddb230"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part007-of-015.zip",
+          "size": 8388854,
+          "sha256": "6282ca0671577f33f07ff6a279aedd8af4a8484766ed15ed2bb2cc30f08d0966",
+          "git_blob_sha1": "e7d792383d84fbc5a2a0d014d6e2b413a0aa526b"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part008-of-015.zip",
+          "size": 8388854,
+          "sha256": "526ccd07131ea30e4f24e762ddecbd8cafc22dfeca31f431ffbc530ec7f77af7",
+          "git_blob_sha1": "526c5e21ae7e700d489455a6c68b21d54d0c0ed5"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part009-of-015.zip",
+          "size": 8388854,
+          "sha256": "a7901cf6f57bd6f5092ff881e1e1c9d54e79c68ef95eb4018f417be8a0a3787a",
+          "git_blob_sha1": "19ee0c788c90d91ca7f6f9036f7359d1662feea8"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part010-of-015.zip",
+          "size": 8388854,
+          "sha256": "b305b0626fb528f8730fc3d11a1e27fc220d3b792b235647bff9365742ad688b",
+          "git_blob_sha1": "7ebf3173a6ac5677c3690b414e912f38587f47c6"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part011-of-015.zip",
+          "size": 8388854,
+          "sha256": "8a7c7542516ea80b6179ca9cbd0f4fb6c72fdb1dd6ef6d9b66dc2c35f1c5e5d0",
+          "git_blob_sha1": "883a5049fa9e70bf23d54af90e4cdf4a800472b5"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part012-of-015.zip",
+          "size": 8388854,
+          "sha256": "60718270c2f919b860fb509a0a0290b325bddda916e8b3d51cbe1db10b33781b",
+          "git_blob_sha1": "28f612570be01c3117ea93afdf5910cd423944c1"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part013-of-015.zip",
+          "size": 8388854,
+          "sha256": "d3db66aa83726d087f016368594a1ce01ec3344fd47f1a7b27d07d4e57eecd14",
+          "git_blob_sha1": "249205f5eef1e16861c077234ea0dbd37e6c3b51"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part014-of-015.zip",
+          "size": 8388854,
+          "sha256": "26a78c8c5c303427473efe722f76a1c203f98bc81329e10bd652ca1d508d6a0b",
+          "git_blob_sha1": "fe74782715b0d0c7aacf8f6915c979ca60bfa72c"
+        },
+        {
+          "path": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part015-of-015.zip",
+          "size": 796084,
+          "sha256": "a8a0766d19c40972bf0f237932c1750fa2d0e0b13cc0ba0f815cbe3422629479",
+          "git_blob_sha1": "a53265b0a67eab5b780bfe289f458868b84aa21c"
+        }
+      ],
+      "mirror_full_filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip",
+      "mirror_full_size": 118236350,
+      "mirror_full_sha256": "96f1bcbe6ab523cdfac48ecf4a3bd25f4837deda7ffe590ccc017baee8ef2e12",
+      "reassembly_manifest": "releases/2026-10-05-delivery-archive/large-archives/myaivan-reviewed-candidate-20261004-0201fcab-github-safe/manifest.json"
+    }
+  ]
+}

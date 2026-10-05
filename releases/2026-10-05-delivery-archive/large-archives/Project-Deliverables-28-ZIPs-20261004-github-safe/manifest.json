@@ -1,0 +1,147 @@
+{
+  "representation": "ZIP wrappers containing consecutive segments of the frozen GitHub-safe archive",
+  "original_filename": "Project-Deliverables-28-ZIPs-20261004.zip",
+  "original_sha256": "cc92e07c6f2dcd3d123eba05083bcc996f546d6eb36767744b61e4524b4159a8",
+  "reassembled_filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.zip",
+  "reassembled_size": 140706518,
+  "reassembled_sha256": "b44385cf974dae8f991ec3fb45983edd29abf0bcf1a87f96289aa37ca5e74da4",
+  "parts": [
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part001-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part001",
+      "size": 8388840,
+      "sha256": "7b72b9a22610eb749fb91f4d7851a9d7e3363ce20edd2fdcb80b881ef0b69680",
+      "chunk_size": 8388608,
+      "chunk_sha256": "00127bd9956c8bb404afdf072a0c342e3ae1b38bd5109c13dc854acc38c0ce21"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part002-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part002",
+      "size": 8388840,
+      "sha256": "c1c7365265299b3ade932de59a5eea84ff0c3fd3d5f81b0fd3f6150a2b1f0fe5",
+      "chunk_size": 8388608,
+      "chunk_sha256": "989487886265881f205841ae14be58917eb304214193d3ffb591168f02e2593b"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part003-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part003",
+      "size": 8388840,
+      "sha256": "c2320153b89dd88df9c5edf6c133cacf875c6a06ddc0a57715d0f87d3b606319",
+      "chunk_size": 8388608,
+      "chunk_sha256": "309d8fe6a5edee07635926725bd10fe888db309505db18d9acf0de2f90bfc750"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part004-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part004",
+      "size": 8388840,
+      "sha256": "08923951d6786832ab07b6de38aa33f8741b5a8bc67d01c6bf8280b7a2a3a987",
+      "chunk_size": 8388608,
+      "chunk_sha256": "0cb2bc8b737d15ef9373243164f25c20c3bd2d6d7adb56771a1c9a9ab25a6ef9"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part005-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part005",
+      "size": 8388840,
+      "sha256": "980703f326091cfb82036a8f41ea4f3d188d0294131a519c2468e7e80bcb5451",
+      "chunk_size": 8388608,
+      "chunk_sha256": "023d5df4967905187657a510699019e6565e60918283c739815d499e72982956"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part006-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part006",
+      "size": 8388840,
+      "sha256": "468bf46bee11b9b0e17fd53a37f91c92b9f6bd91431021037fd39f70663691fe",
+      "chunk_size": 8388608,
+      "chunk_sha256": "c1d2552bbe09729e152c9988e0eb8ff8b19823d3c363a1d89e94d9c1af3979d7"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part007-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part007",
+      "size": 8388840,
+      "sha256": "24ecd9847b154b912e301d6015326ddc1825f1eaa4b7acf56067d66ba3707aa2",
+      "chunk_size": 8388608,
+      "chunk_sha256": "f394d2bcc738e0475176e40b2f42376409359d9d52e70526895d00b0546425a6"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part008-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part008",
+      "size": 8388840,
+      "sha256": "e86f36cbd1897c18c86a207c6674a9531f625d343e787c8d03ae04d145bb6d66",
+      "chunk_size": 8388608,
+      "chunk_sha256": "3a37b2d016a964221c053a006efc921959c609ea3c261b5b6a17b6b5ff2069f0"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part009-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part009",
+      "size": 8388840,
+      "sha256": "f0942b2e48aca4036b2eaed9935ddfd059d13462bc0fbd0ba9be85d3e7fe978e",
+      "chunk_size": 8388608,
+      "chunk_sha256": "a4e678473132250ef152a24f6a094c049a0d9f362925565999a65e9e76eb726f"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part010-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part010",
+      "size": 8388840,
+      "sha256": "0edef5ec6db665ff41d61c4a8a650138daa66ed3488da796ee4a8787a36515e1",
+      "chunk_size": 8388608,
+      "chunk_sha256": "f15975f13e4cca13fc6c8fb75cf321d8cea1d9acdab47b0c3750a4858307cba4"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part011-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part011",
+      "size": 8388840,
+      "sha256": "b12d94dfc8db087c38e4d76ddda4e72dc7e16194a43fe474cd697b2322e13b9d",
+      "chunk_size": 8388608,
+      "chunk_sha256": "7c3159bf80f0af6979c331300aebe8f73c4e80837a04080376902d6cb48fc0d0"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part012-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part012",
+      "size": 8388840,
+      "sha256": "172ed786b9b092f64c17269cc2e1337ea6eaea2099e0e0786ecd4d04d98ae2c6",
+      "chunk_size": 8388608,
+      "chunk_sha256": "217b3c0870ad24c8d3982f01190a015de2b9b229b9b2ffcb1bb1ab16d6a696aa"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part013-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part013",
+      "size": 8388840,
+      "sha256": "e2aab92da9845a9740f55d429789a34801d19166745500e235f76cce04339887",
+      "chunk_size": 8388608,
+      "chunk_sha256": "abdc59b4052c41420a448b5a687fb2b176cc78b9f39b81be44556d9634f5286c"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part014-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part014",
+      "size": 8388840,
+      "sha256": "93364138e86d72f8ba3ba667e8c0aa327f4dde19524c95fdb5abd0d0f96f7c38",
+      "chunk_size": 8388608,
+      "chunk_sha256": "0bb6891f17b929fb7e53c4f6655878feee90fcbfb08f3c7d5e5fba3bf9d300fb"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part015-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part015",
+      "size": 8388840,
+      "sha256": "38b56798e052488f9c658035a5540d87589f7edd6cab25e4261164e5cb24bee0",
+      "chunk_size": 8388608,
+      "chunk_sha256": "f2d2d0df7681d651d2a58a951f0fbee8f214fb36728c22e1f24701a4f1e9aa7e"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part016-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part016",
+      "size": 8388840,
+      "sha256": "cda4a1e2f9c200d8d985f4096c8440ac3da0be24437710fecb2622b34dd2e0d8",
+      "chunk_size": 8388608,
+      "chunk_sha256": "9ada2960a5ec0c5366c53fb541a9512bb567158994c1a919d1ca041871f675f7"
+    },
+    {
+      "filename": "Project-Deliverables-28-ZIPs-20261004-github-safe.part017-of-017.zip",
+      "member": "parts/Project-Deliverables-28-ZIPs-20261004-github-safe.zip.part017",
+      "size": 6489022,
+      "sha256": "40e00c46b677454754331c60aeb6fbb55e4412653caacff3ab39e2eec089586c",
+      "chunk_size": 6488790,
+      "chunk_sha256": "460ad55336c3aabc025ef84185e359bd7478f9c7912b466cd4d1cc65446e61eb"
+    }
+  ],
+  "reassembly_verified": true
+}
