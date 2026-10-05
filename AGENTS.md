@@ -66,3 +66,39 @@ Services configure their own available ports. Do not ask the product owner for a
 On CTYun hosts, TCP port 443 is reserved for SSH. This applies to CTYun hosts only and is not a product constraint: express it through the reserved-port configuration of CTYun deployments, not in product code. Do not stop, rebind, replace, or otherwise disrupt SSH, and do not bind any web listener to 443 there. Do not extend this to SIN or other environments without an explicit instruction. Recording this rule does not authorize changes to SSH, firewalls, credentials, network settings, or security settings.
 
 In this repository `aivan serve` and the GPM server choose ports through `aivan.utils.ports`; `AIVAN_PORT`/`AIVAN_GPM_PORT` are optional requests, and `AIVAN_PORT_FILE`/`AIVAN_GPM_PORT_FILE` receive the chosen port. The public origin is derived from `AIVAN_PUBLIC_HOST` and the chosen port unless `AIVAN_PUBLIC_ORIGIN` overrides it, and it is added to the CORS allowlist automatically. The Stage 7F gate accepts blank (automatic) ports and requires every port in the topology's `protected_port_owners` to be listed in `AIVAN_RESERVED_PORTS`.
+
+## CI on the production host
+
+GitHub Actions does not currently run for this repository. Until it does, any
+code that has not passed CI on GitHub is verified on the production host:
+
+1. Clone the exact GitHub branch and commit onto the production host, into a
+   separate working directory used only for CI. Never run CI inside, or check
+   out into, the live installation directory.
+2. Run the repository's own CI steps there: the same commands as the workflows
+   in `.github/workflows/`, in the same order.
+3. If a step fails, fix the cause in that clone on the production host and rerun
+   the whole pipeline until every step passes. Do not skip, disable or weaken a
+   check to make it pass.
+4. Commit the fix and push it back to the same GitHub branch. GitHub remains the
+   source of truth: no fix may exist only on the server. Afterwards, discard the
+   CI clone or reset it to the pushed commit.
+5. Record the evidence with the commit or pull request: the commit SHA tested,
+   the commands run and their pass/fail results, labelled as production-host CI
+   rather than GitHub Actions. This evidence satisfies a "CI must be green"
+   requirement while GitHub Actions is unavailable.
+
+While doing this:
+
+- Leave the running service alone. Use an isolated environment (its own
+  virtualenv or `node_modules`); do not stop, restart or reconfigure live
+  services or touch the live installation. A CI run is not a deployment.
+- Use test fixtures and the designated simulated databases, never production
+  data or production credentials.
+- Test servers pick free, non-reserved ports automatically; never bind a port a
+  live service uses.
+- Push with a credential that is neither written into the clone's remote URL nor
+  committed. Do not commit host-specific values (IP addresses, hostnames,
+  secrets, local paths) into the repository.
+- Reach GitHub only through the host's authorized network route; do not change
+  network, firewall or SSH settings to do so.
