@@ -14,6 +14,8 @@ For the CTYun Aivan target, retain existing protected-port/service and `abcdyi-s
 
 `scripts/run_stage7f_predeployment.py` produces the existing `production_predeployment` evidence class with `production_acceptance=false`. It is not deployment or application-function evidence. Its fixed-profile inputs and historical prerequisites are implementation constraints to inspect against the selected target; this document does not change the runner or order every old stage check for every delivery.
 
+The application port comes from `AIVAN_PORT` and must match the descriptor’s integer `bind_port` within 1–65535. The descriptor’s `protected_port_owners` map lists the actual deployment reservations; it may be empty when none are reserved. The application port must not appear in that map. No port is reserved merely because the environment is CTYun or SIN. Before running this read-only check, verify current listeners and complete the existing `protected_ports_preserved` observation and evidence digest. The runner validates supplied evidence; it does not probe listeners or establish that a port is currently free.
+
 For a target that actually uses the existing migration tooling, preview the plan, preserve a verified recoverable backup where changes require it, apply only within authorization, and verify convergence/readback. A different compatible private DB provider may need a different reviewed migration or no migration. Do not force one physical schema solely because this historical script used it.
 
 ## After activation, if authorized

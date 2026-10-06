@@ -109,6 +109,28 @@ def _has_usable_tenant_keys(environment: dict[str, str | None]) -> bool:
     )
 
 
+def _tcp_port(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        if not re.fullmatch(r"[1-9][0-9]{0,4}", value):
+            return None
+        value = int(value)
+    if not isinstance(value, int) or not 1 <= value <= 65535:
+        return None
+    return value
+
+
+def _valid_protected_port_owners(value: Any) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(port, str)
+        and _tcp_port(port) is not None
+        and isinstance(owner, str)
+        and bool(owner.strip())
+        for port, owner in value.items()
+    )
+
+
 def _checkout_commit(repository_root: Path) -> str:
     try:
         result = subprocess.run(
@@ -181,7 +203,8 @@ def run_predeployment_gate(
         "candidate_matches_environment", environment.get("AIVAN_CANDIDATE_SHA") == candidate_commit
     )
     check("application_loopback_bind", environment.get("AIVAN_HOST") == "127.0.0.1")
-    check("application_port_8765", environment.get("AIVAN_PORT") == "8765")
+    application_port = _tcp_port(environment.get("AIVAN_PORT"))
+    check("application_port_valid", application_port is not None)
     check("fixed_database_profile", environment.get("AIVAN_DB_URL") == DATABASE_PROFILE)
     check(
         "singapore_egress_policy",
@@ -228,12 +251,24 @@ def run_predeployment_gate(
     check("fixed_install_path", topology.get("install_path") == "/opt/giraffe/aivan")
     check("fixed_service_name", topology.get("service_name") == "myaivan.service")
     check("topology_loopback_bind", topology.get("bind_host") == "127.0.0.1")
-    check("topology_port_8765", topology.get("bind_port") == 8765)
+    topology_port = topology.get("bind_port")
+    check(
+        "topology_port_matches_environment",
+        isinstance(topology_port, int)
+        and not isinstance(topology_port, bool)
+        and _tcp_port(topology_port) is not None
+        and topology_port == application_port,
+    )
     check("topology_database_profile", topology.get("database_profile") == DATABASE_PROFILE)
     check("topology_bridge", topology.get("non_china_egress_bridge") == "abcdyi-sin")
+    protected_port_owners = topology.get("protected_port_owners")
+    protected_ports_valid = _valid_protected_port_owners(protected_port_owners)
+    check("protected_port_owners", protected_ports_valid)
     check(
-        "protected_port_owners",
-        topology.get("protected_port_owners") == {"443": "nginx", "8443": "stalwart"},
+        "application_port_not_reserved",
+        protected_ports_valid
+        and application_port is not None
+        and str(application_port) not in protected_port_owners,
     )
     bridge = topology.get("reverse_bridge") or {}
     check(
