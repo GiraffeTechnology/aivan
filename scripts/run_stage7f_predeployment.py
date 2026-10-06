@@ -267,6 +267,7 @@ def run_predeployment_gate(
     check(
         "application_port_not_reserved",
         protected_ports_valid
+        and isinstance(protected_port_owners, dict)
         and application_port is not None
         and str(application_port) not in protected_port_owners,
     )

@@ -42,6 +42,17 @@ def _tenant_keys_configured() -> bool:
     )
 
 
+def _configured_port_avoids_reservations(port: str) -> bool:
+    def valid(value: str) -> bool:
+        return bool(re.fullmatch(r"[1-9][0-9]{0,4}", value)) and int(value) <= 65535
+
+    if not valid(port):
+        return False
+    raw = os.environ.get("AIVAN_RESERVED_PORTS", "").strip()
+    reserved = [value.strip() for value in raw.split(",")] if raw else []
+    return all(valid(value) for value in reserved) and port not in reserved
+
+
 def _readiness_snapshot(
     *, correlation_id: str
 ) -> tuple[dict[str, bool], list[DependencyProbeResult]]:
@@ -71,7 +82,7 @@ def _readiness_snapshot(
         "ui_identity_configured": _configured("AIVAN_UI_ACTOR_ID") and bool(roles),
         "cors_myaivan_exact": any(origin == "https://myaivan.com" for origin in cors)
         and "*" not in cors,
-        "protected_ports_avoided": bool(port) and port not in {"443", "8443"},
+        "protected_ports_avoided": _configured_port_avoids_reservations(port),
         "gpm_durable_configured": _configured("GIRAFFE_DB_BASE_URL"),
         "openclaw_live_configured": _configured("OPENCLAW_BASE_URL")
         and os.environ.get("OPENCLAW_MOCK_MODE", "").strip().lower() == "false",
