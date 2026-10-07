@@ -1,8 +1,8 @@
 # Build-machine inputs. The delivered installer never invokes a package manager.
 fastapi
 uvicorn[standard]
-sqlalchemy
-pydantic
+sqlalchemy[asyncio]
+pydantic[email]
 python-dotenv
 httpx
 jinja2
@@ -12,3 +12,11 @@ pydantic-settings
 py3langid==0.4.0
 ctranslate2
 sentencepiece
+# abcdYi fulfillment API uses SQLite locally; PostgreSQL drivers are not bundled.
+aiosqlite>=0.22.1
+PyJWT[crypto]>=2.15.1
+cryptography>=50.0.2
+passlib[bcrypt]==1.7.4
+# Preserve the application's supported Passlib bcrypt backend.
+bcrypt>=3.2.2,<4
+python-multipart>=0.0.32

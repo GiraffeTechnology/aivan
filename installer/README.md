@@ -1,7 +1,8 @@
 # MyAivan integrated Linux installer
 
 This package installs a prebuilt CPython 3.12 runtime, MyAivan web application,
-standalone GPM, GLTG, giraffe-db, and giraffe-language-skill. The installation
+standalone GPM, GLTG, giraffe-db, giraffe-language-skill, and the independently
+pinned abcdYi fulfillment API. The installation
 machine does not need Python, pip, uv, Docker, Git, a compiler, or a source checkout.
 Only ordinary Linux tools (`sh`, `tar`, `tail`, `awk`, `sha256sum`, `mktemp`) are used
 before the included Python runtime takes over. All provider code remains in its
@@ -17,7 +18,7 @@ sh myaivan-RELEASE-linux-x86_64.run --prefix "$HOME/MyAivan Server" \
   --tenant enterprise-a --tenant enterprise-b
 ```
 
-The installer creates and starts all five services, initializes empty databases,
+The installer creates and starts all six services, initializes empty databases,
 and creates local installation credentials with private permissions. Existing
 ports are never taken over. All default listeners use loopback and automatically
 allocated, recorded, unprivileged ports. No production host, DNS, firewall, SSH,
@@ -62,7 +63,7 @@ services. For example, with an already authorized local model:
 
 Additional flags include `--web-port` for a confirmed allocation,
 `--language-model-dir` for an existing model directory, `--language-url` for an
-existing compatible language service, and `--database-url` for a compatible private
+existing compatible language service, and `--database-url` with `--database-provider-id` for a compatible private
 DB API. These configure the whole installation; no source editing or separate
 component deployment is required. `--restart` restores the previous configuration
 and services if the changed profile fails its startup checks.
@@ -155,7 +156,7 @@ other repositories. This installer source contains no provider source or fixture
 ## Optional user-service startup
 
 On a host with a functioning current-user systemd manager, `myaivan service-install`
-registers and starts one user unit for the entire five-service supervisor.
+registers and starts one user unit for the entire six-service supervisor.
 `myaivan service-uninstall` disables and removes only that installation's unit.
 Normal installation does not require systemd and continues to support containers.
 
@@ -165,3 +166,43 @@ behavior depends on that host's already authorized user-manager configuration.
 An unavailable user manager fails before stopping the working manual installation.
 Unit generation and command handling are tested with isolated fixtures. An actual
 host reboot/user-manager startup test has not been performed in this environment.
+
+
+## Confirmed-order handoff to abcdYi
+
+Installation reports a separate loopback `fulfillment_url`. The existing tenant
+ID/API credential can obtain a short-lived token from
+`POST /api/installation/session`, with headers `X-AIVAN-Tenant-ID` and
+`X-AIVAN-API-Key`. No separate account or password provisioning is required.
+Use the returned bearer token for the normal fulfillment API, including
+`POST /api/orders/from-provider-confirmed` with `{"purchase_order_id":"<confirmed PO ID>"}`.
+The PO must already be human-confirmed through Aivan in the same selected private
+data provider. Import does not confirm a quote or send an external commitment.
+
+Each configured tenant has its own persisted execution tenant/operator identity
+and provider mapping. The bridge rejects a key paired with another tenant and
+retains normal project, role and lifecycle authorization. Its additional login
+route is provided only by this installation-owned launcher, not by changing
+upstream abcdYi authentication defaults.
+
+The execution view is initialized in installer-owned `data/abcdyi.db` from the
+pinned portable SQLAlchemy schema. Existing schemas are validated and never
+silently rewritten; an incompatible upgrade fails and restores the previous
+release/configuration. Supported explicit schema migrations must be supplied by
+a compatible release. Provider-owned business history remains authoritative.
+Restart, reinstallation and rollback retain the execution database and identities.
+
+The abcdYi `api`/`src` source is inventoried under `services/abcdyi`, loaded only
+inside its process. It is not installed as a wheel that could replace the current
+top-level Aivan/GPM implementation. The builder requires independent abcdYi source,
+revision and Git-tree inputs and checks offline imports from outside all checkouts.
+
+
+### Private provider identity
+
+The installation records a logical identity for its private-data store. When
+selecting another store, supply `setup --database-url URL --database-provider-id ID`.
+Use a different identity for an independent store even if it reuses purchase-order
+IDs. Retain the identity only when an endpoint move preserves the same business
+records and ownership. Returning to the bundled store restores its original
+installation-owned identity. Credentials and provider IDs remain separate.

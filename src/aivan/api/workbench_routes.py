@@ -487,6 +487,36 @@ def _order_confirmation_client(
     )
 
 
+class RequirementClarificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_requirement_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fields: dict = Field(min_length=1, max_length=32)
+
+
+@router.get("/cases/{case_id}/requirement")
+def get_case_requirement(case_id: str, db: Session = Depends(get_db), context: RequestContext = Depends(_context)):
+    from aivan.execution.requirement_clarification import requirement_hash, snapshot
+    project = _get_case(db, context, case_id)
+    return {"case_id": case_id, "requirement": snapshot(project.requirement_json),
+            "requirement_sha256": requirement_hash(project.requirement_json)}
+
+
+@router.patch("/cases/{case_id}/requirement")
+def clarify_case_requirement(case_id: str, body: RequirementClarificationRequest,
+                             db: Session = Depends(get_db), context: RequestContext = Depends(_context)):
+    from aivan.execution.requirement_clarification import clarify_requirement
+    _get_case(db, context, case_id)
+    project = ProjectRepository(db).get_for_update(case_id, tenant_id=context.tenant_id)
+    if project is None:
+        raise HTTPException(404, detail={"error": "CASE_NOT_FOUND"})
+    try:
+        return clarify_requirement(db, project=project, fields=body.fields,
+            expected_hash=body.expected_requirement_sha256, context=context, identity=_identity(context))
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.post("/cases/{case_id}/order-confirmation")
 def confirm_case_order(
     case_id: str,
@@ -565,6 +595,10 @@ def confirm_case_order(
                 "required_state": "approved",
             },
         )
+    from aivan.execution.requirement_clarification import unresolved_material_fields
+    unresolved = unresolved_material_fields(requirement)
+    if unresolved:
+        raise HTTPException(409, detail={"error": "ORDER_CONFIRMATION_MATERIAL_REQUIREMENTS_UNRESOLVED", "missing_fields": unresolved})
     graph_reference = requirement.get("giraffe_db_graph")
     if not isinstance(graph_reference, dict):
         raise HTTPException(

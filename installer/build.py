@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,18 @@ def git_tree_digest(entries):
     return encode(root)
 
 
+def safe_source_file(source: Path, name: str):
+    relative = Path(name)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("Unsafe pinned source path")
+    path = source / relative
+    if any(parent.is_symlink() for parent in [path, *path.parents] if parent != source and parent.is_relative_to(source)):
+        raise ValueError("Pinned source links are not permitted")
+    if not path.is_file():
+        raise ValueError("Pinned source must be a regular file")
+    return path
+
+
 def source_evidence(source: Path, revision: str, expected_tree: str, source_manifest: Path | None = None):
     if not re.fullmatch(r"[0-9a-f]{40}", revision) or not re.fullmatch(r"[0-9a-f]{40}", expected_tree):
         raise ValueError("Component revisions and source trees must be full Git object IDs")
@@ -57,30 +70,31 @@ def source_evidence(source: Path, revision: str, expected_tree: str, source_mani
         if git_tree_digest(entries) != expected_tree:
             raise ValueError("Upstream manifest does not reconstruct the expected Git tree")
         selected = {}
-        prefixes = ("src/", "generators/", "alembic/")
+        prefixes = ("src/", "api/", "generators/", "alembic/")
         names = {"pyproject.toml", "README.md", "alembic.ini", "LICENSE", "LICENSE_NOTICE.md", "PATENT_NOTICE.md"}
         required = {entry["path"]: entry for entry in entries if entry["type"] == "blob" and (entry["path"].startswith(prefixes) or entry["path"] in names)}
         for name, entry in required.items():
-            path = source / name
-            if path.is_symlink() or not path.is_file():
-                raise ValueError(f"Missing or unsafe pinned provider input: {name}")
+            path = safe_source_file(source, name)
             content = path.read_bytes()
             if hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content, usedforsecurity=False).hexdigest() != entry["sha"]:
                 raise ValueError(f"Pinned provider blob mismatch: {name}")
             selected[name] = digest(path)
-        for directory in ("src", "generators", "alembic"):
+        for directory in ("src", "api", "generators", "alembic"):
             for path in (source / directory).rglob("*"):
                 if path.is_file() and "__pycache__" not in path.parts and not any(part.endswith(".egg-info") for part in path.parts) and str(path.relative_to(source)) not in required:
                     raise ValueError(f"Unpinned provider runtime input: {path.name}")
         return {"revision": revision, "upstream_tree": expected_tree, "source_manifest_sha256": digest(source_manifest), "included_source_files": selected, "modified": False}
+    actual_revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+    if actual_revision != revision:
+        raise ValueError("Source revision does not match the pinned Git commit")
     tree = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD^{tree}"], text=True).strip()
     if tree != expected_tree:
         raise ValueError(f"Source tree mismatch for {source.name}")
     tracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0")
-    untracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard", "src"], text=True)
+    untracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard", "src", "api"], text=True)
     if untracked.strip():
         raise ValueError("Untracked application runtime files are not permitted")
-    hashes = {name: digest(source / name) for name in sorted(tracked) if name and (source / name).is_file()}
+    hashes = {name: digest(safe_source_file(source, name)) for name in sorted(tracked) if name}
     changed = subprocess.check_output(["git", "-C", str(source), "diff", "--binary", "HEAD"], text=True)
     return {"revision": revision, "upstream_tree": tree, "tracked_content_sha256": hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest(), "patch_sha256": hashlib.sha256(changed.encode()).hexdigest(), "modified": bool(changed)}
 
@@ -155,7 +169,7 @@ def write_installer(payload: Path, destination: Path):
     archive = destination.with_suffix(".tar.gz")
     with tarfile.open(archive, "w:gz", dereference=True) as tar:
         for path in sorted(payload.rglob("*")):
-            if path.is_symlink() or not all(ord(char) < 128 and char not in "\r\n" for char in str(path.relative_to(payload))):
+            if path.is_symlink() or not (path.is_file() or path.is_dir()) or not all(ord(char) < 128 and char not in "\r\n" for char in str(path.relative_to(payload))):
                 raise ValueError("Unsafe package file name or symlink")
             tar.add(path, arcname=str(path.relative_to(payload)), recursive=False)
     checksum = digest(archive)
@@ -201,7 +215,7 @@ __MYAIVAN_PAYLOAD__
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for component in ("aivan", "gltg", "database", "language"):
+    for component in ("aivan", "gltg", "database", "language", "abcdyi"):
         parser.add_argument(f"--{component}-source", type=Path, required=True)
         parser.add_argument(f"--{component}-revision", required=True)
         parser.add_argument(f"--{component}-tree", required=True)
@@ -218,7 +232,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     components = {}
     sources = {}
-    for component in ("aivan", "gltg", "database", "language"):
+    for component in ("aivan", "gltg", "database", "language", "abcdyi"):
         sources[component] = getattr(args, f"{component}_source").resolve()
         components[component] = source_evidence(sources[component], getattr(args, f"{component}_revision"), getattr(args, f"{component}_tree"), getattr(args, f"{component}_manifest"))
     with tempfile.TemporaryDirectory(prefix="myaivan-build-", dir=args.output) as temporary:
@@ -235,12 +249,20 @@ def main():
             selected = components[component].get("included_source_files")
             if selected is None:
                 tracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0")
-                selected = [name for name in tracked if name and (name.startswith(("src/", "generators/", "alembic/")) or name in {"pyproject.toml", "README.md", "LICENSE", "LICENSE_NOTICE.md", "PATENT_NOTICE.md", "alembic.ini"})]
+                selected = [name for name in tracked if name and (name.startswith(("src/", "api/", "generators/", "alembic/")) or name in {"pyproject.toml", "README.md", "LICENSE", "LICENSE_NOTICE.md", "PATENT_NOTICE.md", "alembic.ini"})]
             for name in selected:
                 destination_file = clean / name
                 destination_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source / name, destination_file)
-            run(args.uv, "build", "--wheel", "--out-dir", wheelhouse, clean)
+                shutil.copy2(safe_source_file(source, name), destination_file)
+            if component == "abcdyi":
+                # Its historical wheel also exports an older top-level Aivan.
+                # Keep the independently pinned API/src namespace process-local.
+                isolated = payload / "services/abcdyi"
+                shutil.copytree(clean, isolated)
+                if not (isolated / "api/main.py").is_file():
+                    raise ValueError("Pinned abcdYi input is missing its fulfillment API")
+            else:
+                run(args.uv, "build", "--wheel", "--out-dir", wheelhouse, clean)
         wheels = sorted(wheelhouse.glob("*.whl"))
         run(args.uv, "pip", "install", "--python", payload / "runtime/bin/python3", "--target", site, "--no-deps", *wheels)
         # Upstream giraffe-db uses a root-level helper package omitted by its wheel.
@@ -252,7 +274,7 @@ def main():
         provider_assets.mkdir(parents=True)
         shutil.copytree(sources["database"] / "alembic", provider_assets / "alembic", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copy2(sources["database"] / "alembic.ini", provider_assets / "alembic.ini")
-        for name in ("runtime.py", "bootstrap.py", "service.py", "requirements.lock", "README.md"):
+        for name in ("runtime.py", "bootstrap.py", "service.py", "abcdyi_service.py", "requirements.lock", "README.md"):
             shutil.copy2(HERE / name, payload / name)
         licenses = payload / "licenses"
         licenses.mkdir()
@@ -271,7 +293,12 @@ def main():
         shutil.copytree(HERE / "licenses", licenses / "third-party")
         # Offline import smoke verifies installed wheels, never a source checkout.
         run(payload / "runtime/bin/python3", "-B", "-I", "-c", "import aivan.api.main,aivan.gpm.server,gltg.api.main,giraffe_db.api.main,giraffe_language_skill.api.main,py3langid,ctranslate2,sentencepiece; print('Offline runtime imports passed')", cwd=work, env={"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
-        sbom = []
+        run(payload / "runtime/bin/python3", "-B", "-I", payload / "abcdyi_service.py", "verify-import",
+            cwd=work, env={"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1", "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+                          "SECRET_KEY": secrets.token_urlsafe(48)})
+        sbom = [{"name": "abcdyi", "version": components["abcdyi"]["revision"],
+                 "license": "See independently supplied component license",
+                 "license_files": [str(path.relative_to(payload)) for path in licenses.glob("abcdyi-*")]}]
         for dist in importlib.metadata.distributions(path=[str(site)]):
             sbom.append({"name": dist.metadata["Name"], "version": dist.version, "license": dist.metadata.get("License-Expression") or dist.metadata.get("License", "See bundled distribution metadata/licenses"), "license_files": [str(file) for file in (dist.files or []) if any(token in str(file).lower() for token in ("license", "copying", "notice"))]})
         for entry in sbom:

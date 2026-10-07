@@ -80,30 +80,30 @@
     {
       "rule": "python_crypto_rule-hash-sha1",
       "path": "installer/build.py",
-      "sha256": "91106733e3b2d6dff35712bffad1566f3bc9b64595ce9a7cca0db99d9bc942bc",
+      "sha256": "dc94ae7eb0c5cc1f56763968ca3a1cd6d92069af189e8a8d7cadd2579f0f7e63",
       "count": 2,
-      "reason": "SHA-1 is used only to reconstruct and compare the existing Git blob/tree object format, with usedforsecurity=False. It is not used for passwords, credentials, signatures or package integrity. The installed payload inventory, wheels, provenance and final installer use SHA-256."
+      "reason": "Re-reviewed against the six-service builder and exact scan: lines 49 and 79 reconstruct existing Git tree/blob object IDs, explicitly usedforsecurity=False. No password, credential, signature or package-integrity use exists. Wheel, source inventory, provenance and final installer integrity continue to use SHA-256."
     },
     {
       "rule": "python_exec_rule-subprocess-call",
       "path": "installer/build.py",
-      "sha256": "91106733e3b2d6dff35712bffad1566f3bc9b64595ce9a7cca0db99d9bc942bc",
+      "sha256": "dc94ae7eb0c5cc1f56763968ca3a1cd6d92069af189e8a8d7cadd2579f0f7e63",
       "count": 2,
-      "reason": "The two flagged calls execute the literal git binary with separate -C, operator-selected source path, ls-files and -z argv values. No shell is used, no application request can select the command, and the build verifies the selected source tree before staging its files."
+      "reason": "Re-reviewed against the six-service builder and exact scan: lines 93 and 251 invoke literal git with separate -C, operator-selected source directory, ls-files and -z argv values, without a shell. Full commit/tree IDs are verified before staging and safe_source_file rejects traversal and symlinks. No application request selects the executable or arguments."
     },
     {
       "rule": "python_urlopen_rule-urllib-urlopen",
       "path": "installer/runtime.py",
-      "sha256": "d8bd021fd07945111d67a319e9b95ce5e515f30ac5f41860d173cd288e33b453",
+      "sha256": "a696c1429bd5c29872751fdffc98c38d2dcba96698d3b139c8c6b10b338bc3c7",
       "count": 1,
-      "reason": "Health probes use recorded loopback URLs or an installing operator-selected private configuration endpoint, validated as HTTP(S) without embedded credentials/query/fragment. No application request input or tenant API key reaches the URL; probes carry no credential headers, use a three-second timeout, and retain default TLS certificate verification."
+      "reason": "Re-reviewed against the six-service runtime and exact scan: health() at line 335 first validates private operator-owned configuration; endpoint() allows HTTP(S), rejects embedded credentials/query/fragment, and service paths are literal. Loopback or operator-configured dependency endpoints carry no credential headers, retain a three-second timeout and default TLS verification. No application request or tenant key selects the URL. Health remains explicitly distinct from public/workflow acceptance."
     },
     {
       "rule": "python_crypto_rule-hash-sha1",
       "path": "tests/test_myaivan_installer.py",
-      "sha256": "536a131b588ed7aa5863aa72def2ee31eadc6b9cd1625ebd60c812db32559b46",
+      "sha256": "21968be52291a7ade1195aa367664b0c91e289cfd0875e73834e3751ec7c5d0a",
       "count": 1,
-      "reason": "The test constructs the known Git blob object identifier to compare the source manifest against git write-tree. SHA-1 is required by this existing Git object format and is not a package-integrity, password or credential mechanism. Production payload digests remain SHA-256."
+      "reason": "Re-reviewed against the six-service installer tests and exact scan: line 175 constructs known synthetic Git blob object IDs for comparison with git write-tree. SHA-1 is required by the existing Git object format, not used for passwords, credentials or package integrity. The builder's payload inventory and installer digests remain SHA-256."
     }
   ],
   "zizmor": [
