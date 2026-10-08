@@ -1,0 +1,34 @@
+{
+  "semgrep": [
+    {
+      "rule": "python_urlopen_rule-urllib-urlopen",
+      "path": "scripts/run_aivan_openclaw_plugin_smoke_test.py",
+      "sha256": "3f27ecffba03b77eddaec083a5fa4c628f18ca6cc662b1a69469631ec1c16742",
+      "count": 2,
+      "reason": "Smoke-test URLs come only from literal localhost or operator-supplied AIVAN_BASE_URL; not application request input. Requests retain explicit timeouts. Reviewed at lines 61 and 77."
+    },
+    {
+      "rule": "python_urlopen_rule-urllib-urlopen",
+      "path": "scripts/run_gpm_llm_api_smoke.py",
+      "sha256": "579c75ea31f1a6de4107173989b5e27fce904257607330b99a7d1ddc6abd89fe",
+      "count": 3,
+      "reason": "Smoke-test destinations are literal localhost or operator-supplied QWEN_BASE_URL; not application request input. Requests retain explicit timeouts. Reviewed at lines 91, 237 and 258."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-i18n-runtime.test.mjs",
+      "sha256": "99e454c085860e44af2e536b739c70b487aa9c40391122cc32f17ebbb3a148f7",
+      "count": 1,
+      "reason": "Test reads the constant ../src/aivan/app/static/i18n.js URL resolved from import.meta.url; no user-controlled path. Present only on the web branch."
+    }
+  ],
+  "zizmor": [
+    {
+      "rule": "zizmor/dangerous-triggers",
+      "path": ".github/workflows/myaivan-direction-policy.yml",
+      "sha256": "4b76146631fbcc2593fd2d6bfc98d9b23a7109cb5aaa6cd28a67ca0657ad45e2",
+      "count": 1,
+      "reason": "Reviewed base-owned metadata-only branch guard: read-only permissions, no checkout, no PR code execution, untrusted metadata passed through environment variables. pull_request_target preserves tamper resistance."
+    }
+  ]
+}

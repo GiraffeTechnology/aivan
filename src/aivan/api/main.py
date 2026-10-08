@@ -145,7 +145,7 @@ SKILL_INVOKE_PATHS = frozenset({
 
 # WeChat-visible degraded reply when the backend pipeline fails. Must be
 # human-readable and must never leak a traceback or raw exception text.
-ERROR_REPLY_TEXT = "AIVAN 处理请求时遇到后端依赖错误，请稍后再试。"
+ERROR_REPLY_TEXT = "AIVAN encountered a backend dependency error while processing your request. Please try again later."
 
 
 @app.exception_handler(Exception)
@@ -191,7 +191,7 @@ def _skill_response(result) -> dict:
 
     The OpenClaw bridge plugin sends `reply_text` (not `output`) back to WeChat
     (integrations/openclaw-aivan-plugin/index.ts), so both fields must be present
-    and non-empty or the user only ever sees the plugin's "已收到您的请求"
+    and non-empty or the user only ever sees the plugin's "Your request has been received"
     fallback. `user_control_message` is the human-facing RFQ summary and is
     preferred over the terser internal `message`. Every existing top-level field
     (project_id, action, strategy, ...) is preserved so the plugin and existing
@@ -202,7 +202,7 @@ def _skill_response(result) -> dict:
         data.get("reply_text"),
         data.get("user_control_message"),
         data.get("message"),
-        "已收到您的请求。",
+        "Your request has been received.",
     )
     return {**data, "status": "ok", "output": reply_text, "reply_text": reply_text}
 

@@ -1,6 +1,7 @@
 """Reproduce the WeChat failure from IMG_9885:
 
-Input: "询价 5000 件高品质格子衬衫，45 天内交巴黎。请向指定供应商 abcdyi 询价"
+Original input: the unchanged Chinese RFQ_ZH constant below.
+English meaning: "Request quotes for 5000 high-quality plaid shirts, delivered to Paris within 45 days, from the designated supplier abcdyi."
 Observed on device: "⚠️ Agent couldn't generate a response. Please try again."
 
 This runs the REAL AIVAN pipeline locally (no CTYUN). It measures:
@@ -11,9 +12,13 @@ This runs the REAL AIVAN pipeline locally (no CTYUN). It measures:
 """
 from __future__ import annotations
 import os
+import tempfile
 import time
+from pathlib import Path
 
-DB_PATH = "/tmp/aivan_repro_paris.sqlite3"
+# The reproduction owns a private per-run database, never a shared fixed path.
+_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="aivan-paris-repro-")
+DB_PATH = str(Path(_TEMP_DIRECTORY.name) / "repro.sqlite3")
 os.environ.update({
     "AIVAN_ENV": "local",
     "AIVAN_DB_URL": f"sqlite:///{DB_PATH}",
@@ -31,10 +36,6 @@ os.environ.update({
     "AIVAN_TEST_TENANT_ID": "repro_tenant",
     "AIVAN_EMAIL_SEND_MODE": "simulation",
 })
-try:
-    os.remove(DB_PATH)
-except OSError:
-    pass
 
 import httpx  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
@@ -213,4 +214,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        _TEMP_DIRECTORY.cleanup()

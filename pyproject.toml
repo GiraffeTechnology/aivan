@@ -3,6 +3,8 @@ name = "aivan"
 version = "0.3.0"
 description = "AIVAN - trade monitoring and human-takeover control plane"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
