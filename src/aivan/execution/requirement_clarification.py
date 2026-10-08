@@ -15,6 +15,7 @@ from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.db.repositories.domain_repo import CaseDomainRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.domain.roles import BusinessRole
+from aivan.execution.safety import evaluate_requirement_readiness
 from aivan.integrations.language_skill_client import LanguageSkillClient
 from aivan.integrations.language_skill import source_digest
 from aivan.schemas.requirement import BuyerRequirement
@@ -23,6 +24,7 @@ EDITABLE_FIELDS = {
     'category', 'product_type', 'quantity', 'quantity_unit', 'fabric_material', 'gsm', 'color',
     'size_ratio', 'packaging', 'destination', 'target_unit_price', 'target_currency',
     'delivery_deadline_iso', 'delivery_days', 'incoterms', 'logistics_preference', 'notes',
+    'material_spec', 'tolerance', 'surface_finish', 'process_type',
 }
 MATERIAL_FIELDS = EDITABLE_FIELDS - {'notes'}
 CONFIRMATION_MATERIAL_FIELDS = MATERIAL_FIELDS - {'gsm', 'target_unit_price', 'target_currency', 'logistics_preference', 'incoterms'}
@@ -181,8 +183,9 @@ def clarify_requirement(db, *, project, fields, expected_hash, context, identity
     if requirement_hash(before) != expected_hash:
         raise HTTPException(409, detail={'error': 'REQUIREMENT_VERSION_MISMATCH'})
     canonical = normalize_fields(fields)
+    validated_before = snapshot(before)
     try:
-        requirement = BuyerRequirement.model_validate({**snapshot(before), **canonical})
+        requirement = BuyerRequirement.model_validate({**validated_before, **canonical})
     except ValidationError as exc:
         raise HTTPException(422, detail={'error': 'REQUIREMENT_VALUE_INVALID'}) from exc
     if requirement.quantity is not None and requirement.quantity <= 0:
@@ -195,17 +198,22 @@ def clarify_requirement(db, *, project, fields, expected_hash, context, identity
         'requirement_clarification': {'source_text_sha256': request_digest, 'actor_id': identity.actor_id,
             'actor_role': identity.business_role.value, 'confirmed_at': now,
             'previous_requirement_sha256': expected_hash, 'confirmed_fields': sorted(canonical)}}
-    changed = [key for key in canonical if before.get(key) != canonical[key]]
+    validated_after = requirement.model_dump()
+    changed = [key for key in canonical if validated_before[key] != validated_after[key]]
     material = bool(set(changed) & MATERIAL_FIELDS)
-    try:
-        graph, strategy, gltg, requirement = refresh_provider_graph(db, project=project, requirement=requirement,
-            identity=identity, operation_id=operation_id)
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(503, detail={'error': 'REQUIREMENT_PROVIDER_REFRESH_FAILED'}) from exc
+    gate = evaluate_requirement_readiness(requirement)
+    graph, strategy, gltg = {}, before.get('strategy') or {}, {}
+    # Partial corrections are durable; downstream execution still requires readiness.
+    if gate.ready:
+        try:
+            graph, strategy, gltg, requirement = refresh_provider_graph(db, project=project, requirement=requirement,
+                identity=identity, operation_id=operation_id)
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(503, detail={'error': 'REQUIREMENT_PROVIDER_REFRESH_FAILED'}) from exc
     now = requirement.extra["requirement_clarification"]["confirmed_at"]
     payload = requirement.model_dump()
     payload.update({'strategy': strategy, 'gltg_simulation': gltg})
@@ -218,7 +226,7 @@ def clarify_requirement(db, *, project, fields, expected_hash, context, identity
         for draft in superseded:
             draft.status = 'superseded'
         project.selected_option_json = None
-        project.case_state = 'awaiting_supplier'
+        project.case_state = 'awaiting_supplier' if gate.ready else 'inquiry'
     else:
         # A non-material note must not erase prior quote/approval state.
         payload = {**before, **payload}
