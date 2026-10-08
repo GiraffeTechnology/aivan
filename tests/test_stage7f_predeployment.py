@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from aivan.db.models import Base
 from scripts.run_stage7f_predeployment import (
     EVIDENCE_CLASS,
@@ -192,3 +194,79 @@ def test_predeployment_gate_fails_for_checkout_mismatch_or_empty_tenant_keys(tmp
     failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
     assert "candidate_matches_checkout" in failed
     assert "api_auth_configured" in failed
+
+
+@pytest.mark.parametrize("port", [1, 443, 8443, 9444, 65535])
+def test_predeployment_port_comes_from_deployment_configuration(tmp_path, monkeypatch, port):
+    repository = _repository(tmp_path)
+    candidate = "a" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate)
+    environment.write_text(environment.read_text().replace("AIVAN_PORT=8765", f"AIVAN_PORT={port}"))
+    _topology(topology)
+    descriptor = json.loads(topology.read_text())
+    descriptor["bind_port"] = port
+    descriptor["protected_port_owners"] = {"2222": "existing-service"}
+    topology.write_text(json.dumps(descriptor))
+
+    result = run_predeployment_gate(
+        repository_root=repository,
+        candidate_commit=candidate,
+        environment_file=environment,
+        topology_file=topology,
+        output_path=tmp_path / "evidence.jsonl",
+    )
+
+    assert result["status"] == "passed"
+    assert result["production_acceptance"] is False
+
+
+@pytest.mark.parametrize(
+    ("port", "topology_port", "protected", "expected_failure"),
+    [
+        ("443", 443, {"443": "ssh"}, "application_port_not_reserved"),
+        ("9444", 9444, {"9444": "existing-service"}, "application_port_not_reserved"),
+        ("0", 0, {}, "application_port_valid"),
+        ("65536", 65536, {}, "application_port_valid"),
+        ("443.0", 443, {}, "application_port_valid"),
+        ("443", 9444, {}, "topology_port_matches_environment"),
+        ("443", True, {}, "topology_port_matches_environment"),
+        ("443", "443", {}, "topology_port_matches_environment"),
+        ("443", 443, None, "protected_port_owners"),
+        ("443", 443, [], "protected_port_owners"),
+        ("443", 443, {"0": "service"}, "protected_port_owners"),
+        ("443", 443, {"65536": "service"}, "protected_port_owners"),
+        ("443", 443, {"0443": "service"}, "protected_port_owners"),
+        ("443", 443, {"2222": ""}, "protected_port_owners"),
+        ("443", 443, {"2222": None}, "protected_port_owners"),
+    ],
+)
+def test_predeployment_rejects_invalid_or_reserved_port_configuration(
+    tmp_path, monkeypatch, port, topology_port, protected, expected_failure
+):
+    repository = _repository(tmp_path)
+    candidate = "b" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate)
+    environment.write_text(environment.read_text().replace("AIVAN_PORT=8765", f"AIVAN_PORT={port}"))
+    _topology(topology)
+    descriptor = json.loads(topology.read_text())
+    descriptor["bind_port"] = topology_port
+    descriptor["protected_port_owners"] = protected
+    topology.write_text(json.dumps(descriptor))
+
+    result = run_predeployment_gate(
+        repository_root=repository,
+        candidate_commit=candidate,
+        environment_file=environment,
+        topology_file=topology,
+        output_path=tmp_path / "evidence.jsonl",
+    )
+
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert result["status"] == "failed_closed"
+    assert expected_failure in failed
