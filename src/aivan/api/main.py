@@ -44,7 +44,6 @@ logger = logging.getLogger("aivan.api")
 
 def _require_api_key(request: Request) -> RequestContext:
     """Authenticate and return the shared tenant/trace request context."""
-
     return resolve_request_context(request)
 
 def _load_supplier_registry_on_startup() -> int:
@@ -314,15 +313,19 @@ def _normalize_invoke_payload(raw: dict) -> dict:
             "message_type": "text",
             "mode": _first_non_empty(context.get("mode")) or "auto",
         }
-        if _first_non_empty(context.get("project_id")):
-            event["project_id"] = context["project_id"]
+        # Preserve provider routing/replay identity; authentication and role
+        # authority still come from apply_trusted_identity after normalization.
+        for key in ("message_id", "channel_account_id", "idempotency_key", "project_id"):
+            value = _first_non_empty(context.get(key), raw.get(key))
+            if value:
+                event[key] = value
         if _first_non_empty(context.get("role_context")):
             event["role_context"] = context["role_context"]
         return event
 
     # WeChat webhook delivery.
     if "content" in raw:
-        return {
+        event = {
             "source": "wechat",
             "channel": "wechat",
             "conversation_id": _first_non_empty(raw.get("room_id"), raw.get("from_user"))
@@ -332,6 +335,11 @@ def _normalize_invoke_payload(raw: dict) -> dict:
             "message_type": _first_non_empty(raw.get("msg_type")) or "text",
             "mode": "auto",
         }
+        for key in ("message_id", "channel_account_id", "idempotency_key", "project_id"):
+            value = _first_non_empty(raw.get(key))
+            if value:
+                event[key] = value
+        return event
 
     raise ValueError(f"unrecognized payload keys: {sorted(raw.keys())}")
 
@@ -477,7 +485,7 @@ def _do_approve_draft(
         )
     from aivan.execution.channel_policy import DeliveryMode
 
-    from aivan.execution.draft_approval_binding import reviewed_channel, claim_pending_approval
+    from aivan.execution.draft_approval_binding import reviewed_channel, claim_pending_approval, missing_relay_bindings
     from aivan.execution.draft_preview import bind_approval
     preview, channel_capability = reviewed_channel(db, draft, preview_id, identity, context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.UNSUPPORTED:
@@ -499,15 +507,7 @@ def _do_approve_draft(
             },
         )
     if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
-        missing_binding = [
-            field
-            for field, value in (
-                ("channel_account_id", draft.channel_account_id),
-                ("conversation_id", draft.conversation_id),
-                ("target_peer_id", draft.target_peer_id),
-            )
-            if not (value or "").strip()
-        ]
+        missing_binding = missing_relay_bindings(draft, preview)
         if missing_binding:
             CaseDomainRepository(db).record_audit(
                 tenant_id=draft.tenant_id,

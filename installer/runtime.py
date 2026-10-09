@@ -146,6 +146,46 @@ def reserve_port(port: int = 0) -> int:
         return sock.getsockname()[1]
 
 
+def load_deployment_module():
+    spec = importlib.util.spec_from_file_location("myaivan_deployment_config", Path(__file__).with_name("deployment_config.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def bind_available_port(requested: int, reserved: set[int], used: set[int]):
+    """Reserve a real listener; occupied/reserved requests fall back safely."""
+    preferred = requested if requested not in reserved and requested not in used else 0
+    for _attempt in range(100):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            listener.bind(("127.0.0.1", preferred))
+            selected = listener.getsockname()[1]
+            if selected in reserved or selected in used:
+                listener.close()
+                preferred = 0
+                continue
+            listener.listen(128)
+            return listener, selected
+        except OSError:
+            listener.close()
+            if not preferred:
+                raise
+            preferred = 0
+    raise RuntimeError("No free non-reserved service port could be allocated")
+
+
+def publish_ports(root: Path, config: dict):
+    write_json(root / "run/ports.json", {
+        "version": 1,
+        "public_origin": config["origin"],
+        "services": {name: {"managed": name not in config["external"], "port": port,
+                            "url": config["external"].get(name, f"http://127.0.0.1:{port}")}
+                     for name, port in config["ports"].items()},
+    })
+
+
 def new_config(tenants: list[str], port: int = 0) -> dict:
     if type(port) is not int or (port != 0 and not 1024 <= port <= 65535):
         raise ValueError("Web port must be zero for automatic allocation or an unprivileged port")
@@ -170,6 +210,12 @@ def new_config(tenants: list[str], port: int = 0) -> dict:
         "tenants": {tenant: secrets.token_urlsafe(32) for tenant in tenants},
         "secrets": {name: secrets.token_urlsafe(48) for name in ("session", "database", "gltg", "abcdyi")},
         "fulfillment": {"port": ports["abcdyi"], "tenants": fulfillment_tenants(tenants)},
+        "database_mode": "external",
+        "database_config_file": "",
+        "service_credentials_file": "",
+        "reserved_ports": sorted(load_deployment_module().reserved_ports({})),
+        "runtime_threads": 2,
+        "channels": {"openclaw_url": "", "send_endpoint": "/messages/send", "email_enabled": False},
         "external": {},
         "language": {"url": "", "provider": "ctranslate2", "model": "", "model_dir": ""},
         "model": {"url": "", "name": ""},
@@ -196,10 +242,19 @@ def upgrade_config(config):
         config["ports"]["abcdyi"] = port
         config["secrets"].setdefault("abcdyi", secrets.token_urlsafe(48))
         config["fulfillment"] = {"port": port, "tenants": fulfillment_tenants(config["tenants"])}
+    if "database_mode" not in config:
+        config["database_mode"] = "isolated" if config.get("host_profile") == "isolated" else "external"
+        config["database_config_file"] = ""
     return config
 
 
 def config_for_release(config, target):
+    if config.get("database_mode") == "external" and "database_config.py" not in read_json(target / "manifest.json").get("files", {}):
+        raise RuntimeError("The previous release cannot preserve the configured external databases; rollback was not started")
+    if ("deployment_config.py" not in read_json(target / "manifest.json").get("files", {})
+            and (config.get("service_credentials_file") or config.get("channels", {}).get("email_enabled")
+                 or config.get("reserved_ports"))):
+        raise RuntimeError("The previous release cannot preserve this deployment profile; rollback was not started")
     if "abcdyi" in read_json(target / "manifest.json").get("components", {}):
         return upgrade_config(config)
     config = json.loads(json.dumps(config))
@@ -219,12 +274,10 @@ def validate_config(config: dict):
         raise ValueError("Every tenant must have a distinct frontend credential")
     ports = config.get("ports", {})
     expected_services = set(SERVICES) - ({"abcdyi"} if config["version"] == 1 else set())
-    if set(ports) != expected_services or any(type(p) is not int or not 1024 <= p <= 65535 for p in ports.values()) or len(set(ports.values())) != len(ports):
-        raise ValueError("Distinct unprivileged ports are required for each bundled service")
+    if set(ports) != expected_services or any(type(p) is not int or p != 0 and not 1024 <= p <= 65535 for p in ports.values()):
+        raise ValueError("Service ports must be zero for automatic allocation or unprivileged requests")
     if config.get("host_profile") not in {"isolated", "ctyun", "sin", "other"}:
         raise ValueError("Unknown host profile")
-    if config["host_profile"] == "ctyun" and 8443 in ports.values():
-        raise ValueError("CTYun ports 443 and 8443 are reserved")
     for name in (("session", "database", "gltg") if config["version"] == 1 else ("session", "database", "gltg", "abcdyi")):
         value = config.get("secrets", {}).get(name, "")
         if not isinstance(value, str) or len(value) < 32 or not value.isascii() or any(ord(c) < 33 or ord(c) == 127 for c in value):
@@ -238,6 +291,10 @@ def validate_config(config: dict):
             raise ValueError("Fulfillment tenant identities must match the installation tenant map")
         if fulfillment.get("port") != ports["abcdyi"]:
             raise ValueError("Fulfillment port does not match the managed service")
+    if config.get("database_mode", "external") not in {"isolated", "external"}:
+        raise ValueError("Unknown database configuration mode")
+    if config.get("database_config_file") and not Path(config["database_config_file"]).is_absolute():
+        raise ValueError("Database configuration requires an absolute private file path")
     external = config.get("external", {})
     if set(external) - {"database", "gltg", "gpm", "language", "aivan_database_url"}:
         raise ValueError("Unknown external dependency")
@@ -248,10 +305,20 @@ def validate_config(config: dict):
     for group in ("language", "model"):
         if config.get(group, {}).get("url"):
             endpoint(config[group]["url"])
+    load_deployment_module().validate(config, endpoint=endpoint)
+
+
+def load_database_module():
+    spec = importlib.util.spec_from_file_location("myaivan_database_config", Path(__file__).with_name("database_config.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def environment(root: Path, rel: Path, config: dict) -> dict:
+    targets = load_database_module().configured_targets(config, root)
     env = {"PATH": f"{rel}/runtime/bin:/usr/bin:/bin", "HOME": str(root), "LANG": "C.UTF-8", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1"}
+    env.update({name: str(config.get("runtime_threads", 2)) for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")})
     urls = {name: f"http://127.0.0.1:{port}" for name, port in config["ports"].items()}
     urls.update({key: value for key, value in config["external"].items() if key in SERVICES})
     library_dirs = [rel / "runtime/lib", *sorted((rel / "runtime/lib/python3.12/site-packages").glob("*.libs"))]
@@ -259,7 +326,9 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
     env.update({
         "AIVAN_ENV": "production",
         "AIVAN_CANDIDATE_SHA": read_json(rel / "manifest.json")["components"]["aivan"]["revision"],
-        "AIVAN_DB_URL": config["external"].get("aivan_database_url", f"sqlite:///{root}/data/aivan.db"),
+        "AIVAN_DB_URL": targets["aivan"]["url"],
+        "MYAIVAN_DATABASE_MODE": config.get("database_mode", "external"),
+        "MYAIVAN_DATABASE_SCHEMAS": json.dumps({name: value["schema"] for name, value in targets.items()}),
         "AIVAN_TENANT_API_KEYS": json.dumps(config["tenants"]),
         "AIVAN_UI_SESSION_SECRET": config["secrets"]["session"],
         "AIVAN_UI_ACTOR_ID": "installation-operator",
@@ -268,6 +337,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
         "AIVAN_REQUIRE_HUMAN_APPROVAL": "true",
         "AIVAN_CORS_ORIGINS": config["origin"],
         "AIVAN_PORT": str(config["ports"]["web"]),
+        "AIVAN_RESERVED_PORTS": ",".join(str(port) for port in sorted(load_deployment_module().reserved_ports(config))),
         "AIVAN_EXTERNAL_MODEL_API_ENABLED": "false",
         "AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED": "false",
         "AIVAN_ALLOW_STUB_SUPPLIERS": "false",
@@ -287,10 +357,11 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
         "TRANSFORMERS_OFFLINE": "1",
         "AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER": config["language"]["provider"],
         "AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL": config["language"]["model"],
-        "OPENCLAW_BASE_URL": "",
+        "OPENCLAW_BASE_URL": config.get("channels", {}).get("openclaw_url", "") if config.get("channels", {}).get("email_enabled") else "",
+        "OPENCLAW_SEND_ENDPOINT": config.get("channels", {}).get("send_endpoint", "/messages/send"),
         "OPENCLAW_MOCK_MODE": "false",
-        "AIVAN_EMAIL_SEND_MODE": "disabled",
-        "GIRAFFE_DB_DATABASE_URL": f"sqlite+pysqlite:///{root}/data/giraffe.db",
+        "AIVAN_EMAIL_SEND_MODE": "openclaw" if config.get("channels", {}).get("email_enabled") else "disabled",
+        "GIRAFFE_DB_DATABASE_URL": targets.get("database", {}).get("url", ""),
         "GIRAFFE_DB_BASE_URL": urls["database"],
         "GIRAFFE_DB_SERVICE_AUTH_SECRET": config["secrets"]["database"],
         "GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON": json.dumps({tenant: config["secrets"]["database"] for tenant in config["tenants"]}),
@@ -308,7 +379,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
     if "abcdyi" in config["ports"]:
         mapping = config["fulfillment"]["tenants"]
         env.update({
-            "DATABASE_URL": f"sqlite+aiosqlite:///{root}/data/abcdyi.db",
+            "DATABASE_URL": targets["abcdyi"]["url"],
             "SECRET_KEY": config["secrets"]["abcdyi"],
             "ABCDYI_PRIVATE_DATA_PROVIDER_ID": config["private_data_provider_id"],
             "ABCDYI_PRIVATE_DATA_TENANT_MAP": json.dumps({item["tenant_id"]: tenant for tenant, item in mapping.items()}),
@@ -316,6 +387,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
             "MYAIVAN_FULFILLMENT_API_KEYS": json.dumps(config["tenants"]),
             "ABCDYI_LANGUAGE_SKILL_BASE_URL": config["language"]["url"] or urls["language"],
         })
+    env.update(load_deployment_module().credential_environment(config))
     return env
 
 
@@ -326,19 +398,12 @@ def active_services(config: dict):
 def health(root: Path) -> dict:
     config = read_json(root / "config.json")
     validate_config(config)
-    report = {}
-    for name, (_app, path) in SERVICES.items():
-        if name not in config["ports"]:
-            continue
-        url = config["external"].get(name, f"http://127.0.0.1:{config['ports'][name]}")
-        try:
-            with urllib.request.urlopen(url + path, timeout=3) as response:
-                data = json.load(response)
-            report[name] = {"ok": True, "response": data}
-        except (OSError, ValueError, urllib.error.URLError):
-            report[name] = {"ok": False}
+    spec = importlib.util.spec_from_file_location("myaivan_healthcheck", Path(__file__).with_name("healthcheck.py"))
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    report = checks.probe(config, SERVICES, load_deployment_module().credentials(config))
     return {"ok": status(root)["running"] and all(item["ok"] for item in report.values()), "services": report,
-            "workflow_acceptance": "not_measured_by_health", "public_entry": {"origin": config["origin"], "status": "authorized_HTTPS_ingress_required_and_unverified"}, "optional_dependencies": {"language": "configured_requires_validation" if config["language"]["url"] or config["language"].get("model_dir") else "canonical_validator_bundled_translation_models_missing", "model": "configured" if config["model"]["url"] else "disabled_deterministic_human_review_guidance", "email": "unconfigured_manual_copy_only"}}
+            "workflow_acceptance": "not_measured_by_health", "public_entry": {"origin": config["origin"], "status": "authorized_HTTPS_ingress_required_and_unverified"}, "optional_dependencies": {"language": "configured_requires_validation" if config["language"]["url"] or config["language"].get("model_dir") else "canonical_validator_bundled_translation_models_missing", "model": "configured" if config["model"]["url"] else "disabled_deterministic_human_review_guidance", "email": "configured_explicit_human_confirmation_required" if config.get("channels", {}).get("email_enabled") else "unconfigured_manual_copy_only"}}
 
 
 def wait_healthy(root: Path, seconds: float = 45):
@@ -361,6 +426,9 @@ def load_service_module():
 
 
 def start(root: Path):
+    config = read_json(root / "config.json")
+    validate_config(config)
+    load_deployment_module().credentials(config, require_external=True)
     if status(root)["running"]:
         return wait_healthy(root)
     # Reclaim only recorded, identity-verified children from a crashed supervisor.
@@ -376,8 +444,6 @@ def start(root: Path):
             stop(root)
             raise
     rel = release(root)
-    config = read_json(root / "config.json")
-    validate_config(config)
     subprocess.run([python(rel), "-B", "-I", str(rel / "bootstrap.py"), str(root)], env=environment(root, rel, config), cwd=root, check=True)
     with open(root / "logs/supervisor.log", "ab") as log:
         child = subprocess.Popen([python(rel), "-B", "-I", str(rel / "runtime.py"), "--prefix", str(root), "supervise"], cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
@@ -436,7 +502,6 @@ def supervise(root: Path):
 def _supervise(root: Path):
     rel = release(root)
     config = read_json(root / "config.json")
-    env = environment(root, rel, config)
     stopping = False
     children = {}
     sockets = {}
@@ -448,14 +513,20 @@ def _supervise(root: Path):
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     try:
-        # Reserve every managed port before starting anything. Never take over an occupied port.
+        # Reserve every managed port before starting anything. Preserve existing owners.
+        reserved = load_deployment_module().reserved_ports(config)
+        used = set()
         for name in active_services(config):
-            sock = socket.socket()
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock, selected = bind_available_port(config["ports"][name], reserved, used)
             sockets[name] = sock
-            sock.bind(("127.0.0.1", config["ports"][name]))
-            sock.listen(128)
+            config["ports"][name] = selected
+            used.add(selected)
             logs[name] = open(root / f"logs/{name}.log", "ab")
+        if "abcdyi" in config["ports"]:
+            config["fulfillment"]["port"] = config["ports"]["abcdyi"]
+        write_json(root / "config.json", config)
+        publish_ports(root, config)
+        env = environment(root, rel, config)
         write_json(root / "run/processes.json", state)
         failures = {name: 0 for name in sockets}
         started = {}
@@ -527,7 +598,35 @@ def set_current(root: Path, target: Path):
     os.replace(link, root / "current")
 
 
-def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: bool):
+def load_release_controller(target: Path):
+    """Bind a verified controller and its helpers to one immutable release path."""
+    target = target.resolve(strict=True)
+    verify_payload(target)
+    spec = importlib.util.spec_from_file_location("myaivan_release_runtime", target / "runtime.py")
+    controller = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(controller)
+    return controller
+
+
+def restart_restored_release(root: Path):
+    """Use the original controller only for an unchanged legacy isolated store."""
+    config = read_json(root / "config.json")
+    if ("database_mode" not in config and config.get("host_profile") == "isolated"
+            and not config.get("database_config_file")
+            and not config.get("external", {}).get("aivan_database_url")
+            and not config.get("external", {}).get("database")):
+        previous = release(root)
+        verify_payload(previous)
+        # Do not rewrite the restored configuration to satisfy a newer SQL
+        # contract, or invoke the CLI while holding the installation lock.
+        spec = importlib.util.spec_from_file_location("myaivan_restored_runtime", previous / "runtime.py")
+        controller = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(controller)
+        return controller.start(root)
+    return start(root)
+
+
+def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: bool, *, database_config_file=None, isolated_sqlite=False, profile_file=None, service_credentials_file=None):
     manifest = verify_payload(payload)
     version = manifest["release"]
     if not NAME.fullmatch(version):
@@ -536,9 +635,28 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
         (root / name).mkdir(exist_ok=True, mode=0o700)
     config_path = root / "config.json"
     if not config_path.exists():
-        write_json(config_path, new_config(tenants, port))
-    config = upgrade_config(read_json(config_path))
+        initial = new_config(tenants, port)
+        if database_config_file:
+            initial["database_config_file"] = str(database_config_file.absolute())
+        if isolated_sqlite:
+            initial["database_mode"] = "isolated"
+        write_json(config_path, initial)
+    original_config = upgrade_config(read_json(config_path))
+    config = json.loads(json.dumps(original_config))
+    if profile_file:
+        helpers = load_deployment_module()
+        config = helpers.profile(config, helpers.private_json(profile_file.absolute()),
+                                 endpoint=endpoint, tenant_identities=fulfillment_tenants)
+    if service_credentials_file:
+        config["service_credentials_file"] = str(service_credentials_file.absolute())
+    if database_config_file:
+        config.update(database_mode="external", database_config_file=str(database_config_file.absolute()))
+    elif isolated_sqlite:
+        config.update(database_mode="isolated", database_config_file="")
     validate_config(config)
+    load_deployment_module().credentials(config, require_external=not no_start)
+    if config.get("database_config_file"):
+        load_database_module().configured_targets(config, root)
     target = root / "releases" / version
     previous = release(root) if (root / "current").exists() else None
     if target.exists():
@@ -556,8 +674,11 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
         snapshot.mkdir(mode=0o700)
         shutil.copytree(root / "data", snapshot / "data")
         shutil.copy2(config_path, snapshot / "config.json")
+        if (root / "previous.json").exists():
+            shutil.copy2(root / "previous.json", snapshot / "previous.json")
         write_json(root / "previous.json", {"release": previous.name, "snapshot": snapshot.name})
     write_json(config_path, config)
+    publish_ports(root, config)
     set_current(root, target)
     launcher = root / "myaivan"
     launcher.write_text('#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$ROOT/current/runtime/bin/python3" -B -I "$ROOT/current/runtime.py" --prefix "$ROOT" "$@"\n')
@@ -572,9 +693,18 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
                 os.replace(root / "data", failed_data)
                 shutil.copytree(snapshot / "data", root / "data")
                 shutil.copy2(snapshot / "config.json", config_path)
-                start(root)
+                if (snapshot / "previous.json").exists():
+                    shutil.copy2(snapshot / "previous.json", root / "previous.json")
+                else:
+                    (root / "previous.json").unlink(missing_ok=True)
+                publish_ports(root, read_json(config_path))
+                if (config.get("database_mode") != "external" or
+                        original_config.get("database_mode") == "external" and
+                        original_config.get("database_config_file") == config.get("database_config_file")):
+                    restart_restored_release(root)
             raise
-    return {"installed": version, "prefix": str(root), "started": not no_start, "web_url": f"http://127.0.0.1:{config['ports']['web']}", "fulfillment_url": f"http://127.0.0.1:{config['ports']['abcdyi']}", "fulfillment_auth": "reuse tenant API credential at /api/installation/session", "credentials_file": str(config_path), "data_retained": True, "workflow_acceptance": "not_measured_by_installation", "pending_configuration": ["verified HTTPS ingress for public browser access"], "optional_capabilities": {"model": "disabled_deterministic_human_review_guidance", "non_English_translation": "requires_verified_models_or_provider"}}
+    config = read_json(config_path)
+    return {"installed": version, "prefix": str(root), "started": not no_start, "web_url": f"http://127.0.0.1:{config['ports']['web']}", "fulfillment_url": f"http://127.0.0.1:{config['ports']['abcdyi']}", "fulfillment_auth": "reuse tenant API credential at /api/installation/session", "credentials_file": str(config_path), "data_retained": True, "ports_file": str(root / "run/ports.json"), "workflow_acceptance": "not_measured_by_installation", "pending_configuration": (["authorized private SQL configuration and explicit schema migration"] if config.get("database_mode") == "external" and not config.get("database_config_file") else []) + ["verified HTTPS ingress for public browser access"], "optional_capabilities": {"model": "configured" if config["model"]["url"] else "disabled_deterministic_human_review_guidance", "non_English_translation": "configured_requires_verification" if config["language"]["url"] or config["language"].get("model_dir") else "requires_verified_models_or_provider"}}
 
 
 def main(argv=None):
@@ -587,9 +717,16 @@ def main(argv=None):
     install_parser.add_argument("--tenant", action="append", default=[])
     install_parser.add_argument("--web-port", type=int, default=0)
     install_parser.add_argument("--no-start", action="store_true")
-    for command in ("start", "stop", "restart", "health", "status", "supervise", "recover", "rollback", "uninstall", "verify", "serve", "service-install", "service-uninstall"):
+    install_parser.add_argument("--profile-file", type=Path)
+    install_parser.add_argument("--service-credentials-file", type=Path)
+    install_db = install_parser.add_mutually_exclusive_group()
+    install_db.add_argument("--database-config-file", type=Path)
+    install_db.add_argument("--isolated-sqlite", action="store_true", help="Explicit disposable/local test profile only")
+    for command in ("start", "stop", "restart", "health", "check", "status", "supervise", "recover", "rollback", "uninstall", "verify", "serve", "service-install", "service-uninstall"):
         commands.add_parser(command)
-    setup_parser = commands.add_parser("setup", help="Configure existing endpoints without editing files")
+    setup_parser = commands.add_parser("setup", aliases=["prepare"], help="Prepare deployment values without source editing or database migration")
+    setup_parser.add_argument("--profile-file", type=Path)
+    setup_parser.add_argument("--service-credentials-file", type=Path)
     setup_parser.add_argument("--origin")
     setup_parser.add_argument("--host-profile", choices=("isolated", "ctyun", "sin", "other"))
     setup_parser.add_argument("--web-port", type=int)
@@ -599,44 +736,122 @@ def main(argv=None):
     setup_parser.add_argument("--language-model-dir", type=Path)
     setup_parser.add_argument("--database-url")
     setup_parser.add_argument("--database-provider-id", help="Logical data-store identity; retain only when moving the same records")
+    setup_parser.add_argument("--gltg-url")
+    setup_parser.add_argument("--gpm-url")
+    setup_parser.add_argument("--openclaw-url")
+    email_group = setup_parser.add_mutually_exclusive_group()
+    email_group.add_argument("--enable-email", action="store_true")
+    email_group.add_argument("--disable-email", action="store_true")
     setup_parser.add_argument("--restart", action="store_true")
+    setup_db = setup_parser.add_mutually_exclusive_group()
+    setup_db.add_argument("--database-config-file", type=Path)
+    setup_db.add_argument("--isolated-sqlite", action="store_true")
+    for database_command in ("database-plan", "database-migrate"):
+        database_parser = commands.add_parser(database_command)
+        database_parser.add_argument("--plan-file", type=Path, required=True)
+        database_parser.add_argument("--component", action="append", choices=("aivan", "abcdyi", "database"))
+        if database_command == "database-migrate":
+            database_parser.add_argument("--tenant-id", required=True)
+            database_parser.add_argument("--authorization-reference", required=True)
+            database_parser.add_argument("--backup-reference", required=True)
+            database_parser.add_argument("--bootstrap-empty", action="store_true")
+    buyer_parser = commands.add_parser("buyer-create", help="Create a separate buyer login with local hidden password entry")
+    buyer_parser.add_argument("--tenant", required=True)
+    buyer_parser.add_argument("--email", required=True)
+    buyer_parser.add_argument("--full-name", required=True)
     configure_parser = commands.add_parser("configure")
     configure_parser.add_argument("--file", type=Path, required=True)
+    for setup_command in ("database-configure", "service-configure"):
+        operator_parser = commands.add_parser(setup_command, help="Enter existing credentials locally without source editing")
+        operator_parser.add_argument("--file", type=Path, required=True)
+        operator_parser.add_argument("--replace", action="store_true")
     args = parser.parse_args(argv)
     root = args.prefix.absolute()
     check_root(root, initialize=args.command == "install")
     if args.command in {"supervise", "serve"}:
         if args.command == "serve":
+            config = read_json(root / "config.json")
+            validate_config(config)
+            load_deployment_module().credentials(config, require_external=True)
             if status(root)["running"]:
                 raise RuntimeError("Services already have a supervisor")
             stop(root)
             rel = release(root)
-            config = read_json(root / "config.json")
-            validate_config(config)
             subprocess.run([python(rel), "-B", "-I", str(rel / "bootstrap.py"), str(root)], env=environment(root, rel, config), cwd=root, check=True)
         supervise(root)
         return 0
-    if args.command in {"health", "status", "verify"}:
-        result = health(root) if args.command == "health" else status(root) if args.command == "status" else {"verified": verify_payload(release(root))["release"]}
+    if args.command in {"health", "check", "status", "verify"}:
+        if args.command == "check":
+            manifest = verify_payload(release(root))
+            result = health(root)
+            result["verified_release"] = manifest["release"]
+            result["ports_file"] = str(root / "run/ports.json")
+        else:
+            result = health(root) if args.command == "health" else status(root) if args.command == "status" else {"verified": verify_payload(release(root))["release"]}
     else:
         with operation_lock(root):
-            if args.command in {"service-install", "service-uninstall"}:
+            if args.command == "buyer-create":
+                rel = release(root)
+                verify_payload(rel)
+                config = read_json(root / "config.json")
+                process = subprocess.run([python(rel), "-B", "-I", str(rel / "abcdyi_service.py"), "buyer-create",
+                    "--tenant", args.tenant, "--email", args.email, "--full-name", args.full_name],
+                    env=environment(root, rel, config), cwd=root, stdout=subprocess.PIPE, text=True)
+                if process.returncode:
+                    raise RuntimeError("Buyer creation failed; no existing account or role is replaced")
+                result = json.loads(process.stdout)
+            elif args.command in {"database-configure", "service-configure"}:
+                spec = importlib.util.spec_from_file_location("myaivan_operator_setup", Path(__file__).with_name("operator_setup.py"))
+                operator = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(operator)
+                config = read_json(root / "config.json")
+                if args.command == "database-configure":
+                    result = operator.configure_databases(config, args.file, validator=load_database_module().sql_target, replace=args.replace)
+                else:
+                    result = operator.configure_services(config, args.file, validator=load_deployment_module().header_secret, replace=args.replace)
+            elif args.command in {"service-install", "service-uninstall"}:
                 service = load_service_module()
                 if args.command == "service-install":
                     result = service.install(root, stop=stop, start=start, status=status, wait_healthy=wait_healthy, write_json=write_json)
                 else:
                     result = service.uninstall(root, stop=stop)
             elif args.command == "install":
-                result = install(root, args.payload.resolve(), args.tenant or ["local-tenant"], args.web_port, args.no_start)
+                result = install(root, args.payload.resolve(), args.tenant or ["local-tenant"], args.web_port, args.no_start,
+                                 database_config_file=args.database_config_file, isolated_sqlite=args.isolated_sqlite,
+                                 profile_file=args.profile_file, service_credentials_file=args.service_credentials_file)
             elif args.command in {"start", "recover", "restart"}:
                 if args.command != "start":
+                    config = read_json(root / "config.json")
+                    validate_config(config)
+                    load_deployment_module().credentials(config, require_external=True)
                     stop(root)
                 result = start(root)
             elif args.command == "stop":
                 result = stop(root)
-            elif args.command == "setup":
+            elif args.command in {"setup", "prepare"}:
                 existing = read_json(root / "config.json")
                 updated = json.loads(json.dumps(existing))
+                if args.profile_file:
+                    helpers = load_deployment_module()
+                    updated = helpers.profile(updated, helpers.private_json(args.profile_file.absolute()),
+                                              endpoint=endpoint, tenant_identities=fulfillment_tenants)
+                if args.service_credentials_file:
+                    updated["service_credentials_file"] = str(args.service_credentials_file.absolute())
+                for dependency in ("gltg", "gpm"):
+                    url = getattr(args, dependency + "_url")
+                    if url is not None:
+                        if url:
+                            updated["external"][dependency] = endpoint(url)
+                        else:
+                            updated["external"].pop(dependency, None)
+                if args.openclaw_url is not None:
+                    updated.setdefault("channels", {})["openclaw_url"] = endpoint(args.openclaw_url) if args.openclaw_url else ""
+                if args.enable_email or args.disable_email:
+                    updated.setdefault("channels", {})["email_enabled"] = args.enable_email
+                if args.database_config_file:
+                    updated.update(database_mode="external", database_config_file=str(args.database_config_file.absolute()))
+                elif args.isolated_sqlite:
+                    updated.update(database_mode="isolated", database_config_file="")
                 for name in ("origin", "host_profile"):
                     if getattr(args, name) is not None:
                         updated[name] = getattr(args, name)
@@ -664,26 +879,61 @@ def main(argv=None):
                         updated["external"].pop("database", None)
                         updated["private_data_provider_id"] = updated["bundled_private_data_provider_id"]
                 if args.database_provider_id is not None:
-                    if not updated["external"].get("database"):
-                        raise ValueError("The bundled store retains its installation-owned provider identity")
+                    if not updated["external"].get("database") and updated.get("database_mode") != "external":
+                        raise ValueError("The isolated bundled store retains its installation-owned provider identity")
                     updated["private_data_provider_id"] = args.database_provider_id
                 validate_config(updated)
+                load_deployment_module().credentials(updated, require_external=args.restart)
+                if args.restart or updated.get("database_config_file") or updated.get("database_mode") == "isolated":
+                    load_database_module().configured_targets(updated, root)
                 was_running = status(root)["running"]
                 if was_running and not args.restart:
                     raise RuntimeError("Use setup --restart to apply settings transactionally to a running instance")
                 stop(root)
                 write_json(root / "config.json", updated)
+                publish_ports(root, updated)
                 try:
                     if args.restart:
                         start(root)
                 except Exception:
                     write_json(root / "config.json", existing)
-                    if was_running:
+                    publish_ports(root, existing)
+                    if (was_running and (updated.get("database_mode") != "external" or
+                            existing.get("database_mode") == "external" and
+                            existing.get("database_config_file") == updated.get("database_config_file"))):
                         start(root)
                     raise
+                updated = read_json(root / "config.json")
                 result = {"configured": True, "restarted": args.restart, "public_origin": updated["origin"],
                           "internal_web_url": f"http://127.0.0.1:{updated['ports']['web']}", "workflow_acceptance": "not_measured_by_setup",
+                          "database_configuration_selected": bool(updated.get("database_config_file")) or updated.get("database_mode") == "isolated",
                           "remaining_verification": ["existing HTTPS ingress", "selected business-flow acceptance"]}
+            elif args.command in {"database-plan", "database-migrate"}:
+                if args.command == "database-migrate" and status(root)["running"]:
+                    raise RuntimeError("Stop the managed services before an explicit database migration")
+                rel = release(root)
+                verify_payload(rel)
+                config = read_json(root / "config.json")
+                command = [python(rel), "-B", "-I", str(rel / "databases.py"),
+                           "plan" if args.command == "database-plan" else "migrate", "--prefix", str(root),
+                           "--plan-file", str(args.plan_file.absolute())]
+                for component in args.component or []:
+                    command += ["--component", component]
+                if args.command == "database-migrate":
+                    command += ["--tenant-id", args.tenant_id, "--authorization-reference", args.authorization_reference,
+                                "--backup-reference", args.backup_reference]
+                    if args.bootstrap_empty:
+                        command.append("--bootstrap-empty")
+                process = subprocess.run(command, env=environment(root, rel, config), cwd=root,
+                                         capture_output=True, text=True)
+                try:
+                    result = json.loads(process.stdout)
+                    if not isinstance(result, dict):
+                        raise ValueError()
+                except (ValueError, TypeError):
+                    raise RuntimeError("Database operation did not produce a verified result; credentials and driver output are redacted") from None
+                if process.returncode:
+                    result["ok"] = False
             elif args.command == "configure":
                 if status(root)["running"]:
                     raise RuntimeError("Stop services before changing configuration")
@@ -694,18 +944,24 @@ def main(argv=None):
             elif args.command == "rollback":
                 previous = read_json(root / "previous.json")
                 target = root / "releases" / previous["release"]
-                verify_payload(target)
+                target_controller = load_release_controller(target)
+                previous_config = read_json(root / "config.json")
+                target_config = config_for_release(previous_config, target)
+                # Enforce current credential requirements before stopping or
+                # switching to an older controller with a weaker preflight.
+                validate_config(target_config)
+                load_deployment_module().credentials(target_config, require_external=True)
                 stop(root)
                 current = release(root)
-                previous_config = read_json(root / "config.json")
-                write_json(root / "config.json", config_for_release(previous_config, target))
+                write_json(root / "config.json", target_config)
                 set_current(root, target)
                 try:
-                    result = start(root)
+                    # Call in-process: another CLI would reacquire our lock.
+                    result = target_controller.start(root)
                 except Exception:
                     set_current(root, current)
                     write_json(root / "config.json", previous_config)
-                    start(root)
+                    load_release_controller(current).start(root)
                     raise
                 result["rolled_back_to"] = target.name
                 result["data_retained"] = True

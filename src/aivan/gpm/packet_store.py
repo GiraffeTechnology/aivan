@@ -61,10 +61,12 @@ class GPMPacketStore:
         tenant_id: str,
         *,
         correlation_id: str | None = None,
+        force_probe: bool = False,
     ) -> bool:
-        if tenant_id in self._verified_tenants:
+        if tenant_id in self._verified_tenants and not force_probe:
             return True
         if self._db is None:
+            self._verified_tenants.discard(tenant_id)
             _raise_production_unavailable()
             return False
         try:
@@ -77,6 +79,7 @@ class GPMPacketStore:
                 correlation_id=correlation_id,
             )
         except GiraffeDBClientError as exc:
+            self._verified_tenants.discard(tenant_id)
             _raise_production_unavailable(exc)
             logger.warning(
                 "GPMPacketStore: provider probe failed error_code=%s",

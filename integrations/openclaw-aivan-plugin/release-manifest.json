@@ -30,6 +30,7 @@
     "verificationCommand": "python scripts/validate_clawhub_aivan_plugin.py"
   },
   "knownLimitations": [
-    "Stage 3 authenticates the OpenClaw channel with one static service identity from process environment variables. Per-participant trusted identity binding is deferred to Stage 4; do not treat the Stage 3 bridge as production-ready for multi-participant role attribution."
+    "The process uses a static service identity and separate channel/account/sender-derived participant assertions. Live provider identity authenticity and account connectivity still require upstream gateway validation; synthetic harness tests do not establish real IM delivery.",
+    "The legacy WeChat callback shape does not identify or validate a personal WeChat or WeCom connector. Platform account access belongs to the configured OpenClaw gateway."
   ]
 }

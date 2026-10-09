@@ -24,6 +24,18 @@ def reviewed_channel(db, draft, preview_id, identity, trace_id):
     return preview, capability
 
 
+def missing_relay_bindings(draft, verified_preview):
+    """Keep adapter account binding for native relay, with reviewed manual delivery."""
+    manual = verified_preview.after_json.get("manual_delivery") is True
+    fields = (
+        ("channel_account_id", draft.channel_account_id),
+        ("conversation_id", draft.conversation_id),
+        ("target_peer_id", draft.target_peer_id),
+    )
+    return [field for field, value in fields
+            if not (value or "").strip() and not (field == "channel_account_id" and manual)]
+
+
 def claim_pending_approval(db, draft, actor_id, manual):
     status = "approved_pending_send" if manual else "approved"
     changed = db.query(type(draft)).filter(

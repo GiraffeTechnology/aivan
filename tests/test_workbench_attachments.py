@@ -22,7 +22,8 @@ def test_upload_readback_and_content_use_trusted_case_mapping(workbench, monkeyp
     metadata = {"attachment_id": "att_1", "tenant_id": "test_tenant",
                 "procurement_case_id": "pc_1", "file_name": f"attachment-{digest[:12]}.txt",
                 "content_type": "text/plain", "size_bytes": len(content), "sha256": digest,
-                "content_path": "/api/data/attachments/att_1/content"}
+                "content_path": "/api/data/attachments/att_1/content",
+                "source_sha256": digest, "source_name_sha256": hashlib.sha256(b"buyer.txt").hexdigest()}
     def handler(request):
         calls.append(request)
         assert request.headers["X-Service-Tenant-ID"] == "test_tenant"
@@ -31,6 +32,8 @@ def test_upload_readback_and_content_use_trusted_case_mapping(workbench, monkeyp
             payload = json.loads(request.content)
             assert payload["procurement_case_id"] == "pc_1"
             assert payload["file_name"] == metadata["file_name"]
+            assert payload["source_sha256"] == digest
+            assert payload["source_name_sha256"] == hashlib.sha256(b"buyer.txt").hexdigest()
             assert base64.b64decode(payload["content_base64"]) == content
             assert request.headers["Idempotency-Key"]
             return httpx.Response(201, json=metadata)
@@ -212,3 +215,32 @@ def test_image_preview_csp_does_not_relax_scripts_or_frames(workbench):
     assert "object-src 'none';" in policy
     assert "frame-ancestors 'none';" in policy
     assert "connect-src *" not in policy
+
+
+def test_original_source_hashes_must_be_read_back_without_original_text(monkeypatch):
+    from aivan.integrations.attachment_client import AttachmentClient, AttachmentError
+    monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://127.0.0.1:12345")
+    monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "fixture-key")
+    canonical = b"We need one hundred white cotton shirts."
+    original = "\u9700\u8981\u4e00\u767e\u4ef6\u767d\u8272\u68c9\u886c\u886b".encode()
+    original_digest = hashlib.sha256(original).hexdigest()
+    name_digest = hashlib.sha256("\u9700\u6c42.txt".encode()).hexdigest()
+    metadata = {"attachment_id": "att_source", "tenant_id": "test_tenant", "procurement_case_id": "pc_1",
+                "file_name": "attachment.txt", "content_type": "text/plain", "size_bytes": len(canonical),
+                "sha256": hashlib.sha256(canonical).hexdigest(), "source_sha256": original_digest,
+                "source_name_sha256": name_digest}
+    def handler(request):
+        if request.method == "POST":
+            payload = json.loads(request.content)
+            assert base64.b64decode(payload["content_base64"]) == canonical
+            assert payload["source_sha256"] == original_digest
+            assert payload["source_name_sha256"] == name_digest
+            assert original not in request.content
+        return httpx.Response(201 if request.method == "POST" else 200, json=metadata)
+    client = AttachmentClient("test_tenant", "trace-source", transport=httpx.MockTransport(handler))
+    assert client.create("pc_1", "attachment.txt", "text/plain", canonical, "key-source",
+                         source_sha256=original_digest, source_name_sha256=name_digest) == metadata
+    metadata["source_sha256"] = "b" * 64
+    with pytest.raises(AttachmentError, match="ATTACHMENT_INDETERMINATE_COMMIT"):
+        client.create("pc_1", "attachment.txt", "text/plain", canonical, "key-source",
+                      source_sha256=original_digest, source_name_sha256=name_digest)

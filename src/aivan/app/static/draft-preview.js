@@ -74,6 +74,7 @@
       const approvedProof = proof;
       working(true); approveButton.disabled = true; copyButton.disabled = true;
       status.textContent = 'Submitting your approval for the displayed message.';
+      let approvedForCopy = false;
       try {
         const result = await api(`/api/drafts/${encodeURIComponent(draftId)}/approve`, {
           method: 'POST', body: JSON.stringify({preview_id: approvedProof.preview_id}),
@@ -81,7 +82,7 @@
         if (!isCurrent()) return;
         if (result.relay_required === true && result.status === 'approved_pending_send') {
           status.textContent = 'Approved for manual delivery. Copy and send it yourself, then record the receipt in the relay queue.';
-          copyButton.disabled = false;
+          approvedForCopy = true;
         } else if (result.sent === true && result.status === 'sent') {
           status.textContent = 'The approved message was sent and a delivery result was recorded.';
         } else {
@@ -90,33 +91,42 @@
         if (onApproved) { try { await onApproved(result); } catch (_) { /* Saved delivery state remains authoritative. */ } }
       } catch (_) {
         if (isCurrent()) { resetProof(); status.textContent = 'Approval or delivery was not confirmed. Reopen the draft and review its saved state before retrying.'; }
-      } finally { if (isCurrent()) working(false); }
+      } finally {
+        if (isCurrent()) {
+          working(false);
+          copyButton.disabled = !approvedForCopy || proof !== approvedProof;
+        }
+      }
     });
     copyButton.addEventListener('click', async () => {
-      if (busy || !proof || copyButton.disabled) return;
+      if (busy || !proof || copyButton.disabled || !isCurrent() || !dialog.open) return;
       const copied = proof;
+      const isCurrentCopy = () => isCurrent() && dialog.open && proof === copied;
       working(true); copyButton.disabled = true;
       let clipboardDone = false;
       try {
         const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(copied.message_text));
+        if (!isCurrentCopy()) return;
         const actual = Array.from(new Uint8Array(hash), v => v.toString(16).padStart(2, '0')).join('');
         if (actual !== copied.rendered_sha256) throw Error('Preview changed');
         await navigator.clipboard.writeText(copied.message_text); clipboardDone = true;
+        // An invoked clipboard write cannot be cancelled; do not start a stale audit after it settles.
+        if (!isCurrentCopy()) return;
         copyKey ||= newKey();
         const result = await api(`/api/workbench/cases/${encodeURIComponent(copied.case_id)}/drafts/${encodeURIComponent(draftId)}/copy`, {
           method: 'POST', headers: {'Idempotency-Key': copyKey},
           body: JSON.stringify({content_sha256: copied.rendered_sha256, preview_id: copied.preview_id}),
         });
-        if (!isCurrent()) return;
+        if (!isCurrentCopy()) return;
         if (result.status !== 'copied' || result.delivery_claim !== false) throw Error('Copy receipt unavailable');
         copyKey = null; status.textContent = 'Copied and recorded. You still need to send it yourself; no delivery is claimed.';
       } catch (_) {
-        if (isCurrent()) {
+        if (isCurrentCopy()) {
           status.textContent = clipboardDone ? 'Copied, but the copy audit was not confirmed. No delivery is claimed.'
             : 'Automatic copying is unavailable. Select this approved text and copy it manually. No copy or delivery is claimed.';
           body.focus(); body.select();
         }
-      } finally { if (isCurrent()) { working(false); copyButton.disabled = false; } }
+      } finally { if (isCurrent() && dialog.open) { working(false); copyButton.disabled = proof !== copied; } }
     });
     dialog.addEventListener('close', () => {
       resetProof(); find('[data-preview="identity"]').textContent = ''; status.textContent = '';

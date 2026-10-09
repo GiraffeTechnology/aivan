@@ -62,6 +62,11 @@ def safe_source_file(source: Path, name: str):
     return path
 
 
+def require_builder_source(source: Path):
+    if HERE != source.resolve() / "installer":
+        raise ValueError("Run the builder from the selected pinned Aivan source")
+
+
 def source_evidence(source: Path, revision: str, expected_tree: str, source_manifest: Path | None = None):
     if not re.fullmatch(r"[0-9a-f]{40}", revision) or not re.fullmatch(r"[0-9a-f]{40}", expected_tree):
         raise ValueError("Component revisions and source trees must be full Git object IDs")
@@ -70,8 +75,10 @@ def source_evidence(source: Path, revision: str, expected_tree: str, source_mani
         if git_tree_digest(entries) != expected_tree:
             raise ValueError("Upstream manifest does not reconstruct the expected Git tree")
         selected = {}
-        prefixes = ("src/", "api/", "generators/", "alembic/")
+        runtime_prefixes = ("src/", "api/", "generators/", "alembic/")
+        prefixes = (*runtime_prefixes, "scripts/", "installer/")
         names = {"pyproject.toml", "README.md", "alembic.ini", "LICENSE", "LICENSE_NOTICE.md", "PATENT_NOTICE.md"}
+        names.update("scripts/" + name for name in ("run_aivan_migrations.py", "migrate_stage1_tenant_context.py", "migrate_stage2_role_domain.py", "migrate_stage4_relay.py", "migrate_stage5a_event_correction.py"))
         required = {entry["path"]: entry for entry in entries if entry["type"] == "blob" and (entry["path"].startswith(prefixes) or entry["path"] in names)}
         for name, entry in required.items():
             path = safe_source_file(source, name)
@@ -79,11 +86,12 @@ def source_evidence(source: Path, revision: str, expected_tree: str, source_mani
             if hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content, usedforsecurity=False).hexdigest() != entry["sha"]:
                 raise ValueError(f"Pinned provider blob mismatch: {name}")
             selected[name] = digest(path)
-        for directory in ("src", "api", "generators", "alembic"):
+        for directory in ("src", "api", "generators", "alembic", "scripts", "installer"):
             for path in (source / directory).rglob("*"):
                 if path.is_file() and "__pycache__" not in path.parts and not any(part.endswith(".egg-info") for part in path.parts) and str(path.relative_to(source)) not in required:
                     raise ValueError(f"Unpinned provider runtime input: {path.name}")
-        return {"revision": revision, "upstream_tree": expected_tree, "source_manifest_sha256": digest(source_manifest), "included_source_files": selected, "modified": False}
+        included = {name: sha for name, sha in selected.items() if name.startswith(runtime_prefixes) or name in names}
+        return {"revision": revision, "upstream_tree": expected_tree, "source_manifest_sha256": digest(source_manifest), "included_source_files": included, "verified_build_input_files": selected, "modified": False}
     actual_revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     if actual_revision != revision:
         raise ValueError("Source revision does not match the pinned Git commit")
@@ -91,7 +99,7 @@ def source_evidence(source: Path, revision: str, expected_tree: str, source_mani
     if tree != expected_tree:
         raise ValueError(f"Source tree mismatch for {source.name}")
     tracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0")
-    untracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard", "src", "api"], text=True)
+    untracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard", "src", "api", "generators", "alembic", "scripts", "installer"], text=True)
     if untracked.strip():
         raise ValueError("Untracked application runtime files are not permitted")
     hashes = {name: digest(safe_source_file(source, name)) for name in sorted(tracked) if name}
@@ -235,6 +243,7 @@ def main():
     for component in ("aivan", "gltg", "database", "language", "abcdyi"):
         sources[component] = getattr(args, f"{component}_source").resolve()
         components[component] = source_evidence(sources[component], getattr(args, f"{component}_revision"), getattr(args, f"{component}_tree"), getattr(args, f"{component}_manifest"))
+    require_builder_source(sources["aivan"])
     with tempfile.TemporaryDirectory(prefix="myaivan-build-", dir=args.output) as temporary:
         work = Path(temporary)
         payload = work / "payload"
@@ -274,7 +283,11 @@ def main():
         provider_assets.mkdir(parents=True)
         shutil.copytree(sources["database"] / "alembic", provider_assets / "alembic", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copy2(sources["database"] / "alembic.ini", provider_assets / "alembic.ini")
-        for name in ("runtime.py", "bootstrap.py", "service.py", "abcdyi_service.py", "requirements.lock", "README.md"):
+        migration_assets = payload / "provider-assets/aivan/scripts"
+        migration_assets.mkdir(parents=True)
+        for name in ("run_aivan_migrations.py", "migrate_stage1_tenant_context.py", "migrate_stage2_role_domain.py", "migrate_stage4_relay.py", "migrate_stage5a_event_correction.py"):
+            shutil.copy2(safe_source_file(sources["aivan"], "scripts/" + name), migration_assets / name)
+        for name in ("runtime.py", "bootstrap.py", "service.py", "abcdyi_service.py", "database_config.py", "databases.py", "deployment_config.py", "healthcheck.py", "operator_setup.py", "buyer_setup.py", "requirements.lock", "README.md"):
             shutil.copy2(HERE / name, payload / name)
         licenses = payload / "licenses"
         licenses.mkdir()
@@ -311,7 +324,8 @@ def main():
         # Remove build-generated caches; every byte in the final payload is inventoried.
         for cache in payload.rglob("__pycache__"):
             shutil.rmtree(cache)
-        manifest = {"format": 1, "release": args.release, "components": components, "python_version": platform.python_version(), "abi": abi_report(payload), "wheels": {wheel.name: digest(wheel) for wheel in wheels}, "requirements_lock_sha256": digest(HERE / "requirements.lock"), "files": {str(path.relative_to(payload)): digest(path) for path in sorted(payload.rglob("*")) if path.is_file()}}
+        runtime_version = subprocess.check_output([str(payload / "runtime/bin/python3"), "-I", "-c", "import platform; print(platform.python_version())"], text=True).strip()
+        manifest = {"format": 1, "release": args.release, "components": components, "python_version": runtime_version, "abi": abi_report(payload), "wheels": {wheel.name: digest(wheel) for wheel in wheels}, "requirements_lock_sha256": digest(HERE / "requirements.lock"), "files": {str(path.relative_to(payload)): digest(path) for path in sorted(payload.rglob("*")) if path.is_file()}}
         (payload / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
         destination = args.output / f"myaivan-{args.release}-linux-x86_64.run"
         write_installer(payload, destination)

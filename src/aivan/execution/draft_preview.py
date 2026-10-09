@@ -33,7 +33,9 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def sender_identity(draft: InquiryDraftRecord) -> str:
+def sender_identity(draft: InquiryDraftRecord, manual: bool = False) -> str:
+    if manual:
+        return draft.channel_account_id or "Manual sender (account not recorded)"
     if draft.channel in {"email", "smtp"}:
         return os.getenv("AIVAN_PRESET_MAILBOX") or os.getenv("AIVAN_SMTP_USERNAME", "") or draft.channel_account_id or "configured-email-account"
     return draft.channel_account_id or "configured-channel-account"
@@ -47,7 +49,7 @@ def source_fingerprint(draft: InquiryDraftRecord, target: str, manual: bool = Fa
     )}
     value["subject"] = next((line.split(":", 1)[1].strip() for line in (draft.notes or "").splitlines()
                              if line.lower().startswith("subject:")), "")
-    value.update(target_language=target, sender=sender_identity(draft), manual_delivery=manual)
+    value.update(target_language=target, sender=sender_identity(draft, manual), manual_delivery=manual)
     return digest(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
 
 

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from aivan.agents.requirement_agent import structure_customer_requirement_with_llm
 from aivan.agents.supplier_response_agent import parse_supplier_reply
 from aivan.agents.buyer_option_agent import generate_buyer_options
+from aivan.pricing.customer_quote import format_customer_quote_draft
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.event_repo import ExecutionEventRepository
 from aivan.db.repositories.preference_repo import UserPreferenceRepository
@@ -900,20 +901,11 @@ def _create_customer_quote_email_draft(
     # cannot be approved or sent after buyer options have been regenerated.
     DraftRepository(db).supersede_customer_quote_drafts(project.project_id)
 
-    option_summary = "\n".join(
-        f"{opt.option_label}: {opt.reasoning} | Lead time: "
-        f"{opt.lead_time_estimate.expected_days if opt.lead_time_estimate else 'N/A'} days | "
-        f"Price: {opt.quote.buyer_unit_price if opt.quote else 'N/A'} {opt.quote.currency if opt.quote else ''}"
-        for opt in buyer_options
+    message_text = format_customer_quote_draft(
+        buyer_options,
+        _load_requirement(project.requirement_json),
+        gpm_guidance=gpm_guidance,
     )
-    guidance_summary = ""
-    if gpm_guidance:
-        guidance_summary = (
-            "\n\nGPM advisory: "
-            f"{gpm_guidance['recommendation']} "
-            f"(confidence: {gpm_guidance['confidence']}). "
-            "Human approval is still required."
-        )
     draft = DraftRepository(db).create(
         project.project_id,
         {
@@ -923,11 +915,7 @@ def _create_customer_quote_email_draft(
             "channel_account_id": project.channel_account_id or "",
             "target_peer_id": project.customer_id or "",
             "target_role": "customer",
-            "message_text": (
-                "We have received supplier quotes. Here are the current options:\n\n"
-                f"{option_summary}"
-                f"{guidance_summary}\n\nPlease let us know which option you prefer."
-            ),
+            "message_text": message_text,
             "message_type": "text",
             "attachments_json": [],
             "status": "pending_approval",

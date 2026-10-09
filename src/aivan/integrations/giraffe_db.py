@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from aivan.schemas.requirement import BuyerRequirement
+from aivan.integrations.giraffe_db_auth import ServiceAuthError, service_auth_for_tenant
 from aivan.utils.env import env_bool
 from aivan.schemas.rfq import GiraffeContext
 from aivan.sourcing.supplier_models import SupplierProfile
@@ -76,12 +77,12 @@ class GiraffeDBClient:
         production = os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
         if production and not self.uses_remote_data_api:
             raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_ENDPOINT_REQUIRED")
-        if self.uses_remote_data_api and not os.environ.get("GIRAFFE_DB_SERVICE_AUTH_SECRET", "").strip():
-            raise GiraffeDBContextError("GIRAFFE_DB_CONTEXT_AUTH_REQUIRED")
+        if self.uses_remote_data_api:
+            _giraffe_db_service_headers(self.tenant_id, require_auth=True)
 
     def _remote_get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         self._validate_context_configuration()
-        headers = _giraffe_db_service_headers(self.tenant_id)
+        headers = _giraffe_db_service_headers(self.tenant_id, require_auth=True)
         try:
             with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
                 response = client.get(f"{self.base_url}{path}", params=params, headers=headers)
@@ -315,9 +316,16 @@ def _supplier_profile_from_data_api(record: dict[str, Any]) -> SupplierProfile:
     )
 
 
-def _giraffe_db_service_headers(tenant_id: str, idempotency_key: str = "") -> dict[str, str]:
+def _giraffe_db_service_headers(
+    tenant_id: str, idempotency_key: str = "", *, require_auth: bool = False
+) -> dict[str, str]:
     headers = {"X-Service-Tenant-ID": tenant_id}
-    service_auth = os.environ.get("GIRAFFE_DB_SERVICE_AUTH_SECRET")
+    try:
+        service_auth = service_auth_for_tenant(tenant_id, required=require_auth)
+    except ServiceAuthError as exc:
+        raise GiraffeDBContextError(
+            f"GIRAFFE_DB_CONTEXT_AUTH_{exc.reason.upper()}"
+        ) from None
     if service_auth:
         headers["X-Service-Auth"] = service_auth
     if idempotency_key:

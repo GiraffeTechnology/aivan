@@ -93,6 +93,7 @@ clawhub package link .
 | `AIVAN_ROLE_CONTEXT` | Production | *(none)* | Static Core role context for the service actor |
 | `AIVAN_CONVERSATION_ROLE` | No | *(none)* | Static conversation role for the service actor |
 | `AIVAN_EXECUTION_MODE` | No | *(none)* | Static execution mode for the service actor |
+| `AIVAN_CHANNEL_ACCOUNT_ID` | Production channel binding | *(none)* | Trusted channel account for this plugin process |
 
 `aivan.forwardEvent` supplies a stable `Idempotency-Key`, so connection, 429 and
 5xx failures can be retried without duplicating an inbound event. Approval and
@@ -101,15 +102,25 @@ user-visible `AIVAN_*` error codes with a `retryable` flag.
 
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
 
-### Stage 3 trusted-identity limitation
+### Service and participant identity
 
-The identity variables above are read from the process environment and apply to
-every message handled by that OpenClaw process. Stage 3 does **not** map an
-individual WeChat participant to a trusted AIVAN actor or role. Do not enable this
-bridge for production multi-participant role attribution until Stage 4 adds a
-per-channel/per-participant trust binding. In production mode, missing required
-service identity values fail closed; using one fixed identity does not make every
-participant that identity. AIVAN Core RBAC and human approval remain mandatory.
+The process environment supplies the static service identity. The current bridge
+separately derives a participant ID from the event channel, account (or `default`)
+and sender, and sends participant role/conversation headers. Internal/operator
+role aliases are reduced to buyer for participant attribution; they do not grant
+operator capabilities. Aivan Core still authenticates the service, binds the
+tenant/account and enforces role and object access.
+
+This supersedes the historical Stage 3 statement that every message has only one
+service identity. It does not establish a live provider's sender authenticity.
+The upstream gateway must supply trustworthy sender, account and role metadata;
+missing SDK metadata and fallback identities require integration validation.
+The checked-in gateway harness uses synthetic inputs, not real IM accounts.
+
+The legacy `content/from_user/room_id` callback is a supported input shape, not
+proof of a personal WeChat or WeCom connection. No WeCom-specific login, signature
+verification or account connector is implemented in this bridge. Account access
+belongs to the configured OpenClaw gateway; do not bypass platform restrictions.
 
 ---
 

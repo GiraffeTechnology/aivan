@@ -54,7 +54,7 @@ def preview_draft(draft_id: str, body: PreviewRequest, request: Request,
     return JSONResponse({
         "draft_id": draft.draft_id, "case_id": draft.project_id, "preview_id": record.audit_id,
         "target_language": rendered.target_language,
-        "sender": sender_identity(draft), "recipient": draft.target_peer_id,
+        "sender": sender_identity(draft, manual), "recipient": draft.target_peer_id,
         "channel": draft.channel, "channel_account_id": draft.channel_account_id,
         "message_text": rendered.message_text, "rendered_sha256": rendered.rendered_sha256,
         "source_sha256": rendered.source_sha256, "approval_required": True,

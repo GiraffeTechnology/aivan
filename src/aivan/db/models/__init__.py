@@ -43,3 +43,9 @@ __all__ = [
     "CaseMessageRecord",
     "CaseParticipantRecord",
 ]
+
+# Preserve case-sensitive tenant/record identity on the required MySQL backend.
+# These dialect options affect fresh table DDL only; existing data is not altered.
+for _table in Base.metadata.tables.values():
+    _table.dialect_options["mysql"]["charset"] = "utf8mb4"
+    _table.dialect_options["mysql"]["collate"] = "utf8mb4_bin"
