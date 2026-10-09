@@ -82,13 +82,13 @@ assert("reject tool is optional", toolOptions.get("aivan.rejectDraft")?.optional
 assert("Agent Harness registered", harness?.id === "openclaw-aivan");
 
 const nonTrade = { prompt: "What is the weather today?", sessionId: "non-trade" };
-assert("supports rejects non-trade messages", harness.supports(nonTrade).supported === false);
+assert("supports rejects automatic runtime selection", harness.supports({ provider: "test-provider", modelId: "test-model", requestedRuntime: "auto" }).supported === false);
 const beforePassThrough = invokeCount;
 const passThrough = await harness.runAttempt(nonTrade);
-assert("non-trade messages explicitly pass through", passThrough.assistantTexts.length === 0 && invokeCount === beforePassThrough);
+assert("selected harness makes no Core call and returns no reply for non-trade messages", passThrough.assistantTexts.length === 0 && invokeCount === beforePassThrough);
 
 const trade = { prompt: "Please source suppliers and request for quotation for 5,000 shirts", sessionId: "trade-1", senderId: "buyer-1", channel: "weixin", metadata: { intent: "trade-sourcing" } };
-assert("supports accepts shared trade-sourcing intent", harness.supports(trade).supported === true);
+assert("supports accepts explicit AIVAN runtime selection without a prompt", harness.supports({ provider: "test-provider", modelId: "test-model", requestedRuntime: "openclaw-aivan" }).supported === true);
 mode = "success";
 const attempt = await harness.runAttempt(trade);
 assert("trade attempt is captured without automatic outbound reply", attempt.assistantTexts.length === 0 && attempt.didSendViaMessagingTool === true && attempt.outboundAuthorization === "required");

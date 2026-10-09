@@ -51,6 +51,11 @@ Authorized channel action / manual IM relay
 
 ## Install
 
+For the unpublished explicit-routing compatibility candidate, review
+[existing Gateway reuse](EXISTING_GATEWAY_REUSE.md) before changing a working
+WeChat installation. The candidate does not install or upgrade Tencent's channel
+plugin, log in an account, or enable automatic replies.
+
 ### 1. Install and run AIVAN locally
 
 ```bash
@@ -167,8 +172,10 @@ OpenClaw has no generic numeric priority field for skills. The explicit
 invocation, and the skill description carries the same first-match rule in the
 eligible-skill catalog. The Agent Harness `supports()` phase receives
 provider/model facts rather than the inbound prompt, so it is not used to fake
-message-level skill priority. Outside the shared boundary the workflow must
-explicitly pass through. Neither mechanism authorizes outbound delivery.
+message-level skill priority. Once explicitly selected, a non-trade attempt
+returns no reply and makes no Core call; this does not replay the turn through
+another runtime. The workflow boundary metadata is not an SDK handoff. Neither
+mechanism authorizes outbound delivery.
 
 The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the action to the AIVAN API, which enforces the policy server-side.
 
