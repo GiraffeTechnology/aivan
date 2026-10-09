@@ -435,8 +435,8 @@ function extractPrompt(params) {
     ];
     return candidates.find((v) => typeof v === "string" && v.trim().length > 0)?.trim() ?? "";
 }
-// This is the single runtime boundary consumed by both supports() and
-// runAttempt(). The SKILL artifact references the same JSON contract.
+// Message intent is checked in runAttempt(), after explicit runtime selection.
+// The SKILL artifact references the same JSON contract.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isTradeSourcingIntent(params) {
     const structured = String(params?.metadata?.intent ?? params?.intent ?? "").toLowerCase();
@@ -489,7 +489,7 @@ function extractSessionContext(params) {
     return ctx;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildPassThroughResult(params) {
+function buildEmptyAttemptResult(params) {
     const sessionId = typeof params?.sessionId === "string" ? params.sessionId : "";
     return {
         aborted: false,
@@ -519,7 +519,7 @@ function buildPassThroughResult(params) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildNoOutboundResult(params) {
     return {
-        ...buildPassThroughResult(params),
+        ...buildEmptyAttemptResult(params),
         didSendViaMessagingTool: true,
         aivanHandled: true,
         outboundAuthorization: "required",
@@ -541,14 +541,16 @@ export function register(api) {
         api.registerAgentHarness({
             id: "openclaw-aivan",
             label: "AIVAN Agent Harness",
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            // The SDK selects harnesses before it supplies a message prompt. AIVAN
+            // must be explicitly routed; it never claims arbitrary model providers.
+            autoSelection: { providerIds: [] },
             supports(ctx) {
-                const supported = isTradeSourcingIntent(ctx);
+                const supported = ctx.requestedRuntime === "openclaw-aivan";
                 return {
                     supported,
                     reason: supported
-                        ? "Matched the shared AIVAN trade-sourcing intent boundary."
-                        : "Non-trade message: explicit pass-through to the next OpenClaw harness.",
+                        ? "Explicit AIVAN runtime selected; trade intent is checked per attempt."
+                        : "AIVAN requires explicit openclaw-aivan runtime selection.",
                 };
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -557,12 +559,12 @@ export function register(api) {
                 try {
                     const prompt = extractPrompt(params);
                     if (!prompt) {
-                        process.stderr.write("[aivan] runAttempt: no prompt found in params, returning pass-through\n");
-                        return buildPassThroughResult(params);
+                        process.stderr.write("[aivan] runAttempt: no prompt found in params, returning an empty attempt\n");
+                        return buildEmptyAttemptResult(params);
                     }
                     if (!isTradeSourcingIntent(params)) {
-                        process.stderr.write("[aivan] runAttempt: outside trade-sourcing boundary, returning pass-through\n");
-                        return buildPassThroughResult(params);
+                        process.stderr.write("[aivan] runAttempt: outside trade-sourcing boundary, no Core call or reply\n");
+                        return buildEmptyAttemptResult(params);
                     }
                     matchedTrade = true;
                     const ctx = extractSessionContext(params);
@@ -616,7 +618,7 @@ export function register(api) {
                     process.stderr.write(`[aivan] runAttempt unexpected error: ${String(err)}\n`);
                     return matchedTrade
                         ? buildNoOutboundResult(params)
-                        : buildPassThroughResult(params);
+                        : buildEmptyAttemptResult(params);
                 }
             },
         });

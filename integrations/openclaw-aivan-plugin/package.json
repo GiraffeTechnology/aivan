@@ -31,7 +31,7 @@
   "scripts": {
     "build": "tsc && node -e \"const fs=require('node:fs'); for (const file of ['intent-boundary.json','workflow.json']) fs.copyFileSync(file,'dist/'+file)\"",
     "typecheck": "tsc --noEmit",
-    "test": "node test-gateway-harness.mjs",
+    "test": "node test-gateway-harness.mjs && node --test test-selection-contract.mjs",
     "pack:check": "npm pack --dry-run",
     "prepack": "npm run build"
   },
@@ -43,6 +43,7 @@
     "README.md",
     "SECURITY.md",
     "COMPATIBILITY.md",
+    "EXISTING_GATEWAY_REUSE.md",
     "release-manifest.json"
   ],
   "peerDependencies": {

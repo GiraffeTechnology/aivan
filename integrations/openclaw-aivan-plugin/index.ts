@@ -12,6 +12,7 @@
  */
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import type { AgentHarness } from "openclaw/plugin-sdk/agent-harness";
 import { Type } from "typebox";
 import { createHash } from "node:crypto";
 import intentBoundary from "./intent-boundary.json" with { type: "json" };
@@ -602,8 +603,8 @@ function extractPrompt(params: any): string {
   )?.trim() ?? "";
 }
 
-// This is the single runtime boundary consumed by both supports() and
-// runAttempt(). The SKILL artifact references the same JSON contract.
+// Message intent is checked in runAttempt(), after explicit runtime selection.
+// The SKILL artifact references the same JSON contract.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isTradeSourcingIntent(params: any): boolean {
   const structured = String(
@@ -683,7 +684,7 @@ function extractSessionContext(params: any): {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildPassThroughResult(params: any): any {
+function buildEmptyAttemptResult(params: any): any {
   const sessionId: string = typeof params?.sessionId === "string" ? params.sessionId : "";
   return {
     aborted: false,
@@ -714,7 +715,7 @@ function buildPassThroughResult(params: any): any {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildNoOutboundResult(params: any): any {
   return {
-    ...buildPassThroughResult(params),
+    ...buildEmptyAttemptResult(params),
     didSendViaMessagingTool: true,
     aivanHandled: true,
     outboundAuthorization: "required",
@@ -741,15 +742,17 @@ export function register(api: any): void {
     api.registerAgentHarness({
       id: "openclaw-aivan",
       label: "AIVAN Agent Harness",
+      // The SDK selects harnesses before it supplies a message prompt. AIVAN
+      // must be explicitly routed; it never claims arbitrary model providers.
+      autoSelection: { providerIds: [] },
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      supports(ctx: any): { supported: boolean; reason?: string } {
-        const supported = isTradeSourcingIntent(ctx);
+      supports(ctx: Parameters<AgentHarness["supports"]>[0]): ReturnType<AgentHarness["supports"]> {
+        const supported = ctx.requestedRuntime === "openclaw-aivan";
         return {
           supported,
           reason: supported
-            ? "Matched the shared AIVAN trade-sourcing intent boundary."
-            : "Non-trade message: explicit pass-through to the next OpenClaw harness.",
+            ? "Explicit AIVAN runtime selected; trade intent is checked per attempt."
+            : "AIVAN requires explicit openclaw-aivan runtime selection.",
         };
       },
 
@@ -761,16 +764,16 @@ export function register(api: any): void {
 
           if (!prompt) {
             process.stderr.write(
-              "[aivan] runAttempt: no prompt found in params, returning pass-through\n"
+              "[aivan] runAttempt: no prompt found in params, returning an empty attempt\n"
             );
-            return buildPassThroughResult(params);
+            return buildEmptyAttemptResult(params);
           }
 
           if (!isTradeSourcingIntent(params)) {
             process.stderr.write(
-              "[aivan] runAttempt: outside trade-sourcing boundary, returning pass-through\n"
+              "[aivan] runAttempt: outside trade-sourcing boundary, no Core call or reply\n"
             );
-            return buildPassThroughResult(params);
+            return buildEmptyAttemptResult(params);
           }
 
           matchedTrade = true;
@@ -842,10 +845,10 @@ export function register(api: any): void {
           );
           return matchedTrade
             ? buildNoOutboundResult(params)
-            : buildPassThroughResult(params);
+            : buildEmptyAttemptResult(params);
         }
       },
-    });
+    } satisfies AgentHarness);
 
     process.stderr.write(
       "[aivan] registerAgentHarness registered successfully\n"
