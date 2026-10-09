@@ -12,7 +12,12 @@ pydantic-settings
 py3langid==0.4.0
 ctranslate2
 sentencepiece
-# abcdYi fulfillment API uses SQLite locally; PostgreSQL drivers are not bundled.
+# SQL drivers are runtime dependencies; the target never installs packages.
+aiomysql
+asyncpg
+psycopg[binary]
+psycopg2-binary
+# SQLite remains an explicit disposable unit-test compatibility profile only.
 aiosqlite>=0.22.1
 PyJWT[crypto]>=2.15.1
 cryptography>=50.0.2

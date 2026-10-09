@@ -371,6 +371,15 @@ async def healthz() -> dict:
     }
 
 
+@router.get("/readiness")
+async def tenant_readiness(tenant_id: str = Depends(require_auth)) -> dict:
+    """Recheck authenticated provider access without writing business records."""
+    ready = _packet_store.ensure_tenant_ready(tenant_id, force_probe=True)
+    if not ready:
+        raise HTTPException(status_code=503, detail={"error": "GPM_PERSISTENCE_UNAVAILABLE"})
+    return {"status": "ok", "tenant_id": tenant_id, "packet_persistence": "durable"}
+
+
 @router.get("/capabilities")
 async def capabilities() -> dict:
     has_secret = bool(os.environ.get("AIVAN_AUTH_SECRET"))

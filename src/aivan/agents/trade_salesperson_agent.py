@@ -9,6 +9,7 @@ from aivan.agents.clarification_agent import generate_clarification_message
 from aivan.agents.supplier_inquiry_agent import draft_supplier_inquiry
 from aivan.agents.supplier_response_agent import parse_supplier_reply
 from aivan.agents.buyer_option_agent import generate_buyer_options
+from aivan.pricing.customer_quote import format_customer_quote_draft
 from aivan.sourcing.supplier_matcher import match_suppliers_for_requirement
 from aivan.sourcing.supplier_registry import list_active as list_active_suppliers
 from aivan.sourcing.marketplaces.search_query_builder import build_marketplace_queries
@@ -259,10 +260,6 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
 
     drafts_created = []
     if options:
-        option_summary = "\n".join(
-            f"{opt.option_label}: {opt.reasoning} | Lead time: {opt.lead_time_estimate.expected_days if opt.lead_time_estimate else 'N/A'} days | Price: {opt.quote.buyer_unit_price if opt.quote else 'N/A'} {opt.quote.currency if opt.quote else ''}"
-            for opt in options
-        )
         draft_id = create_draft_in_db(
             db_session=db_session,
             project_id=project_id,
@@ -270,7 +267,7 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
             channel=event.channel,
             target_peer_id=project.customer_id,
             target_role="customer",
-            message_text=f"We have received supplier quotes. Here are your Top-3 options:\n\n{option_summary}\n\nPlease let us know which option you prefer.",
+            message_text=format_customer_quote_draft(options, requirement),
             created_by_agent="buyer_option_agent",
         )
         drafts_created.append(draft_id)
@@ -286,4 +283,3 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
         buyer_options=options,
         lead_time_estimates=[lt],
     )
-

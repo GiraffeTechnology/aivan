@@ -7,6 +7,7 @@ from aivan.schemas.leadtime import LeadTimeEstimate
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import BUYER_OPTION_SYSTEM
 from aivan.pricing.quote_calculator import calculate_buyer_quote
+from aivan.pricing.customer_quote import deadline_warning
 from aivan.pricing.margin import should_hide_supplier_identity, should_hide_supplier_price, get_default_margin_rate
 from aivan.utils.ids import new_id
 from aivan.execution.source_quote import source_quote_reference
@@ -136,8 +137,10 @@ def generate_buyer_options(
                 "Quote currencies or unit bases are not directly comparable; "
                 "no lowest-cost ranking was applied."
             )
-        if lt and lt.deadline_feasible is False:
-            warnings.append(f"Lead time ({lt.expected_days} days) exceeds your deadline ({requirement.delivery_days} days).")
+        if lt:
+            warning = deadline_warning(lt, requirement.delivery_days)
+            if warning:
+                warnings.append(warning)
         if reply.moq and requirement.quantity and requirement.quantity < reply.moq:
             warnings.append(f"Your order quantity ({requirement.quantity}) is below supplier MOQ ({reply.moq}).")
         if lt and "lead_time_too_aggressive" in (getattr(reply, "risks", []) or []):
@@ -179,9 +182,10 @@ def generate_buyer_options(
 
     if by_lt:
         r, lt, _, lt_s, p_s = by_lt[0]
-        reason = f"Fastest option: {'estimated ' + str(lt.expected_days) + ' days delivery' if lt else 'shortest stated lead time'}"
-        if lt and lt.deadline_feasible is False:
-            reason += f" (WARNING: may not meet {requirement.delivery_days}-day deadline)"
+        reason = f"Fastest option by expected lead time: {lt.expected_days} days."
+        warning = deadline_warning(lt, requirement.delivery_days)
+        if warning:
+            reason += f" {warning}"
         opt = make_option(r, lt, "fastest", "Option A — Fastest", reason)
         result_options.append(opt)
         added.add(reply_key(r))

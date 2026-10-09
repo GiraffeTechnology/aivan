@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 from aivan.api.main import app
 from aivan.app.ui_catalog import (
     GENERATED_LOCALES,
+    AUTHORITATIVE_ENGLISH,
     POLICY_VERSION,
     SCHEMA_VERSION,
     canonical_messages,
@@ -105,11 +107,30 @@ def test_python_and_browser_authoritative_english_manifests_are_identical():
     start = javascript.index(marker) + len(marker)
     end = javascript.index(end_marker, start)
     browser_manifest = ast.literal_eval(javascript[start:end].strip().removesuffix(";"))
-    assert len(browser_manifest) == 139
+    assert len(browser_manifest) == 144
     assert browser_manifest == {
         source: canonical_messages()[message_id]
         for source, message_id in source_map().items()
     }
+
+
+def test_all_literal_localized_browser_handles_have_authoritative_english():
+    root = Path(__file__).resolve().parents[1] / "src/aivan/app/static"
+    pattern = re.compile(r"\b(?:t|ht)\(\s*('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")")
+    missing = []
+    for path in root.glob("*.js"):
+        for match in pattern.finditer(path.read_text(encoding="utf-8")):
+            handle = ast.literal_eval(match.group(1))
+            if any("\u3400" <= char <= "\u9fff" for char in handle):
+                if handle not in AUTHORITATIVE_ENGLISH:
+                    missing.append((path.name, handle))
+    assert missing == [], "New localized control handles need their English source mapping"
+
+
+def test_rejection_controls_and_failure_messages_use_english_source():
+    assert AUTHORITATIVE_ENGLISH["\u62d2\u7edd"] == "Reject"
+    assert AUTHORITATIVE_ENGLISH["\u62d2\u7edd\u5931\u8d25\uff1a"] == "Rejection failed: "
+    assert AUTHORITATIVE_ENGLISH["\u6d4b\u8bd5\u8d26\u53f7\u4e0d\u53ef\u7528"] == "Test account is unavailable"
 
 
 @pytest.mark.parametrize("locale", GENERATED_LOCALES)

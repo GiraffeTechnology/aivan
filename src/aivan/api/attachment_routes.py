@@ -171,6 +171,8 @@ def upload_attachment(case_id: str, body: Upload, request: Request,
         saved = AttachmentClient(context.tenant_id, context.trace_id).create(
             provider_case, name, body.content_type, content,
             "att_" + hashlib.sha256(f"{context.tenant_id}:{context.actor_id}:{case_id}:{key}".encode()).hexdigest(),
+            source_sha256=body.sha256,
+            source_name_sha256=hashlib.sha256(body.file_name.encode("utf-8")).hexdigest(),
         )
     except AttachmentError as error:
         _raise_provider(error, context)

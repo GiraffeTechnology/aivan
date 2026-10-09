@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from aivan.integrations.giraffe_db_auth import ServiceAuthError, service_auth_for_tenant
 from aivan.integrations.transport_safety import reject_test_transport_in_production
 
 _DEFAULT_TRANSPORT: httpx.BaseTransport | None = None
@@ -32,9 +33,14 @@ class AttachmentClient:
         self.tenant = safe_identity(tenant_id)
         self.trace = safe_identity(trace_id)
         self.base = os.environ.get("GIRAFFE_DB_BASE_URL", "").strip().rstrip("/")
-        self.auth = os.environ.get("GIRAFFE_DB_SERVICE_AUTH_SECRET", "").strip()
-        if not self.base or not self.auth:
+        if not self.base:
             raise AttachmentError("ATTACHMENT_PROVIDER_NOT_CONFIGURED")
+        try:
+            self.auth = service_auth_for_tenant(self.tenant)
+        except ServiceAuthError as exc:
+            code = ("ATTACHMENT_PROVIDER_NOT_CONFIGURED" if exc.reason == "required"
+                    else "ATTACHMENT_PROVIDER_AUTH_INVALID")
+            raise AttachmentError(code) from None
         try:
             endpoint = urlsplit(self.base)
         except ValueError as exc:
@@ -43,8 +49,6 @@ class AttachmentClient:
                 or endpoint.scheme not in {"http", "https"}
                 or (endpoint.scheme == "http" and endpoint.hostname not in {"127.0.0.1", "localhost", "::1"})):
             raise AttachmentError("ATTACHMENT_PROVIDER_CONFIGURATION_INVALID")
-        if not self.auth.isascii():
-            raise AttachmentError("ATTACHMENT_PROVIDER_AUTH_INVALID")
         self.transport = transport if transport is not None else _DEFAULT_TRANSPORT
         reject_test_transport_in_production(self.transport, component="attachment")
 
@@ -85,7 +89,7 @@ class AttachmentClient:
             raise AttachmentError("ATTACHMENT_READBACK_INVALID")
         return data
 
-    def create(self, case_id, name, media_type, content, key):
+    def create(self, case_id, name, media_type, content, key, *, source_sha256=None, source_name_sha256=None):
         safe_identity(case_id)
         digest = hashlib.sha256(content).hexdigest()
         payload = {"procurement_case_id": case_id, "file_name": name,
@@ -93,6 +97,11 @@ class AttachmentClient:
                    "sha256": digest,
                    # Request correlation changes on retry; persisted operation lineage must not.
                    "source_trace_id": "attachment_" + hashlib.sha256(f"{self.tenant}:{key}".encode()).hexdigest()[:48]}
+        lineage = {"source_sha256": source_sha256, "source_name_sha256": source_name_sha256}
+        lineage = {field: value for field, value in lineage.items() if value is not None}
+        if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in lineage.values()):
+            raise AttachmentError("ATTACHMENT_SOURCE_HASH_INVALID", 422)
+        payload.update(lineage)
         response = self._request("POST", "/api/data/attachments", body=payload, key=key)
         try:
             saved = self._metadata(response, case_id)
@@ -100,7 +109,7 @@ class AttachmentClient:
         except AttachmentError as exc:
             raise AttachmentError("ATTACHMENT_INDETERMINATE_COMMIT") from exc
         expected = {"file_name": name, "content_type": media_type,
-                    "size_bytes": len(content), "sha256": digest}
+                    "size_bytes": len(content), "sha256": digest, **lineage}
         if saved != readback or any(readback.get(k) != v for k, v in expected.items()):
             raise AttachmentError("ATTACHMENT_INDETERMINATE_COMMIT")
         return readback

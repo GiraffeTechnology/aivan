@@ -45,13 +45,16 @@ resolved by pip. GitHub Actions dependencies use commit pins.
   Every scan uses `--error --strict --oss-only`, with per-rule/file timeouts.
   Reported parse errors, skipped rules, unexpected exit statuses, missing/invalid reports,
   timeouts, empty target sets and incomplete target/rule coverage fail the job.
-- **Dependencies:** OSV scans every tracked `uv.lock` and `package-lock.json`,
-  including development dependencies. This is a full resolved-lockfile scan,
+- **Dependencies:** OSV scans every tracked `uv.lock`, `package-lock.json` and installer
+  `requirements.lock`, including development dependencies present in those locks.
+  This is a full resolved-lockfile scan,
   rather than GitHub Dependency Review's pull-request dependency delta. Both
   ecosystems must be present and nonempty. `--all-packages --all-vulns` reports
   the full inventory and findings; the wrapper verifies every registry package
-  and version from each lockfile is represented. No vulnerability ignores are
-  configured. Any advisory finding or scanner error fails. Matching uses
+  and version from each lockfile is represented. The installer requirements parser
+  requires exact versions and SHA-256 hashes and rejects unparsed or duplicate
+  dependency entries; OSV uses its explicit `requirements.txt` parser for that
+  `.lock` filename. No vulnerability ignores are configured. Any advisory finding or scanner error fails. Matching uses
   `--offline`: no package identity/version, source or credential is sent to an
   external vulnerability service. Before scanning, CI downloads the complete
   public PyPI and npm database archives from fixed URLs; the downloads contain
@@ -134,20 +137,44 @@ finding cannot inherit an exception.
   test/API destinations or fixed localhost URLs, with explicit timeouts. Their
   URL inputs are not application request input. The generic urllib rule matches
   all such uses. These exact two files account for two and three findings.
-- Eight web-only JavaScript runtime tests contain twelve exact filesystem reads
+- Nine web-only JavaScript runtime tests contain fourteen exact filesystem reads
   of literal application source/template URLs resolved from `import.meta.url`.
   Inquiry, conversation, upload and clipboard fixtures never control those paths.
   Each reviewed rule/path is bound to its own whole-file digest and exact count,
-  not a blanket test exclusion. The GPM smoke-script review was refreshed after
-  synthetic request fields changed; its three operator-selected/localhost URL
-  destinations and explicit timeouts are unchanged. Scanner reports retain all
-  seventeen WARNING findings (five urllib calls and twelve source-file reads).
-  Content drift, a new matching occurrence, or an unrelated rule still fails.
+  not a blanket test exclusion. The draft-preview test review was refreshed after
+  asynchronous preview/copy and focus-recovery regressions; its single literal
+  source read is unchanged. The GPM smoke-script review retains its three
+  operator-selected/localhost URL destinations and explicit timeouts.
+- The installer builder has two SHA-1 matches that reconstruct existing Git
+  tree/blob object IDs with `usedforsecurity=False`, and its synthetic test has
+  one equivalent Git blob fixture. Payload, wheel and installer integrity use
+  SHA-256. Two builder subprocess matches invoke literal `git` with separate
+  operator-selected source-directory and fixed `ls-files -z` arguments, without
+  a shell; source revision/tree IDs and safe source files are independently checked.
+- The synthetic installed-browser verifier has twelve filesystem-pattern matches.
+  Installation, package and evidence roots come from explicit operator CLI paths;
+  the resolved current release must be directly inside the real releases directory.
+  Manifest and runner reads use those paths or `__filename`; evidence filenames
+  use literals or a validated run ID plus an internal sequence. Browser content,
+  uploaded filenames and suggested download filenames do not choose local paths.
+  This review does not establish browser acceptance or authorize local restarts
+  or external delivery.
 - The main-only `myaivan-direction-policy.yml` uses `pull_request_target` to keep
   its direction guard owned by the base branch. It reads metadata with a read-only
   token, does not check out or execute PR code, and passes untrusted metadata via
   environment variables. Its single dangerous-trigger heuristic is reviewed for
   that exact content. Changing it to `pull_request` would weaken tamper resistance.
+
+The complete-candidate scan retains all thirty-six WARNING findings: five urllib
+calls, fourteen runtime-test source reads, three Git-compatible SHA-1 uses, two
+builder subprocess calls and twelve synthetic-verifier filesystem operations.
+Content drift, a new matching occurrence, or an unrelated rule still fails. The
+older `installer/runtime.py` urllib review is retained without modification but
+is unmatched in this candidate because health requests moved to the dedicated
+helper; it cannot waive another path or a different file digest. The helper's
+new credential-bearing probes require HTTPS for non-loopback destinations,
+disable proxies and reject redirects. Uncredentialed HTTP health/trace requests
+remain supported; this was checked independently of pattern scanning.
 
 The INFO-severity `assert` observations also include six `self._db is not None`
 checks in the main branch's `packet_store` methods (`save`, `get`, `update_status`,

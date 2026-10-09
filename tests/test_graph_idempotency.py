@@ -38,7 +38,20 @@ def test_graph_trace_metadata_is_deterministic():
 
 
 @pytest.mark.parametrize("tenant_id", ["", "tenant-alpha", "tenant-beta"])
-def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatch, tenant_id):
+@pytest.mark.parametrize("credential_mode", ["shared", "tenant_map"])
+def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatch, tenant_id, credential_mode):
+    import json
+
+    # Synthetic HTTP credentials, not real-provider acceptance evidence.
+    service_tenant = tenant_id or "test_tenant"
+    expected_auth = f"synthetic-graph-{service_tenant}"
+    monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", expected_auth)
+    monkeypatch.delenv("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", raising=False)
+    if credential_mode == "tenant_map":
+        monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "synthetic-unused-fallback")
+        monkeypatch.setenv("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", json.dumps({
+            service_tenant: expected_auth, "synthetic-unrelated": "synthetic-other-key",
+        }))
     monkeypatch.setenv("AIVAN_PERSIST_GIRAFFE_DB_GRAPH", "true")
     monkeypatch.setenv("GIRAFFE_DB_BASE_URL", "http://giraffe-db.test")
     if tenant_id:
@@ -53,6 +66,8 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
     def handler(request: httpx.Request) -> httpx.Response:
         import json as _json
 
+        assert request.headers["X-Service-Tenant-ID"] == service_tenant
+        assert request.headers["X-Service-Auth"] == expected_auth
         if request.method == "GET":
             lineage = {"source_trace_id": "aivan:proj_1:msg_graph_001"}
             return httpx.Response(200, json={

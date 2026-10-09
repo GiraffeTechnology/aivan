@@ -168,6 +168,11 @@ AUTHORITATIVE_ENGLISH: dict[str, str] = {
     "订单确认失败：": "Order confirmation failed: ",
     "正在加载翻译…": "Loading translation…",
     "翻译暂不可用，正在显示权威英文。": "Translation is unavailable; authoritative English is shown.",
+    "\u6d4b\u8bd5\u8d26\u53f7\u4e0d\u53ef\u7528": "Test account is unavailable",
+    "\u62d2\u7edd": "Reject",
+    "\u786e\u8ba4\u62d2\u7edd\u5f53\u524d\u8349\u7a3f\u5e76\u8fd4\u56de\u4fee\u8ba2\uff1f": "Reject the current draft and return it for revision?",
+    "\u5df2\u62d2\u7edd\uff0c\u6848\u4f8b\u53ef\u7ee7\u7eed\u4fee\u8ba2": "Draft rejected; the case can be revised",
+    "\u62d2\u7edd\u5931\u8d25\uff1a": "Rejection failed: ",
 }
 
 

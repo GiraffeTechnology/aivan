@@ -16,6 +16,7 @@ from urllib.parse import quote as quote_path_segment
 import httpx
 
 from aivan.domain.roles import ActorIdentity
+from aivan.integrations.giraffe_db_auth import ServiceAuthError, service_auth_for_tenant
 from aivan.integrations.transport_safety import reject_test_transport_in_production
 
 
@@ -89,9 +90,6 @@ class GiraffeDBOrderConfirmationClient:
             trace_id, code="ORDER_CONFIRMATION_TRACE_REQUIRED"
         )
         self.base_url = os.environ.get("GIRAFFE_DB_BASE_URL", "").strip().rstrip("/")
-        self.service_auth = os.environ.get(
-            "GIRAFFE_DB_SERVICE_AUTH_SECRET", ""
-        ).strip()
         self.timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
         self._transport = transport if transport is not None else _DEFAULT_TRANSPORT
         reject_test_transport_in_production(
@@ -99,12 +97,12 @@ class GiraffeDBOrderConfirmationClient:
         )
         if not self.base_url:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_ENDPOINT_REQUIRED")
-        if not self.service_auth:
-            raise OrderConfirmationError("ORDER_CONFIRMATION_DB_AUTH_REQUIRED")
         try:
-            self.service_auth.encode("ascii")
-        except UnicodeEncodeError as exc:
-            raise OrderConfirmationError("ORDER_CONFIRMATION_DB_AUTH_INVALID") from exc
+            self.service_auth = service_auth_for_tenant(self.tenant_id)
+        except ServiceAuthError as exc:
+            raise OrderConfirmationError(
+                f"ORDER_CONFIRMATION_DB_AUTH_{exc.reason.upper()}"
+            ) from None
 
     def _headers(self, *, idempotency_key: str = "") -> dict[str, str]:
         headers = {

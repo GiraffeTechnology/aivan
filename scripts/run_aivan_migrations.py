@@ -84,6 +84,24 @@ def apply(
         raise ValueError("candidate SHA must be 40 lowercase hexadecimal characters")
     if _checkout_commit(repository_root) != candidate_sha:
         raise ValueError("candidate SHA does not match the executing Git checkout")
+    return _apply_verified_candidate(database_url, tenant_id=tenant_id, candidate_sha=candidate_sha,
+        authorization_reference=authorization_reference, backup_reference=backup_reference,
+        bootstrap_empty=bootstrap_empty)
+
+
+def _apply_verified_candidate(
+    database_url: str,
+    *,
+    tenant_id: str,
+    candidate_sha: str,
+    authorization_reference: str,
+    backup_reference: str,
+    bootstrap_empty: bool = False,
+) -> dict:
+    # The source CLI verifies Git; the packaged installer verifies its complete
+    # immutable payload inventory before calling this internal shared operation.
+    if not _SHA.fullmatch(candidate_sha):
+        raise ValueError("candidate SHA must be 40 lowercase hexadecimal characters")
     if not tenant_id.strip():
         raise ValueError("verified tenant id is required")
     if not authorization_reference.strip() or not backup_reference.strip():

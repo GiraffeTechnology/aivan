@@ -31,7 +31,7 @@ class InstallerReview(unittest.TestCase):
         return target
     def installed(self):
         m.check_root(self.root, initialize=True)
-        m.install(self.root,self.payload('v1'),['tenant-a','tenant-b'],0,True)
+        m.install(self.root,self.payload('v1'),['tenant-a','tenant-b'],0,True, isolated_sqlite=True)
         return self.root
     def test_reject_extra_nested_manifest(self):
         p=self.payload('v1'); (p/'nested').mkdir(); (p/'nested/manifest.json').write_text('extra')
@@ -93,7 +93,8 @@ class InstallerReview(unittest.TestCase):
         m.write_json(self.root/'run/processes.json',foreign)
         with socket.socket() as occupied:
             occupied.bind(('127.0.0.1',config['ports']['language']));occupied.listen()
-            with self.assertRaises(OSError):m.supervise(self.root)
+            with mock.patch.object(m, 'bind_available_port', side_effect=OSError('test listener failure')):
+                with self.assertRaises(OSError):m.supervise(self.root)
         self.assertTrue((self.root/'run/processes.json').exists(),'failed supervisor deleted state it did not write')
         self.assertEqual(m.read_json(self.root/'run/processes.json'),foreign)
 
@@ -116,13 +117,16 @@ def test_installer_rejects_duplicate_tenant_credentials():
         m.validate_config(config)
 
 
-def test_installer_ctyun_reserved_port_rejected():
+def test_installer_reservations_are_environment_values(monkeypatch):
+    monkeypatch.setenv("AIVAN_RESERVED_PORTS", "443,14443")
     config = m.new_config(["tenant-a"])
     config["host_profile"] = "ctyun"
-    config["ports"]["web"] = 8443
-    import pytest
-    with pytest.raises(ValueError, match="reserved"):
-        m.validate_config(config)
+    assert config["reserved_ports"] == [443, 14443]
+    listener, selected = m.bind_available_port(14443, set(config["reserved_ports"]), set())
+    try:
+        assert selected not in config["reserved_ports"]
+    finally:
+        listener.close()
 
 
 def test_installer_environment_does_not_inherit_host_credentials(tmp_path, monkeypatch):
@@ -132,6 +136,7 @@ def test_installer_environment_does_not_inherit_host_credentials(tmp_path, monke
     rel.mkdir()
     (rel / "manifest.json").write_text(json.dumps({"components": {"aivan": {"revision": "a" * 40}}}))
     config = m.new_config(["tenant-a", "tenant-b"])
+    config["database_mode"] = "isolated"
     env = m.environment(tmp_path, rel, config)
     assert "OPENAI_API_KEY" not in env
     assert env["OPENCLAW_BASE_URL"] == ""
@@ -182,6 +187,9 @@ def test_setup_preserves_keys_and_supports_space_paths(tmp_path):
     for name in ("data", "logs", "run", "releases"):
         (root / name).mkdir()
     config = m.new_config(["tenant-a", "tenant-b"])
+    sql = tmp_path / "sql.json"
+    m.write_json(sql, {"version": 1, "databases": {name: {"url": f"mysql+{driver}://test@127.0.0.1/{name}"} for name, driver in (("aivan", "pymysql"), ("abcdyi", "aiomysql"), ("database", "pymysql"))}})
+    config["database_config_file"] = str(sql)
     m.write_json(root / "config.json", config)
     with contextlib.redirect_stdout(io.StringIO()):
         m.main(["--prefix", str(root), "setup", "--origin", "https://myaivan.com", "--model-url", "http://127.0.0.1:11434", "--model-name", "configured-model", "--host-profile", "sin"])
@@ -197,6 +205,7 @@ def test_setup_failed_restart_restores_configuration(tmp_path, monkeypatch):
     m.check_root(root, initialize=True)
     (root / "run").mkdir()
     config = m.new_config(["tenant-a"])
+    config["database_mode"] = "isolated"
     m.write_json(root / "config.json", config)
     monkeypatch.setattr(m, "status", lambda root: {"running": True})
     monkeypatch.setattr(m, "stop", lambda root: {"stopped": True})
@@ -314,6 +323,9 @@ def test_current_user_service_install_and_remove(tmp_path, monkeypatch):
 
 
 def test_restart_routes_registered_installation_through_user_systemd(tmp_path, monkeypatch):
+    config = m.new_config(["tenant-a"])
+    config["database_mode"] = "isolated"
+    m.write_json(tmp_path / "config.json", config)
     from types import SimpleNamespace
     (tmp_path / "systemd.json").write_text("{}")
     state = {"running": False}
@@ -355,6 +367,9 @@ def test_user_service_start_revalidates_owned_unit(tmp_path, monkeypatch):
 
 
 def test_registered_failed_health_stops_services_before_upgrade_restore(tmp_path, monkeypatch):
+    config = m.new_config(["tenant-a"])
+    config["database_mode"] = "isolated"
+    m.write_json(tmp_path / "config.json", config)
     from types import SimpleNamespace
     import pytest
     (tmp_path / "systemd.json").write_text("{}")
@@ -391,6 +406,7 @@ def test_five_service_upgrade_preserves_credentials_and_execution_identity():
 
 def test_five_service_rollback_preserves_sixth_service_identity_for_reupgrade(tmp_path):
     config = m.new_config(['tenant-a'])
+    config["database_mode"] = "isolated"
     old = tmp_path / 'old-release'; old.mkdir()
     (old / 'manifest.json').write_text(json.dumps({'components': {'aivan': {}}}))
     rolled_back = m.config_for_release(config, old)
@@ -403,6 +419,7 @@ def test_five_service_rollback_preserves_sixth_service_identity_for_reupgrade(tm
 
 def test_fulfillment_provider_tenant_mapping_and_jwt_secret_are_independent(tmp_path):
     config = m.new_config(['tenant-a', 'tenant-b'])
+    config["database_mode"] = "isolated"
     (tmp_path / 'manifest.json').write_text(json.dumps({'components': {'aivan': {'revision': 'a' * 40}}}))
     env = m.environment(tmp_path, tmp_path, config)
     mapping = json.loads(env['ABCDYI_PRIVATE_DATA_TENANT_MAP'])
@@ -471,7 +488,9 @@ def test_external_store_change_requires_explicit_logical_identity(tmp_path):
     import pytest
     root = tmp_path / 'server'; m.check_root(root, initialize=True)
     for name in ('data', 'logs', 'run', 'releases'): (root / name).mkdir()
-    config = m.new_config(['tenant-a']); m.write_json(root / 'config.json', config)
+    config = m.new_config(['tenant-a'])
+    config["database_mode"] = "isolated"
+    m.write_json(root / 'config.json', config)
     with pytest.raises(ValueError, match='database-provider-id'):
         m.main(['--prefix', str(root), 'setup', '--database-url', 'https://private-db.invalid'])
     assert m.read_json(root / 'config.json') == config
@@ -483,3 +502,24 @@ def test_external_store_change_requires_explicit_logical_identity(tmp_path):
     with contextlib.redirect_stdout(io.StringIO()):
         m.main(['--prefix', str(root), 'setup', '--database-url', ''])
     assert m.read_json(root / 'config.json')['private_data_provider_id'] == config['private_data_provider_id']
+
+
+def test_build_rejects_untracked_migration_and_runtime_assets(tmp_path):
+    import subprocess
+    import pytest
+    spec = importlib.util.spec_from_file_location('build_asset_guard', SOURCE.with_name('build.py'))
+    builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
+    root = tmp_path / 'source'; root.mkdir()
+    (root / 'README.md').write_text('Synthetic source fixture\n')
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'Synthetic source'], check=True)
+    revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    tree = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+    assert builder.source_evidence(root, revision, tree)['modified'] is False
+    for name in ('src/new.py', 'api/new.py', 'alembic/versions/new.py', 'generators/new.py', 'scripts/migration.py', 'installer/configuration.py'):
+        asset = root / name; asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_text('synthetic = True\n')
+        with pytest.raises(ValueError, match='Untracked application runtime'):
+            builder.source_evidence(root, revision, tree)
+        asset.unlink()

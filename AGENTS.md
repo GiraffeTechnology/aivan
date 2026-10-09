@@ -52,10 +52,10 @@ Follow [the current security scan policy](docs/SECURITY_SCANNING.md) for scanner
 
 Before handoff: identify the exact scope and revision, run relevant checks, distinguish passed/failed/skipped/not-run, record evidence and limitations, and avoid new gates. Draft PRs and docs do not prove code implementation, merge, functional acceptance or production deployment.
 
-## CTYun TCP port 443 reservation
+## Deployment listener protection
 
-On CTYun hosts, TCP port 443 is reserved for SSH. Do not configure HTTP, HTTPS, web servers, reverse proxies, or TLS listeners to bind to TCP port 443. Do not stop, rebind, replace, or otherwise disrupt SSH to free that port.
+Select service bindings from the deployment's confirmed configuration and existing listener inventory. Preserve configured reserved ports and existing SSH or other service listeners. Never stop, replace, or rebind another service to free a web port.
 
-Before selecting a web or bridge port, inspect the existing deployment and operations configuration and reuse an explicitly confirmed allocation. Do not guess a replacement port. If the allocation is unclear, report the missing configuration rather than changing a service binding.
+Host vendor or profile names do not define a product-wide forbidden-port list. Deployment-specific reservations remain operator-owned configuration. If an intended binding is unclear, report the missing configuration rather than guessing a port. Repository examples must not contain private host addresses or connection details.
 
-This constraint applies only to CTYun hosts; do not extend it to SIN or other environments without an explicit instruction. Recording this rule does not authorize server access or changes to SSH, firewalls, credentials, network settings, or security settings.
+This guidance does not authorize server access, firewall or SSH changes, credentials, account changes, service restarts, or deployments.
