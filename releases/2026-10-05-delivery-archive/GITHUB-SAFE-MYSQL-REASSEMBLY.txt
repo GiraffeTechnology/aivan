@@ -1,0 +1,32 @@
+GITHUB-SAFE SANITIZED SPLIT SET - ALL 16 PARTS
+
+Do not mix these wrappers or chunks with owner-only Drive originals. The original and sanitized full ZIP hashes differ.
+
+Extract all 16 GitHub-safe wrappers into one directory. Concatenate parts/GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip.part001 through .part016 in numeric order into GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip. Its SHA-256 must be 805ba427076dbd31fef8c7e58b794602e685f9f741db5884f5fb35002d2b404b and its size must be 131516976 bytes. The internal GITHUB-SAFE- prefix distinguishes these chunks from private originals. The wrapper filenames may have a github-safe publication suffix; internal chunk names are authoritative.
+
+
+PUBLISHED GITHUB FILENAMES AND VERIFICATION
+
+Download all 16 wrappers named
+MyAivan-MySQL-Verified-Delivery-20261004.part001-of-016-github-safe.zip
+through
+MyAivan-MySQL-Verified-Delivery-20261004.part016-of-016-github-safe.zip
+into this directory with SHA256SUMS-MYSQL-PARTS and
+SHA256SUMS-MYSQL-RECONSTRUCTED. Verify the wrappers before extraction:
+
+  sha256sum --check SHA256SUMS-MYSQL-PARTS
+
+Extract every wrapper into one common empty working directory, retaining its
+parts/ subdirectory. From that working directory concatenate the numbered
+segments in order (the three-digit suffixes give the correct lexical order):
+
+  cat parts/GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip.part??? > GITHUB-SAFE-MyAivan-MySQL-Verified-Delivery-20261004.zip
+
+Copy SHA256SUMS-MYSQL-RECONSTRUCTED into that working directory and verify:
+
+  sha256sum --check SHA256SUMS-MYSQL-RECONSTRUCTED
+
+The reconstructed full ZIP must also have exactly 131516976 bytes. Do not
+extract or use it if any wrapper, reconstructed hash or byte size differs.
+The reconstructed checksum file applies only after concatenation; the full ZIP
+is represented by the shared wrappers rather than a redundant repository blob.

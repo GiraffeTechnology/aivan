@@ -1,0 +1,131 @@
+{
+  "representation": "ZIP wrappers containing consecutive segments of the frozen GitHub-safe archive",
+  "original_filename": "myaivan-reviewed-candidate-20261004-0201fcab.zip",
+  "original_sha256": "207eb59550b897d03d9cae601f22e5a03831340ff78222189a21b723b99fd22b",
+  "reassembled_filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip",
+  "reassembled_size": 118236350,
+  "reassembled_sha256": "96f1bcbe6ab523cdfac48ecf4a3bd25f4837deda7ffe590ccc017baee8ef2e12",
+  "parts": [
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part001-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part001",
+      "size": 8388854,
+      "sha256": "db24ccb2d2afc1da395c09d537358d84998d3d0337c11636b8775efdec4ca7a2",
+      "chunk_size": 8388608,
+      "chunk_sha256": "7be0c7e2ec4fb48bf97bf83e60e2dccb49da2be33f8d06ae26cbe49d5a7cdff1"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part002-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part002",
+      "size": 8388854,
+      "sha256": "e244d2c6b4da8a5a2b70f5386b340e0fe96f410a7e424f7e64c62877ec462938",
+      "chunk_size": 8388608,
+      "chunk_sha256": "aa93119a43c335cb76b2e79252fdd1c2f4ddc32496f26991a91946b9797b8a94"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part003-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part003",
+      "size": 8388854,
+      "sha256": "a2ee89ab155c57f5b674d7d446cfd044aada706c58e53f0f2b2359aaa2003180",
+      "chunk_size": 8388608,
+      "chunk_sha256": "eca600e7ee93e57dd5a2ab480069cae692f46a4e671939bd834b25cc9be8fb45"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part004-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part004",
+      "size": 8388854,
+      "sha256": "883d8466160780ad5c32c3592442c858e9861bd818225818985422f48be2143b",
+      "chunk_size": 8388608,
+      "chunk_sha256": "f9d709c9d4276a0f8cc87454e11ce118962e945fe7fcef91f3088dcec74c4c25"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part005-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part005",
+      "size": 8388854,
+      "sha256": "9773e8bf63d1ef714a89123efce1643b2347bedd26e732205b5bcaa4399f925e",
+      "chunk_size": 8388608,
+      "chunk_sha256": "0be7862b7b3211ca7a681e190bf670a2ef9ec3bf9ce39379d4dd2b0376440744"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part006-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part006",
+      "size": 8388854,
+      "sha256": "da9ff5a72f63efa58cf1f043eef714b90657c456c74ea21c0dde0f3b677bcd05",
+      "chunk_size": 8388608,
+      "chunk_sha256": "491b864b55a6876ae5caa0dc7e7cd1cdbeea291bfc10de2a2c6a241af51c570f"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part007-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part007",
+      "size": 8388854,
+      "sha256": "6282ca0671577f33f07ff6a279aedd8af4a8484766ed15ed2bb2cc30f08d0966",
+      "chunk_size": 8388608,
+      "chunk_sha256": "510c4663ed066b9bc8db27423d79d28123be78e629ba190fcfbf29c1b9cf26b9"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part008-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part008",
+      "size": 8388854,
+      "sha256": "526ccd07131ea30e4f24e762ddecbd8cafc22dfeca31f431ffbc530ec7f77af7",
+      "chunk_size": 8388608,
+      "chunk_sha256": "df80cca7bafc5c18511394b4ea3155a80210e8764929ee85d6c6895c9496c95a"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part009-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part009",
+      "size": 8388854,
+      "sha256": "a7901cf6f57bd6f5092ff881e1e1c9d54e79c68ef95eb4018f417be8a0a3787a",
+      "chunk_size": 8388608,
+      "chunk_sha256": "49795416065bf077bb3863de817566ab827a7e986d581d657525856497a8f00b"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part010-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part010",
+      "size": 8388854,
+      "sha256": "b305b0626fb528f8730fc3d11a1e27fc220d3b792b235647bff9365742ad688b",
+      "chunk_size": 8388608,
+      "chunk_sha256": "58b7805ba3d7dbcbad77dc970cb7d2668ca7d16cef08b13ec7c6889b3029b905"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part011-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part011",
+      "size": 8388854,
+      "sha256": "8a7c7542516ea80b6179ca9cbd0f4fb6c72fdb1dd6ef6d9b66dc2c35f1c5e5d0",
+      "chunk_size": 8388608,
+      "chunk_sha256": "ced365864121b0d70e4f2046704c7ba291c5b858266d8fa15acdbd9ad5459114"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part012-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part012",
+      "size": 8388854,
+      "sha256": "60718270c2f919b860fb509a0a0290b325bddda916e8b3d51cbe1db10b33781b",
+      "chunk_size": 8388608,
+      "chunk_sha256": "02b1a2ec7b6f2236faac3815b769d08f2d512697822789727b7363aa7294de0f"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part013-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part013",
+      "size": 8388854,
+      "sha256": "d3db66aa83726d087f016368594a1ce01ec3344fd47f1a7b27d07d4e57eecd14",
+      "chunk_size": 8388608,
+      "chunk_sha256": "db134faec2c70d3d6ca85c6fad3957dba56d155b4af2827094cfd8507c69b690"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part014-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part014",
+      "size": 8388854,
+      "sha256": "26a78c8c5c303427473efe722f76a1c203f98bc81329e10bd652ca1d508d6a0b",
+      "chunk_size": 8388608,
+      "chunk_sha256": "0f4d9a2100b273a94cbce63b145e7d78d298170000e44e3909fc9923d16b731d"
+    },
+    {
+      "filename": "myaivan-reviewed-candidate-20261004-0201fcab-github-safe.part015-of-015.zip",
+      "member": "parts/myaivan-reviewed-candidate-20261004-0201fcab-github-safe.zip.part015",
+      "size": 796084,
+      "sha256": "a8a0766d19c40972bf0f237932c1750fa2d0e0b13cc0ba0f815cbe3422629479",
+      "chunk_size": 795838,
+      "chunk_sha256": "5370851909fd6258d961efe9433f914578e967cfd116a1affe2affb39933f3b8"
+    }
+  ],
+  "reassembly_verified": true
+}

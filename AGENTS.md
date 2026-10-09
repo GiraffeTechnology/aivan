@@ -59,3 +59,15 @@ On CTYun hosts, TCP port 443 is reserved for SSH. Do not configure HTTP, HTTPS, 
 Before selecting a web or bridge port, inspect the existing deployment and operations configuration and reuse an explicitly confirmed allocation. Do not guess a replacement port. If the allocation is unclear, report the missing configuration rather than changing a service binding.
 
 This constraint applies only to CTYun hosts; do not extend it to SIN or other environments without an explicit instruction. Recording this rule does not authorize server access or changes to SSH, firewalls, credentials, network settings, or security settings.
+
+## Delivery archive inventory (2026-10-05)
+
+The private delivery archive inventory and GitHub-safe publication mirrors are
+recorded in [releases/2026-10-05-delivery-archive/README.md](releases/2026-10-05-delivery-archive/README.md).
+Read the manifest, SHA-256 checksums, omission records and candidate labels before
+using any package. Sanitized mirrors have different bytes and hashes from their
+original handoffs; their publication commit is not their application source identity.
+Publication does not establish a merge, deployment, general release, current-head
+CI pass or genuine-device acceptance. Existing product, security and port rules
+remain in force.
+
