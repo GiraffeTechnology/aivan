@@ -33,6 +33,7 @@ def _settings() -> Settings:
 
 
 def _packet(*, runtime_status: str, provider: str | None) -> dict:
+    payload = _payload()
     deterministic = runtime_status == "disabled" and provider == "none"
     quote_position = "insufficient_data" if deterministic else "within_mid_range"
     confidence = "low" if deterministic else "medium"
@@ -52,7 +53,7 @@ def _packet(*, runtime_status: str, provider: str | None) -> dict:
             "quoted_total_difference": 250.0,
             "quoted_total_difference_rate": 0.17,
         }
-    return {
+    packet = {
         "packet_id": "gpm_pkt_acceptance001",
         "tenant_id": "tenant-acceptance",
         "actor_id": "aivan-service",
@@ -69,6 +70,9 @@ def _packet(*, runtime_status: str, provider: str | None) -> dict:
         "lineage": {"source_trace_id": "acceptance-trace"},
         "llm_reasoning": json.dumps({"runtime_status": runtime_status}),
     }
+    for field, value in payload.items():
+        packet[field] = json.dumps(value) if field == "evidence_ids" else value
+    return packet
 
 
 def test_actual_mode_rejects_mock_provider_identity() -> None:
@@ -187,8 +191,41 @@ def test_deterministic_mode_rejects_tampered_inputs_or_calculation(
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("case_id", "case-tampered"),
+        ("quote_id", "quote-tampered"),
+        ("sku", "SYNTH-TAMPERED"),
+        ("supplier_id", "supplier-tampered"),
+        ("supplier_quote", 12.6),
+        ("currency", "EUR"),
+        ("quantity", 101),
+        ("buyer_unit_price", 15.1),
+        ("margin_rate", 0.2),
+        ("gltg_run_id", "gltg-tampered"),
+        ("gltg_api_version", "v3"),
+        ("evidence_ids", json.dumps(["evidence-tampered"])),
+        ("notes", "tampered note"),
+    ],
+)
+def test_deterministic_mode_rejects_tampered_request_identity(
+    field: str, value: object,
+) -> None:
+    packet = _packet(runtime_status="disabled", provider="none")
+    packet[field] = value
+    with pytest.raises(AcceptanceFailure, match="deterministic model-disabled"):
+        _assert_packet(
+            packet,
+            _settings(),
+            model_mode="deterministic",
+            expected_payload=_payload(),
+        )
+
+
 def test_restart_instruction_preserves_deterministic_mode() -> None:
     instruction = _restart_instruction("deterministic")
+    assert "same GPM_ACCEPTANCE_* input environment" in instruction
     assert "--phase readback" in instruction
     assert "--packet-id <packet_id>" in instruction
     assert instruction.endswith("--model-mode deterministic")

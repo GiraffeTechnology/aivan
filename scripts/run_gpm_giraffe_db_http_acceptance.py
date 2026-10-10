@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from aivan.gpm.request_identity import matches_request
 from aivan.pricing.margin import calculate_margin_breakdown
 
 
@@ -273,6 +274,13 @@ def _assert_packet(
             or packet.get("recommendation") != "human_review_required"
             or packet.get("quote_position") != "insufficient_data"
             or packet.get("confidence") != "low"
+            or not matches_request(
+                packet,
+                expected_payload,
+                tenant_id=settings.tenant_id,
+                actor_id=settings.actor_id,
+                actor_role=settings.actor_role,
+            )
             or packet.get("supplier_total") != expected_supplier_total
             or packet.get("buyer_total") != expected_buyer_total
             or not isinstance(calculation, dict)
@@ -307,7 +315,8 @@ def _result_status(model_mode: str) -> str:
 def _restart_instruction(model_mode: str) -> str:
     _result_status(model_mode)
     return (
-        "restart services, then run --phase readback --packet-id <packet_id> "
+        "restart services, preserve the same GPM_ACCEPTANCE_* input environment, "
+        "then run --phase readback --packet-id <packet_id> "
         f"--model-mode {model_mode}"
     )
 
