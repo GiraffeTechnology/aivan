@@ -224,8 +224,9 @@ def test_deterministic_mode_rejects_tampered_request_identity(
 
 
 def test_restart_instruction_preserves_deterministic_mode() -> None:
-    instruction = _restart_instruction("deterministic")
+    instruction = _restart_instruction("deterministic", "trace-stable")
     assert "same GPM_ACCEPTANCE_* input environment" in instruction
+    assert "GPM_ACCEPTANCE_TRACE_ID=trace-stable" in instruction
     assert "--phase readback" in instruction
     assert "--packet-id <packet_id>" in instruction
     assert instruction.endswith("--model-mode deterministic")

@@ -312,10 +312,13 @@ def _result_status(model_mode: str) -> str:
         raise AcceptanceFailure("unsupported model evidence mode") from exc
 
 
-def _restart_instruction(model_mode: str) -> str:
+def _restart_instruction(model_mode: str, trace_id: str) -> str:
     _result_status(model_mode)
+    if not SAFE_VALUE.fullmatch(trace_id):
+        raise AcceptanceFailure("trace ID contains unsupported characters")
     return (
         "restart services, preserve the same GPM_ACCEPTANCE_* input environment, "
+        f"including GPM_ACCEPTANCE_TRACE_ID={trace_id}, "
         "then run --phase readback --packet-id <packet_id> "
         f"--model-mode {model_mode}"
     )
@@ -515,7 +518,10 @@ def main() -> int:
                             "phase": "full",
                             "packet_id": packet_id,
                             "model_mode": args.model_mode,
-                            "next": _restart_instruction(args.model_mode),
+                            "next": _restart_instruction(
+                                args.model_mode,
+                                settings.trace_id,
+                            ),
                         },
                         sort_keys=True,
                     )
