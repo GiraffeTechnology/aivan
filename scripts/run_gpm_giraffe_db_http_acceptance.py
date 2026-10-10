@@ -234,14 +234,48 @@ def _assert_packet(
             None,
             "",
             "mock",
+            "none",
         }:
             raise AcceptanceFailure("GPM did not use an identified live model runtime")
     elif model_mode == "mock":
         if runtime_status != "mock" or model_result.get("model_provider") != "mock":
             raise AcceptanceFailure("GPM did not use the declared mock model runtime")
+    elif model_mode == "deterministic":
+        calculation = model_result.get("calculation")
+        if (
+            runtime_status != "disabled"
+            or model_result.get("model_provider") != "none"
+            or model_result.get("model_name") is not None
+            or model_result.get("human_approval_required") is not True
+            or model_result.get("recommendation") != "human_review_required"
+            or model_result.get("quote_position") != "insufficient_data"
+            or model_result.get("confidence") != "low"
+            or packet.get("recommendation") != "human_review_required"
+            or packet.get("quote_position") != "insufficient_data"
+            or packet.get("confidence") != "low"
+            or not isinstance(calculation, dict)
+            or calculation.get("supplied_supplier_total")
+            != packet.get("supplier_total")
+            or calculation.get("supplied_buyer_total") != packet.get("buyer_total")
+        ):
+            raise AcceptanceFailure(
+                "GPM did not use the declared deterministic model-disabled runtime"
+            )
     else:
         raise AcceptanceFailure("unsupported model evidence mode")
     return packet_id
+
+
+def _result_status(model_mode: str) -> str:
+    statuses = {
+        "actual": "PASS",
+        "deterministic": "PASS_DETERMINISTIC_MODEL_DISABLED",
+        "mock": "PASS_PERSISTENCE_ONLY_MODEL_MOCK",
+    }
+    try:
+        return statuses[model_mode]
+    except KeyError as exc:
+        raise AcceptanceFailure("unsupported model evidence mode") from exc
 
 
 def provider_preflight(client: httpx.Client, settings: Settings) -> None:
@@ -396,11 +430,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--model-mode",
-        choices=("actual", "mock"),
+        choices=("actual", "deterministic", "mock"),
         default="actual",
         help=(
-            "Use actual for full model plus persistence acceptance. Use mock only "
-            "for explicitly limited persistence-path evidence."
+            "Use actual for identified live-model plus persistence acceptance; "
+            "deterministic for the real model-disabled calculation path; or mock "
+            "only for explicitly limited persistence-path evidence."
         ),
     )
     args = parser.parse_args()
@@ -416,11 +451,7 @@ def main() -> int:
                 print(
                     json.dumps(
                         {
-                            "status": (
-                                "PASS"
-                                if args.model_mode == "actual"
-                                else "PASS_PERSISTENCE_ONLY_MODEL_MOCK"
-                            ),
+                            "status": _result_status(args.model_mode),
                             "phase": "full",
                             "packet_id": packet_id,
                             "model_mode": args.model_mode,
@@ -443,11 +474,7 @@ def main() -> int:
                 print(
                     json.dumps(
                         {
-                            "status": (
-                                "PASS"
-                                if args.model_mode == "actual"
-                                else "PASS_PERSISTENCE_ONLY_MODEL_MOCK"
-                            ),
+                            "status": _result_status(args.model_mode),
                             "phase": "readback",
                             "packet_id": args.packet_id,
                             "model_mode": args.model_mode,
