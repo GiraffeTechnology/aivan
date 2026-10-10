@@ -10,6 +10,8 @@ from scripts.run_gpm_giraffe_db_http_acceptance import (
     AcceptanceFailure,
     Settings,
     _assert_packet,
+    _payload,
+    _restart_instruction,
     _result_status,
 )
 
@@ -114,6 +116,7 @@ def test_deterministic_mode_accepts_only_explicit_model_disabled_evidence() -> N
         _packet(runtime_status="disabled", provider="none"),
         _settings(),
         model_mode="deterministic",
+        expected_payload=_payload(),
     )
     assert packet_id == "gpm_pkt_acceptance001"
 
@@ -130,6 +133,7 @@ def test_deterministic_mode_rejects_mock_live_or_named_provider_evidence(
             _packet(runtime_status=runtime_status, provider=provider),
             _settings(),
             model_mode="deterministic",
+            expected_payload=_payload(),
         )
 
 
@@ -137,7 +141,57 @@ def test_deterministic_mode_rejects_a_model_name() -> None:
     packet = _packet(runtime_status="disabled", provider="none")
     packet["model_result"]["model_name"] = "unexpected-model"
     with pytest.raises(AcceptanceFailure, match="deterministic model-disabled"):
-        _assert_packet(packet, _settings(), model_mode="deterministic")
+        _assert_packet(
+            packet,
+            _settings(),
+            model_mode="deterministic",
+            expected_payload=_payload(),
+        )
+
+
+def test_deterministic_mode_rejects_inconsistent_model_runtime_status() -> None:
+    packet = _packet(runtime_status="disabled", provider="none")
+    packet["model_result"]["runtime_status"] = "available"
+    with pytest.raises(AcceptanceFailure, match="deterministic model-disabled"):
+        _assert_packet(
+            packet,
+            _settings(),
+            model_mode="deterministic",
+            expected_payload=_payload(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("supplier_total", 1251.0),
+        ("buyer_total", 1501.0),
+        ("quoted_total_difference", 251.0),
+        ("quoted_total_difference_rate", 0.16),
+    ],
+)
+def test_deterministic_mode_rejects_tampered_inputs_or_calculation(
+    field: str, value: float,
+) -> None:
+    packet = _packet(runtime_status="disabled", provider="none")
+    if field in {"supplier_total", "buyer_total"}:
+        packet[field] = value
+    else:
+        packet["model_result"]["calculation"][field] = value
+    with pytest.raises(AcceptanceFailure, match="deterministic model-disabled"):
+        _assert_packet(
+            packet,
+            _settings(),
+            model_mode="deterministic",
+            expected_payload=_payload(),
+        )
+
+
+def test_restart_instruction_preserves_deterministic_mode() -> None:
+    instruction = _restart_instruction("deterministic")
+    assert "--phase readback" in instruction
+    assert "--packet-id <packet_id>" in instruction
+    assert instruction.endswith("--model-mode deterministic")
 
 
 def test_result_status_distinguishes_all_three_modes() -> None:
