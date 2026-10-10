@@ -262,6 +262,7 @@ def _assert_packet(
             expected_buyer_total,
         )
         calculation = model_result.get("calculation")
+        lineage = packet["lineage"]
         if (
             runtime_status != "disabled"
             or model_result.get("runtime_status") != "disabled"
@@ -280,6 +281,16 @@ def _assert_packet(
                 tenant_id=settings.tenant_id,
                 actor_id=settings.actor_id,
                 actor_role=settings.actor_role,
+            )
+            or any(
+                lineage.get(field) != expected_payload.get(field)
+                for field in (
+                    "case_id",
+                    "quote_id",
+                    "supplier_id",
+                    "gltg_run_id",
+                    "gltg_api_version",
+                )
             )
             or packet.get("supplier_total") != expected_supplier_total
             or packet.get("buyer_total") != expected_buyer_total

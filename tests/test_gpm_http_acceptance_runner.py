@@ -67,7 +67,14 @@ def _packet(*, runtime_status: str, provider: str | None) -> dict:
         "supplier_total": 1250.0,
         "buyer_total": 1500.0,
         "model_result": model_result,
-        "lineage": {"source_trace_id": "acceptance-trace"},
+        "lineage": {
+            "source_trace_id": "acceptance-trace",
+            "case_id": payload["case_id"],
+            "quote_id": payload["quote_id"],
+            "supplier_id": payload["supplier_id"],
+            "gltg_run_id": payload["gltg_run_id"],
+            "gltg_api_version": payload["gltg_api_version"],
+        },
         "llm_reasoning": json.dumps({"runtime_status": runtime_status}),
     }
     for field, value in payload.items():
@@ -214,6 +221,22 @@ def test_deterministic_mode_rejects_tampered_request_identity(
 ) -> None:
     packet = _packet(runtime_status="disabled", provider="none")
     packet[field] = value
+    with pytest.raises(AcceptanceFailure, match="deterministic model-disabled"):
+        _assert_packet(
+            packet,
+            _settings(),
+            model_mode="deterministic",
+            expected_payload=_payload(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["case_id", "quote_id", "supplier_id", "gltg_run_id", "gltg_api_version"],
+)
+def test_deterministic_mode_rejects_tampered_lineage(field: str) -> None:
+    packet = _packet(runtime_status="disabled", provider="none")
+    packet["lineage"][field] = "tampered-lineage"
     with pytest.raises(AcceptanceFailure, match="deterministic model-disabled"):
         _assert_packet(
             packet,
