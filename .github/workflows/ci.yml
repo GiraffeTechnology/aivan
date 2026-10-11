@@ -278,7 +278,7 @@ jobs:
         run: python tools/security/scan.py osv
       - name: Preserve OSV reports even on failure
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-osv-${{ github.run_id }}
           path: security-reports/osv/
@@ -320,7 +320,7 @@ jobs:
 
       - name: Upload digest-only candidate evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stage6-candidate-evidence-${{ github.run_id }}
           path: evidence/stage6-ci.jsonl
