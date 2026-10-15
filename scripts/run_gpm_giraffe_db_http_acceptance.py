@@ -21,6 +21,9 @@ from urllib.parse import urlparse
 
 import httpx
 
+from aivan.gpm.request_identity import matches_request
+from aivan.pricing.margin import calculate_margin_breakdown
+
 
 SAFE_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -202,6 +205,7 @@ def _assert_packet(
     settings: Settings,
     *,
     model_mode: str = "actual",
+    expected_payload: dict[str, Any] | None = None,
 ) -> str:
     packet_id = packet.get("packet_id")
     if (
@@ -234,14 +238,101 @@ def _assert_packet(
             None,
             "",
             "mock",
+            "none",
         }:
             raise AcceptanceFailure("GPM did not use an identified live model runtime")
     elif model_mode == "mock":
         if runtime_status != "mock" or model_result.get("model_provider") != "mock":
             raise AcceptanceFailure("GPM did not use the declared mock model runtime")
+    elif model_mode == "deterministic":
+        if not isinstance(expected_payload, dict):
+            raise AcceptanceFailure(
+                "deterministic model evidence requires the original request payload"
+            )
+        expected_supplier_total = expected_payload.get("supplier_total")
+        expected_buyer_total = expected_payload.get("buyer_total")
+        if not isinstance(expected_supplier_total, (int, float)) or not isinstance(
+            expected_buyer_total, (int, float)
+        ):
+            raise AcceptanceFailure(
+                "deterministic model evidence requires numeric request totals"
+            )
+        expected_calculation = calculate_margin_breakdown(
+            expected_supplier_total,
+            expected_buyer_total,
+        )
+        calculation = model_result.get("calculation")
+        lineage = packet["lineage"]
+        if (
+            runtime_status != "disabled"
+            or model_result.get("runtime_status") != "disabled"
+            or model_result.get("model_provider") != "none"
+            or model_result.get("model_name") is not None
+            or model_result.get("human_approval_required") is not True
+            or model_result.get("recommendation") != "human_review_required"
+            or model_result.get("quote_position") != "insufficient_data"
+            or model_result.get("confidence") != "low"
+            or packet.get("recommendation") != "human_review_required"
+            or packet.get("quote_position") != "insufficient_data"
+            or packet.get("confidence") != "low"
+            or not matches_request(
+                packet,
+                expected_payload,
+                tenant_id=settings.tenant_id,
+                actor_id=settings.actor_id,
+                actor_role=settings.actor_role,
+            )
+            or any(
+                lineage.get(field) != expected_payload.get(field)
+                for field in (
+                    "case_id",
+                    "quote_id",
+                    "supplier_id",
+                    "gltg_run_id",
+                    "gltg_api_version",
+                )
+            )
+            or packet.get("supplier_total") != expected_supplier_total
+            or packet.get("buyer_total") != expected_buyer_total
+            or not isinstance(calculation, dict)
+            or calculation.get("supplied_supplier_total")
+            != expected_supplier_total
+            or calculation.get("supplied_buyer_total") != expected_buyer_total
+            or calculation.get("quoted_total_difference")
+            != expected_calculation["margin_amount"]
+            or calculation.get("quoted_total_difference_rate")
+            != expected_calculation["margin_rate"]
+        ):
+            raise AcceptanceFailure(
+                "GPM did not use the declared deterministic model-disabled runtime"
+            )
     else:
         raise AcceptanceFailure("unsupported model evidence mode")
     return packet_id
+
+
+def _result_status(model_mode: str) -> str:
+    statuses = {
+        "actual": "PASS",
+        "deterministic": "PASS_DETERMINISTIC_MODEL_DISABLED",
+        "mock": "PASS_PERSISTENCE_ONLY_MODEL_MOCK",
+    }
+    try:
+        return statuses[model_mode]
+    except KeyError as exc:
+        raise AcceptanceFailure("unsupported model evidence mode") from exc
+
+
+def _restart_instruction(model_mode: str, trace_id: str) -> str:
+    _result_status(model_mode)
+    if not SAFE_VALUE.fullmatch(trace_id):
+        raise AcceptanceFailure("trace ID contains unsupported characters")
+    return (
+        "restart services, preserve the same GPM_ACCEPTANCE_* input environment, "
+        f"including GPM_ACCEPTANCE_TRACE_ID={trace_id}, "
+        "then run --phase readback --packet-id <packet_id> "
+        f"--model-mode {model_mode}"
+    )
 
 
 def provider_preflight(client: httpx.Client, settings: Settings) -> None:
@@ -279,6 +370,7 @@ def readback(
     packet_id: str,
     *,
     model_mode: str = "actual",
+    expected_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gpm_packet = _expect_status(
         client.get(
@@ -298,7 +390,12 @@ def readback(
     )
     if gpm_packet != db_packet:
         raise AcceptanceFailure("GPM and giraffe-db readback packets differ")
-    _assert_packet(gpm_packet, settings, model_mode=model_mode)
+    _assert_packet(
+        gpm_packet,
+        settings,
+        model_mode=model_mode,
+        expected_payload=expected_payload,
+    )
     return gpm_packet
 
 
@@ -349,7 +446,12 @@ def run_full(
         {201},
         "GPM create",
     )
-    packet_id = _assert_packet(first, settings, model_mode=model_mode)
+    packet_id = _assert_packet(
+        first,
+        settings,
+        model_mode=model_mode,
+        expected_payload=payload,
+    )
     replay = _expect_status(
         client.post(
             f"{settings.gpm_url}/api/gpm/quote-guidance",
@@ -373,7 +475,13 @@ def run_full(
     if not isinstance(detail, dict) or detail.get("error") != "GPM_IDEMPOTENCY_CONFLICT":
         raise AcceptanceFailure("GPM idempotency conflict code is unstable")
 
-    persisted = readback(client, settings, packet_id, model_mode=model_mode)
+    persisted = readback(
+        client,
+        settings,
+        packet_id,
+        model_mode=model_mode,
+        expected_payload=payload,
+    )
     if persisted != first:
         raise AcceptanceFailure("persisted packet differs from the create response")
     cross_tenant_negative(client, settings, packet_id)
@@ -396,11 +504,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--model-mode",
-        choices=("actual", "mock"),
+        choices=("actual", "deterministic", "mock"),
         default="actual",
         help=(
-            "Use actual for full model plus persistence acceptance. Use mock only "
-            "for explicitly limited persistence-path evidence."
+            "Use actual for identified live-model plus persistence acceptance; "
+            "deterministic for the real model-disabled calculation path; or mock "
+            "only for explicitly limited persistence-path evidence."
         ),
     )
     args = parser.parse_args()
@@ -416,15 +525,14 @@ def main() -> int:
                 print(
                     json.dumps(
                         {
-                            "status": (
-                                "PASS"
-                                if args.model_mode == "actual"
-                                else "PASS_PERSISTENCE_ONLY_MODEL_MOCK"
-                            ),
+                            "status": _result_status(args.model_mode),
                             "phase": "full",
                             "packet_id": packet_id,
                             "model_mode": args.model_mode,
-                            "next": "restart services, then run --phase readback --packet-id <packet_id>",
+                            "next": _restart_instruction(
+                                args.model_mode,
+                                settings.trace_id,
+                            ),
                         },
                         sort_keys=True,
                     )
@@ -438,16 +546,13 @@ def main() -> int:
                     settings,
                     args.packet_id,
                     model_mode=args.model_mode,
+                    expected_payload=_payload(),
                 )
                 cross_tenant_negative(client, settings, args.packet_id)
                 print(
                     json.dumps(
                         {
-                            "status": (
-                                "PASS"
-                                if args.model_mode == "actual"
-                                else "PASS_PERSISTENCE_ONLY_MODEL_MOCK"
-                            ),
+                            "status": _result_status(args.model_mode),
                             "phase": "readback",
                             "packet_id": args.packet_id,
                             "model_mode": args.model_mode,
