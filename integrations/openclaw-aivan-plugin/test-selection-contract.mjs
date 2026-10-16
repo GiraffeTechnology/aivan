@@ -104,6 +104,8 @@ test("approval tool exposes an optional, format-bound reviewed preview", () => {
   const schema = tools.get("aivan.approveDraft").parameters;
   assert.equal(schema.properties.preview_id.type, "string");
   assert.equal(schema.properties.preview_id.pattern, "^render_[a-f0-9]{32}$");
+  assert.equal(schema.properties.preview_id.minLength, 39);
+  assert.equal(schema.properties.preview_id.maxLength, 39);
   assert.equal(schema.required.includes("preview_id"), false, "Retain the existing English approval contract");
   assert.equal(schema.additionalProperties, false);
 });
@@ -132,7 +134,8 @@ test("approval tool forwards exactly the human-reviewed preview without fetching
   }
 });
 
-for (const preview of ["", "render_" + "x".repeat(32), "../preview", "审阅", null, 42]) {
+for (const preview of ["", "render_" + "x".repeat(32), "../preview", "审阅", null, 42,
+                       "render_" + "a".repeat(32) + "\n", "render_" + "a".repeat(32) + "\r\n"]) {
   test(`invalid approval preview ${JSON.stringify(preview)} fails without any HTTP call`, async () => {
     const previous = globalThis.fetch;
     let calls = 0;
