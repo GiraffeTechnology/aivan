@@ -39,7 +39,15 @@ def test_graph_trace_metadata_is_deterministic():
 
 @pytest.mark.parametrize("tenant_id", ["", "tenant-alpha", "tenant-beta"])
 @pytest.mark.parametrize("credential_mode", ["shared", "tenant_map"])
-def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatch, tenant_id, credential_mode):
+@pytest.mark.parametrize(("supplier_scope", "option_label"), [
+    ("known_suppliers_only", "Use known suppliers only"),
+    ("known_suppliers_first", "Prioritize known suppliers"),
+    ("public_bidding_first", "Prioritize public bidding"),
+    ("parallel_known_and_public", "Evaluate known suppliers and public bidding in parallel"),
+])
+def test_graph_payloads_include_trace_metadata_and_idempotency_header(
+    monkeypatch, tenant_id, credential_mode, supplier_scope, option_label,
+):
     import json
 
     # Synthetic HTTP credentials, not real-provider acceptance evidence.
@@ -99,7 +107,7 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
     result = persist_rfq_gltg_graph(
         event=_event().model_copy(update={"tenant_id": tenant_id}), project_id="proj_1",
         requirement=BuyerRequirement(quantity=5000, destination="Osaka"),
-        strategy=RFQStrategy(), gltg=_gltg(),
+        strategy=RFQStrategy(supplier_scope=supplier_scope), gltg=_gltg(),
     )
 
     assert result["source_trace_id"] == "aivan:proj_1:msg_graph_001"
@@ -125,6 +133,8 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
     assert gltg_payload["final_p90_days"] == 45.75
 
     decision_payload = next(payload for payload in captured_payloads if "decision_option_id" not in payload and "option_label" in payload)
+    assert decision_payload["option_label"] == option_label
+    assert decision_payload["option_type"] == supplier_scope
     assert decision_payload["p50_days"] == 30.25
     assert decision_payload["p80_days"] == 38.5
     assert decision_payload["p90_days"] == 45.75

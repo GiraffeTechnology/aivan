@@ -23,6 +23,14 @@ _STUB_SUPPLIERS_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "demo" / "stub_suppliers.json"
 )
 
+# The type remains a machine enum; its display label is canonical English.
+_SUPPLIER_SCOPE_LABELS = {
+    "known_suppliers_only": "Use known suppliers only",
+    "known_suppliers_first": "Prioritize known suppliers",
+    "public_bidding_first": "Prioritize public bidding",
+    "parallel_known_and_public": "Evaluate known suppliers and public bidding in parallel",
+}
+
 
 class GiraffeDBContextError(RuntimeError):
     """Stable, non-sensitive failure raised by the private-data context client."""
@@ -514,7 +522,7 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
                 "procurement_case_id": procurement_case_id,
                 "rfq_id": rfq_id,
                 "buyer_id": buyer_id,
-                "option_label": "known_suppliers_first",
+                "option_label": _SUPPLIER_SCOPE_LABELS[strategy_payload["supplier_scope"]],
                 "option_type": strategy_payload.get("supplier_scope", "known_suppliers_first"),
                 "gltg_run_ids_json": [gltg_run_id],
                 "pricing_input_ids_json": [pricing_input_id],
