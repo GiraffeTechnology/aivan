@@ -162,27 +162,51 @@ class GiraffeDBOrderConfirmationClient:
         )
 
     def _recover_write(self, operation: str, idempotency_key: str) -> dict[str, Any]:
+        code = f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
         encoded_key = quote_path_segment(idempotency_key, safe="")
-        response = self._request(
-            "GET", f"/api/data/write-results/{operation}/{encoded_key}"
-        )
-        if response.status_code == 404:
-            raise OrderConfirmationError(
-                f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
+        try:
+            response = self._request(
+                "GET", f"/api/data/write-results/{operation}/{encoded_key}"
             )
+        except OrderConfirmationError:
+            # A failed recovery read cannot establish that the earlier POST
+            # failed or authorize creating a different commercial operation.
+            raise OrderConfirmationError(code) from None
         if response.status_code != 200:
-            raise OrderConfirmationError(
-                f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
-            )
-        payload = self._json_object(
-            response, code=f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
-        )
+            raise OrderConfirmationError(code)
+        payload = self._json_object(response, code=code)
         record = payload.get("record")
-        if payload.get("status") != "committed" or not isinstance(record, dict):
-            raise OrderConfirmationError(
-                f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
-            )
+        primary_key = {"supplier_quotes": "quote_id", "purchase_orders": "po_id"}.get(operation)
+        if (primary_key is None or payload.get("status") != "committed"
+                or not self._valid_write_record(record, operation, idempotency_key)
+                or payload.get("target_id") != record[primary_key]):
+            raise OrderConfirmationError(code)
         return record
+
+    def _valid_write_record(self, record, operation: str, idempotency_key: str) -> bool:
+        primary_key = {"supplier_quotes": "quote_id", "purchase_orders": "po_id"}.get(operation)
+        if not isinstance(record, dict) or primary_key is None:
+            return False
+        value = record.get(primary_key)
+        if not isinstance(value, str) or not _SAFE_PROVIDER_ID.fullmatch(value):
+            return False
+        # Trust the authenticated tenant/key-scoped endpoint. Compatible
+        # providers need not add echoes; if supplied, they must not disagree.
+        if "tenant_id" in record and record["tenant_id"] != self.tenant_id:
+            return False
+        if "idempotency_key" in record and record["idempotency_key"] != idempotency_key:
+            return False
+        return True
+
+    def _read_after_write(self, path: str, *, not_found_code: str) -> dict[str, Any]:
+        try:
+            return self._get(path, not_found_code=not_found_code)
+        except OrderConfirmationError:
+            # Both provider writes have returned a record. Missing/unavailable
+            # readback is not evidence that those writes did not commit.
+            raise OrderConfirmationError(
+                "ORDER_CONFIRMATION_INDETERMINATE_COMMIT:readback"
+            ) from None
 
     def _post(
         self,
@@ -207,11 +231,14 @@ class GiraffeDBOrderConfirmationClient:
 
         if response.status_code == 200:
             try:
-                return self._json_object(
+                record = self._json_object(
                     response, code="ORDER_CONFIRMATION_DB_INVALID_RESPONSE"
                 )
             except OrderConfirmationError:
                 return self._recover_write(operation, idempotency_key)
+            if not self._valid_write_record(record, operation, idempotency_key):
+                return self._recover_write(operation, idempotency_key)
+            return record
         if response.status_code in {401, 403}:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_AUTH_REJECTED")
         if response.status_code == 409:
@@ -421,15 +448,15 @@ class GiraffeDBOrderConfirmationClient:
             code="ORDER_CONFIRMATION_ORDER_RESPONSE_INVALID",
         )
 
-        quote_readback = self._get(
+        quote_readback = self._read_after_write(
             f"/api/data/supplier-quotes/{quote_path_segment(supplier_quote_id, safe='')}",
             not_found_code="ORDER_CONFIRMATION_QUOTE_READBACK_MISSING",
         )
-        order_readback = self._get(
+        order_readback = self._read_after_write(
             f"/api/data/purchase-orders/{quote_path_segment(purchase_order_id, safe='')}",
             not_found_code="ORDER_CONFIRMATION_ORDER_READBACK_MISSING",
         )
-        final_graph = self._get(
+        final_graph = self._read_after_write(
             f"/api/data/procurement-cases/{quote_path_segment(procurement_case_id, safe='')}/transaction-graph",
             not_found_code="ORDER_CONFIRMATION_DB_GRAPH_NOT_FOUND",
         )
