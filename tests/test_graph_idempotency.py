@@ -40,10 +40,10 @@ def test_graph_trace_metadata_is_deterministic():
 @pytest.mark.parametrize("tenant_id", ["", "tenant-alpha", "tenant-beta"])
 @pytest.mark.parametrize("credential_mode", ["shared", "tenant_map"])
 @pytest.mark.parametrize(("supplier_scope", "option_label"), [
-    ("known_suppliers_only", "Use known suppliers only"),
-    ("known_suppliers_first", "Prioritize known suppliers"),
-    ("public_bidding_first", "Prioritize public bidding"),
-    ("parallel_known_and_public", "Evaluate known suppliers and public bidding in parallel"),
+    ("known_suppliers_only", "The selected sourcing strategy is to use only known suppliers."),
+    ("known_suppliers_first", "The selected sourcing strategy is to prioritize known suppliers."),
+    ("public_bidding_first", "The selected sourcing strategy is to prioritize public bidding."),
+    ("parallel_known_and_public", "The selected sourcing strategy evaluates known suppliers and public bidding in parallel."),
 ])
 def test_graph_payloads_include_trace_metadata_and_idempotency_header(
     monkeypatch, tenant_id, credential_mode, supplier_scope, option_label,
