@@ -2,9 +2,11 @@
 
 `build_runtime_repair.py` creates a new offline candidate from the verified
 integrated installer. It applies only the selected Aivan graph-label module and
-the selected database canonical-language module. The database replacement is
-also applied to its packaged migration/source asset copy, keeping both imports
-consistent. It does not rebuild wheels or change native dependencies, migrations,
+the selected database canonical-language module. A database source mirror is
+updated only if declared in the verified base inventory; no duplicate source
+asset is invented when migrations import the installed package. Existing target
+permissions are preserved, independent of checkout permissions. It does not
+rebuild wheels or change native dependencies, migrations,
 service bindings, authentication, channel configuration or unrelated components.
 
 ```sh

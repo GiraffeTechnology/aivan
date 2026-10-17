@@ -34,11 +34,20 @@ def component(tmp_path, module, name):
     return source, {"included_source_files": baseline}
 
 
+def payload_inventory(module, name, original):
+    path = next(iter(module.RUNTIME_DELTAS[name]))
+    digest = original["included_source_files"][path]
+    result = {str(module.SITE / path.removeprefix("src/")): digest}
+    if name == "database":
+        result["provider-assets/giraffe-db/" + path] = digest
+    return result
+
+
 @pytest.mark.parametrize("name", ["aivan", "database"])
 def test_exact_runtime_delta_and_database_mirror_are_selected(tmp_path, name):
     module = builder()
     source, original = component(tmp_path, module, name)
-    selected = module.verify_component(source, name, original)
+    selected = module.verify_component(source, name, original, payload_files=payload_inventory(module, name, original))
     assert len(selected) == 1
     replacement = selected[0]
     assert replacement["source_path"] in module.RUNTIME_DELTAS[name]
@@ -65,7 +74,7 @@ def test_unselected_or_incomplete_runtime_changes_are_rejected(tmp_path, kind):
         changed.unlink()
         changed.symlink_to(untouched)
     with pytest.raises(ValueError):
-        module.verify_component(source, "aivan", original)
+        module.verify_component(source, "aivan", original, payload_files=payload_inventory(module, "aivan", original))
 
 
 def prepare_copy(tmp_path, module):
@@ -73,7 +82,7 @@ def prepare_copy(tmp_path, module):
     rows = []
     for name in ("aivan", "database"):
         source, original = component(tmp_path, module, name)
-        selected = module.verify_component(source, name, original)
+        selected = module.verify_component(source, name, original, payload_files=payload_inventory(module, name, original))
         for row in selected:
             for target in row["targets"]:
                 destination = payload / target
@@ -88,11 +97,39 @@ def test_copy_updates_both_database_locations_without_touching_dependencies(tmp_
     payload, rows = prepare_copy(tmp_path, module)
     dependency = payload / "runtime/dependency.bin"
     dependency.write_bytes(b"frozen dependency bytes")
+    for row in rows:
+        for target in row["targets"]:
+            (payload / target).chmod(0o640)
     module.apply_replacements(payload, rows)
     for row in rows:
         for target in row["targets"]:
             assert module.build.digest(payload / target) == row["candidate_sha256"]
+            assert (payload / target).stat().st_mode & 0o777 == 0o640
     assert dependency.read_bytes() == b"frozen dependency bytes"
+
+
+def test_database_without_declared_source_mirror_updates_only_installed_module(tmp_path):
+    module = builder()
+    source, original = component(tmp_path, module, "database")
+    path = next(iter(module.RUNTIME_DELTAS["database"]))
+    installed = str(module.SITE / path.removeprefix("src/"))
+    files = {installed: original["included_source_files"][path]}
+    selected = module.verify_component(source, "database", original, payload_files=files)
+    assert selected[0]["targets"] == [installed]
+
+
+@pytest.mark.parametrize("kind", ["missing_installed", "mismatched_declared_mirror"])
+def test_declared_payload_locations_must_match_original_source(tmp_path, kind):
+    module = builder()
+    source, original = component(tmp_path, module, "database")
+    path = next(iter(module.RUNTIME_DELTAS["database"]))
+    files = {str(module.SITE / path.removeprefix("src/")): original["included_source_files"][path]}
+    if kind == "missing_installed":
+        files.clear()
+    else:
+        files["provider-assets/giraffe-db/" + path] = "different baseline"
+    with pytest.raises(ValueError):
+        module.verify_component(source, "database", original, payload_files=files)
 
 
 @pytest.mark.parametrize("kind", ["target_drift", "source_drift", "target_link"])

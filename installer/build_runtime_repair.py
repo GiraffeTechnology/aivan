@@ -29,7 +29,7 @@ RUNTIME_DELTAS = {
 RUNTIME_PREFIXES = ("src/", "api/", "generators/", "alembic/")
 
 
-def verify_component(source: Path, name: str, component: dict) -> list[dict]:
+def verify_component(source: Path, name: str, component: dict, *, payload_files: dict) -> list[dict]:
     """Select only the scoped repair, rejecting any other runtime difference."""
     if name not in RUNTIME_DELTAS:
         raise ValueError("Unknown repair component")
@@ -54,8 +54,14 @@ def verify_component(source: Path, name: str, component: dict) -> list[dict]:
     rows = []
     for path in sorted(changed):
         targets = [str(SITE / path.removeprefix("src/"))]
+        if payload_files.get(targets[0]) != baseline[path]:
+            raise ValueError("Declared installed module differs from source baseline")
         if name == "database":
-            targets.append("provider-assets/giraffe-db/" + path)
+            asset = "provider-assets/giraffe-db/" + path
+            if asset in payload_files:
+                if payload_files[asset] != baseline[path]:
+                    raise ValueError("Declared source mirror differs from source baseline")
+                targets.append(asset)
         rows.append({"component": name, "source_path": path, "targets": targets,
             "base_sha256": baseline[path], "candidate_sha256": build.digest(source / path),
             "_source": source})
@@ -74,7 +80,8 @@ def apply_replacements(payload: Path, rows: list[dict]) -> None:
                 raise ValueError("Installed baseline does not match selected source")
     for row in rows:
         for relative in row["targets"]:
-            shutil.copy2(row["_source"] / row["source_path"], payload / relative)
+            # Keep verified installed permissions, not operator checkout modes.
+            shutil.copyfile(row["_source"] / row["source_path"], payload / relative)
 
 
 def extract_base(installer: Path, destination: Path) -> tuple[dict, str]:
@@ -144,8 +151,8 @@ def main():
         base, archive_sha = extract_base(args.base_installer, payload)
         if build.digest(source / "installer/requirements.lock") != base["requirements_lock_sha256"]:
             raise ValueError("Frozen dependency lock changed")
-        rows = verify_component(source, "aivan", base["components"]["aivan"])
-        rows += verify_component(database, "database", base["components"]["database"])
+        rows = verify_component(source, "aivan", base["components"]["aivan"], payload_files=base["files"])
+        rows += verify_component(database, "database", base["components"]["database"], payload_files=base["files"])
         apply_replacements(payload, rows)
         public_rows = [{key: value for key, value in row.items() if key != "_source"} for row in rows]
         provenance = {"build_kind": "offline-integrated-runtime-repair", "release": args.release,
