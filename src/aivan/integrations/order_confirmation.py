@@ -414,6 +414,8 @@ class GiraffeDBOrderConfirmationClient:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_INVALID")
         if procurement_case.get("procurement_case_id") != procurement_case_id:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_MISMATCH")
+        if "tenant_id" in procurement_case and procurement_case["tenant_id"] != self.tenant_id:
+            raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_MISMATCH")
         buyer_id = _provider_id(
             procurement_case.get("buyer_id"),
             code="ORDER_CONFIRMATION_BUYER_ID_REQUIRED",
@@ -423,6 +425,12 @@ class GiraffeDBOrderConfirmationClient:
             isinstance(item, dict) and item.get("id") == rfq_id for item in rfqs
         ):
             raise OrderConfirmationError("ORDER_CONFIRMATION_RFQ_NOT_FOUND")
+        for row in rfqs:
+            if isinstance(row, dict) and row.get("id") == rfq_id and any(
+                key in row and row[key] != value
+                for key, value in {"tenant_id": self.tenant_id, "procurement_case_id": procurement_case_id}.items()
+            ):
+                raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_MISMATCH")
 
         authorization = {
             "actor_id": identity.actor_id,
