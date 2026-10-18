@@ -139,3 +139,20 @@ def test_asset_manifest_hashes_and_origin_are_checked(tmp_path, change):
     else:
         with pytest.raises(ValueError):
             m.verify_assets(tmp_path)
+
+
+@pytest.mark.parametrize('kind', ['overwrite', 'inside-source'])
+def test_entrypoint_preserves_retained_artifacts_and_source(tmp_path, monkeypatch, kind):
+    m = builder()
+    source, output = tmp_path / 'source', tmp_path / 'output'
+    source.mkdir(); output.mkdir()
+    existing = output / 'myaivan-unit-release-linux-x86_64.run'
+    existing.write_bytes(b'retained artifact fixture')
+    if kind == 'inside-source':
+        output = source / 'output'
+    monkeypatch.setattr(sys, 'argv', ['build_execution_wiring_successor.py',
+        '--base-installer', str(tmp_path / 'not-read.run'), '--source', str(source), '--output', str(output),
+        '--revision', m.SOURCE_REVISION, '--tree', m.SOURCE_TREE, '--release', 'unit-release'])
+    with pytest.raises(ValueError):
+        m.main()
+    assert existing.read_bytes() == b'retained artifact fixture'
