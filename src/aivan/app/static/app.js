@@ -180,6 +180,7 @@ async function establishSession() {
     const recoverableViews = ['welcome', 'dashboard', 'cases', 'new-inquiry', 'relay', 'health'];
     setView(recoverableViews.includes(requestedView) ? requestedView : 'welcome');
   } catch (error) {
+    if (generation !== state.authGeneration || error.name === 'AbortError') return;
     if (error.status === 401 || error.status === 403) showLogin();
     else showLogin(t('无法恢复会话，请重新登录。'));
   }

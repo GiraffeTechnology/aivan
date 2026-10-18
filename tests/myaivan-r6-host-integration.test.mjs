@@ -230,3 +230,36 @@ for (const transition of ['login', 'restore']) {
     finally { bootstrap.resolve(); await pending; }
   });
 }
+
+test('a superseded session restore cannot clear the newer mounted order', async () => {
+  for (const supersededBy of ['generation', 'session']) {
+  const h = harness(); await h.load();
+  const pending = deferred(); h.resourceWith(() => pending.promise);
+  vm.runInContext(selected('async function establishSession(', '\nasync function login('), h.ctx);
+  const restoring = h.ctx.establishSession();
+  const newerSession = {role: 'admin', marker: 'newer-session'};
+  if (supersededBy === 'generation') h.state.authGeneration += 1;
+  h.state.executionHost.invalidate('context-changing');
+  h.state.session = newerSession;
+  await h.load();
+  const newerContext = h.current();
+  assert.equal(newerContext.orderId, order);
+  pending.resolve(new Response(JSON.stringify({role: 'admin'}), {headers: {'content-type': 'application/json'}}));
+  await restoring;
+  assert.equal(h.state.session, newerSession);
+  assert.equal(h.current(), newerContext, 'Stale restore failure must not sign out or clear the newer lifetime');
+  }
+});
+
+test('a current session restore denial still clears the mounted order', async () => {
+  for (const status of [401, 403, 500]) {
+    const h = harness(); await h.load();
+    h.resourceWith(async () => new Response(JSON.stringify({detail: 'synthetic failure'}),
+      {status, headers: {'content-type': 'application/json'}}));
+    vm.runInContext(selected('async function establishSession(', '\nasync function login('), h.ctx);
+    await h.ctx.establishSession();
+    assert.equal(h.current(), null);
+    assert.equal(h.node('#login-view').hidden, false);
+    assert.equal(h.node('#app-shell').hidden, true);
+  }
+});
