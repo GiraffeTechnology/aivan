@@ -7,7 +7,7 @@ const start = source.indexOf('async function confirmRelay(');
 const end = source.indexOf('async function loadHealth(', start);
 assert.ok(start >= 0 && end > start);
 
-function harness() {
+function harness(translate = value => value) {
   const events = [];
   const state = {session: {}, authGeneration: 1, relayRequestGeneration: 1};
   const button = {disabled: false};
@@ -20,7 +20,7 @@ function harness() {
   }};
   let response = valid;
   let requestCount = 0;
-  const ctx = vm.createContext({state, t: value => value,
+  const ctx = vm.createContext({state, t: translate,
     requestId: () => `relay-request-${++requestCount}`,
     $$: () => [], history: {replaceState() {}}, window: {scrollTo() {}},
     loadCases() {}, loadHealth() {},
@@ -111,3 +111,34 @@ for (const change of [h => {h.state.session = null;}, h => {h.state.authGenerati
 assert.ok(source.includes('data-case-id="${escapeHtml(item.project_id)}" data-channel="${escapeHtml(item.channel)}"'),
   'the rendered form must carry the actual draft case/channel, not guessed identities');
 console.log('Manual relay receipt identity, unknown outcome, retry key, stale view and duplicate submission checks passed.');
+
+const relayCatalogKeys = new Set(['已记录 relayed 回执', '确认失败：', '读取转发队列失败：', '正在读取转发队列…',
+  'AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。']);
+function localized(key) {
+  assert.ok(relayCatalogKeys.has(key), 'relay feedback must use existing registered catalog messages');
+  return `LOCALIZED:${key}`;
+}
+for (const replay of [false, true]) {
+  const h = harness(localized); h.response({...h.valid, idempotent_replay: replay});
+  await h.submit();
+  const success = h.events.find(e => e.kind === 'success');
+  assert.ok(success.message.startsWith('LOCALIZED:'), 'new and replayed receipts must use locale rendering');
+  assert.ok(success.message.includes(localized('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')));
+}
+{
+  const h = harness(localized); h.response(() => {throw Error('private upstream failure');});
+  await h.submit();
+  assert.ok(h.events.at(-1).message.startsWith('LOCALIZED:'));
+  assert.ok(!h.events.at(-1).message.includes('private upstream'));
+  assert.equal(h.form.dataset.relayKey, 'relay-request-1');
+}
+{
+  const list = {innerHTML: ''};
+  const ctx = vm.createContext({state: {session: {}, relayRequestGeneration: 0},
+    $: () => list, ht: localized, api: async () => {throw Error('private upstream failure');}});
+  vm.runInContext(source.slice(source.indexOf('async function loadRelay('), start), ctx);
+  await ctx.loadRelay();
+  assert.ok(list.innerHTML.includes(localized('读取转发队列失败：')));
+  assert.ok(!list.innerHTML.includes('private upstream'));
+}
+console.log('Relay success, replay and failures use the existing translated catalog and preserve manual-send safety.');

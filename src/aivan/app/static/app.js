@@ -561,7 +561,9 @@ async function loadRelay() {
       <button class="secondary" ${item.render_error ? 'disabled' : ''} data-preview-id="${escapeHtml(item.preview_id || '')}" data-action="copy" data-copy="${escapeHtml(item.copy_payload?.message_text || '')}" data-copy-case-id="${escapeHtml(item.project_id)}" data-draft-id="${escapeHtml(item.draft_id)}" data-content-sha256="${escapeHtml(item.content_sha256)}" type="button">${ht('复制内容')}</button>
       <form class="relay-confirm" data-case-id="${escapeHtml(item.project_id)}" data-channel="${escapeHtml(item.channel)}" data-preview-id="${escapeHtml(item.preview_id || '')}" data-content-sha256="${escapeHtml(item.content_sha256 || '')}" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
     </article>`).join('') : emptyHtml();
-  } catch (_) { if (isCurrent()) list.innerHTML = '<p class="error">The manual-send queue could not be loaded. No delivery state is confirmed.</p>'; }
+  } catch (_) {
+    if (isCurrent()) list.innerHTML = `<p class="error">${ht('读取转发队列失败：')}${ht('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')}</p>`;
+  }
 }
 
 async function confirmRelay(event) {
@@ -609,12 +611,11 @@ async function confirmRelay(event) {
     }
     delete form.dataset.relayKey;
     delete form.relayAttemptBody;
-    toast(payload.idempotent_replay
-      ? 'The existing manual-send record was read back. No message was sent by Aivan.'
-      : 'Manual-send confirmation recorded. No message was sent by Aivan.', 'success');
+    // Both new and replayed receipts are recorded; neither means Aivan sent a message.
+    toast(`${t('已记录 relayed 回执')} ${t('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')}`, 'success');
     await loadRelay();
   } catch (_) {
-    if (isCurrent()) toast('The manual-send record could not be verified. Reopen the queue or retry the unchanged confirmation. Aivan did not send a message.', 'error');
+    if (isCurrent()) toast(`${t('确认失败：')}${t('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')}`, 'error');
   } finally {
     form.relaySubmitting = false;
     if (button) button.disabled = false;
