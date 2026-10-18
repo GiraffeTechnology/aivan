@@ -22,6 +22,7 @@ let loadCasesCalls = 0;
 let resetCalls = 0;
 
 const context = vm.createContext({
+  state: {session: {}},
   console,
   JSON,
   $: (selector) => fields[selector],
@@ -164,7 +165,7 @@ const realContext = vm.createContext({
   console,
   JSON,
   URLSearchParams,
-  state: { offset: 0, limit: 25 },
+  state: { offset: 0, limit: 25, session: {} },
   $: (selector) => realFields[selector],
   requestId: (prefix) => `${prefix}-real-helper`,
   t: (value) => value,

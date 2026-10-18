@@ -138,6 +138,7 @@ async function establishSession() {
       state.csrf = payload.csrf_token;
     }
     state.session = await api('/api/session');
+    releaseInquirySubmission();
     showApp();
     $('#test-account-banner').hidden = !state.session.test_account;
     $$('.test-account-restricted').forEach((node) => {
@@ -177,6 +178,7 @@ async function login(event) {
     state.csrf = payload.csrf_token;
     keyInput.value = '';
     state.session = payload;
+    releaseInquirySubmission();
     showApp();
     $('#test-account-banner').hidden = true;
     populateRoles(payload.allowed_roles, payload.role);
@@ -194,6 +196,7 @@ async function logout() {
   try { await api('/api/session/logout', { method: 'POST', body: '{}' }); } catch (_) { /* expire locally */ }
   state.csrf = '';
   state.session = null;
+  releaseInquirySubmission();
   showLogin();
 }
 
@@ -204,6 +207,7 @@ async function switchRole(event) {
       method: 'POST', body: JSON.stringify({ role: event.target.value }),
     });
     state.session = payload;
+    releaseInquirySubmission();
     state.csrf = payload.csrf_token;
     state.selectedCase = null;
     setView('dashboard');
@@ -216,12 +220,25 @@ async function switchRole(event) {
 }
 
 async function loadBootstrap() {
-  state.bootstrap = await api('/api/workbench/bootstrap');
-  await window.myAivanI18n?.assertCandidate(state.bootstrap.candidate_sha);
-  const sha = state.bootstrap.candidate_sha;
-  $('#candidate-banner').innerHTML = sha
-    ? `<strong>${ht('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(state.bootstrap.api_version)}</span>`
-    : `<strong>${ht('候选未冻结')}</strong><span>${ht('仅可作为非生产工作台使用。')}</span>`;
+  const session = state.session;
+  if (!session) return;
+  const auth = state.authGeneration ?? 0;
+  const generation = state.bootstrapRequestGeneration = (state.bootstrapRequestGeneration ?? 0) + 1;
+  const isCurrent = () => session === state.session && auth === (state.authGeneration ?? 0)
+    && generation === state.bootstrapRequestGeneration;
+  try {
+    const payload = await api('/api/workbench/bootstrap');
+    if (!isCurrent()) return;
+    await window.myAivanI18n?.assertCandidate(payload.candidate_sha);
+    if (!isCurrent()) return;
+    state.bootstrap = payload;
+    const sha = payload.candidate_sha;
+    $('#candidate-banner').innerHTML = sha
+      ? `<strong>${ht('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(payload.api_version)}</span>`
+      : `<strong>${ht('候选未冻结')}</strong><span>${ht('仅可作为非生产工作台使用。')}</span>`;
+  } catch (error) {
+    if (isCurrent()) throw error;
+  }
 }
 
 function caseCard(item) {
@@ -243,23 +260,31 @@ function formatTime(value) {
 }
 
 async function loadCases(reset = false) {
+  const session = state.session;
+  if (!session) return;
+  const auth = state.authGeneration ?? 0;
+  const generation = state.caseListRequestGeneration = (state.caseListRequestGeneration ?? 0) + 1;
+  const isCurrent = () => session === state.session && auth === (state.authGeneration ?? 0)
+    && generation === state.caseListRequestGeneration;
   if (reset) state.offset = 0;
+  const offset = state.offset, limit = state.limit;
   const filter = $('#case-state-filter')?.value || '';
-  const params = new URLSearchParams({ offset: state.offset, limit: state.limit });
+  const params = new URLSearchParams({ offset, limit });
   if (filter) params.set('state', filter);
   try {
     const payload = await api(`/api/workbench/cases?${params}`);
+    if (!isCurrent()) return;
     state.cases = payload.items;
     state.total = payload.page.total;
     const html = payload.items.length ? payload.items.map(caseCard).join('') : emptyHtml();
     $('#case-list').innerHTML = html;
     $('#recent-cases').innerHTML = payload.items.slice(0, 5).map(caseCard).join('') || emptyHtml();
-    $('#page-summary').textContent = `${state.offset + 1}-${Math.min(state.offset + payload.items.length, state.total)} / ${state.total}`;
-    $('#prev-page').disabled = state.offset === 0;
+    $('#page-summary').textContent = `${offset + 1}-${Math.min(offset + payload.items.length, state.total)} / ${state.total}`;
+    $('#prev-page').disabled = offset === 0;
     $('#next-page').disabled = !payload.page.has_more;
     renderMetrics(payload.items);
   } catch (error) {
-    $('#case-list').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
+    if (isCurrent()) $('#case-list').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -364,7 +389,8 @@ function eventRow(event) {
   return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
-async function showInquiryConversation(caseId, input, response) {
+async function showInquiryConversation(caseId, input, response, isCurrent = () => true) {
+  if (!isCurrent()) return;
   const stream = $('#conversation-stream');
   const review = $('#outbound-review-content');
   stream.replaceChildren();
@@ -377,10 +403,12 @@ async function showInquiryConversation(caseId, input, response) {
   review.textContent = 'Loading saved drafts…';
   try {
     const detail = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
+    if (!isCurrent()) return;
     if (!Array.isArray(detail.drafts)) throw new Error('Invalid draft response');
     if (detail.drafts.length) review.innerHTML = detail.drafts.map(draftRow).join('');
     else review.textContent = 'No saved draft is available yet. Open the case for clarification or status.';
   } catch (_) {
+    if (!isCurrent()) return;
     review.textContent = 'The input was accepted, but saved drafts could not be loaded. Reopen the case to retry. No message was sent by this view.';
   }
 }
@@ -401,15 +429,49 @@ function inquirySubmissionOutcome(payload) {
   };
 }
 
+function releaseInquirySubmission() {
+  const form = $('#inquiry-form');
+  const pending = form?.inquirySubmission;
+  if (pending) {
+    delete form.inquirySubmission;
+    form.inquirySubmitting = false;
+    if (pending.button) pending.button.disabled = pending.wasDisabled;
+  }
+  state.inquiryAttempt = null;
+}
+
 async function submitInquiry(event) {
   event.preventDefault();
+  const form = event.target;
+  if (!state.session || form.inquirySubmission?.session === state.session) return;
+  const session = state.session;
   const buyerId = $('#buyer-id').value.trim();
+  const buyerName = $('#buyer-name').value.trim();
   const text = $('#inquiry-text').value.trim();
-  const conversation = requestId('manual-conversation');
+  const signature = JSON.stringify([buyerId, buyerName, text]);
+  if (!state.inquiryAttempt || state.inquiryAttempt.session !== session || state.inquiryAttempt.signature !== signature) {
+    state.inquiryAttempt = {session, signature, key: requestId('inquiry'),
+      body: JSON.stringify({source: 'myaivan', channel: 'myaivan',
+        conversation_id: requestId('manual-conversation'), message_id: requestId('manual-message'),
+        sender_id: buyerId, sender_display_name: buyerName, message_text: text})};
+  }
+  const attempt = state.inquiryAttempt;
+  const button = event.submitter;
+  const previous = form.inquirySubmission;
+  const submission = {session, button,
+    wasDisabled: previous && previous.button === button ? previous.wasDisabled : button?.disabled};
+  form.inquirySubmission = submission;
+  const isCurrent = () => session === state.session && form.inquirySubmission === submission;
+  const inputUnchanged = () => signature === JSON.stringify([
+    $('#buyer-id')?.value.trim(), $('#buyer-name')?.value.trim(), $('#inquiry-text')?.value.trim(),
+  ]);
+  form.inquirySubmitting = true;
+  if (button) button.disabled = true;
   const result = $('#inquiry-result');
   result.hidden = true;
   result.textContent = '';
   const headers = {
+    'Idempotency-Key': attempt.key,
     'X-AIVAN-Participant-ID': buyerId,
     'X-AIVAN-Participant-Role': 'buyer',
     'X-AIVAN-Participant-Conversation-Role': 'buyer_thread',
@@ -417,29 +479,36 @@ async function submitInquiry(event) {
   try {
     const payload = await api('/invoke', {
       method: 'POST', headers,
-      body: JSON.stringify({
-        source: 'myaivan', channel: 'myaivan', conversation_id: conversation,
-        message_id: requestId('manual-message'), sender_id: buyerId,
-        sender_display_name: $('#buyer-name').value.trim(), message_text: text,
-      }),
+      body: attempt.body,
     });
+    if (!isCurrent()) return;
     const outcome = inquirySubmissionOutcome(payload);
     if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
+    // A confirmed intake is complete; only unknown outcomes retain their retry identity.
+    if (state.inquiryAttempt === attempt) state.inquiryAttempt = null;
     result.hidden = false;
     const responseMessage = payload.action === 'pending_email_approval' && !outcome.enteredApprovalFlow
       ? t('请求已受理，请按案例提示继续。')
       : (payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。'));
     result.textContent = `${t('案例')} ${outcome.projectId}\n${responseMessage}`;
     await loadCases(true);
-    if ($('#conversation-stream')) await showInquiryConversation(outcome.projectId, text, responseMessage);
+    if (!isCurrent()) return;
+    if ($('#conversation-stream')) await showInquiryConversation(outcome.projectId, text, responseMessage, isCurrent);
+    if (!isCurrent()) return;
     if (outcome.enteredApprovalFlow) {
-      event.target.reset();
+      if (inputUnchanged()) form.reset();
       toast(t('询盘草稿已生成，等待人工审批'), 'success');
     } else {
       toast(t('请求已受理，请按案例提示继续。'), 'info');
     }
-  } catch (error) {
-    toast(`${t('创建失败：')}${error.message}`, 'error');
+  } catch (_) {
+    if (isCurrent()) toast(`${t('创建失败：')}${t('服务器未确认案例创建，请检查输入后重试。')}`, 'error');
+  } finally {
+    if (form.inquirySubmission === submission) {
+      delete form.inquirySubmission;
+      form.inquirySubmitting = false;
+      if (button) button.disabled = submission.wasDisabled;
+    }
   }
 }
 
@@ -572,8 +641,15 @@ async function confirmRelay(event) {
 }
 
 async function loadHealth() {
+  const session = state.session;
+  if (!session) return;
+  const auth = state.authGeneration ?? 0;
+  const generation = state.healthRequestGeneration = (state.healthRequestGeneration ?? 0) + 1;
+  const isCurrent = () => session === state.session && auth === (state.authGeneration ?? 0)
+    && generation === state.healthRequestGeneration;
   try {
     const health = await api('/api/workbench/health');
+    if (!isCurrent()) return;
     const entries = [
       [t('数据库'), health.database.configured, t('运行时配置')],
       ['GPM', !health.gpm.durable_required || health.gpm.backend !== 'memory', health.gpm.backend],
@@ -582,7 +658,9 @@ async function loadHealth() {
       [t('候选版本'), Boolean(health.candidate_sha), health.candidate_sha || t('未冻结')],
     ];
     $('#health-grid').innerHTML = entries.map(([label, ok, note]) => `<article class="health-card ${ok ? 'ok' : 'pending'}"><span class="health-dot" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><p>${escapeHtml(note)}</p></div><span>${ok ? ht('已配置') : ht('待完成')}</span></article>`).join('');
-  } catch (error) { $('#health-grid').innerHTML = `<p class="error">${ht('读取健康状态失败：')}${escapeHtml(error.message)}</p>`; }
+  } catch (error) {
+    if (isCurrent()) $('#health-grid').innerHTML = `<p class="error">${ht('读取健康状态失败：')}${escapeHtml(error.message)}</p>`;
+  }
 }
 
 document.addEventListener('click', async (event) => {

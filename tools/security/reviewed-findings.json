@@ -17,9 +17,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-i18n-runtime.test.mjs",
-      "sha256": "0da4a9bcc1f1da2a1b39301cff24c7b908b14a57dc8ea8b7b593b9b536d3324c",
+      "sha256": "c8beaaca50309298b5f1a606029608876d8e2f668fdd4105b37fcd95c9bd7232",
       "count": 3,
-      "reason": "Re-reviewed after first-visit locale regressions. Exact reads at lines 8, 192 and 289 resolve literal i18n.js, app.js and index.html URLs relative to import.meta.url. No request, environment, argument or fixture controls these paths; saved locale values only select in-memory catalogs."
+      "reason": "Re-reviewed after supplying trusted session state to inquiry outcome fixtures. The three reads still resolve literal i18n.js, app.js and index.html URLs relative to import.meta.url. No request, environment, argument or fixture controls these paths; saved locale values only select in-memory catalogs."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
@@ -52,9 +52,30 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-inquiry-runtime.test.mjs",
-      "sha256": "13b0fb6610f45eafb81a8e8c93db859d66dba1bee322456cbd181239ceb40732",
+      "sha256": "70f3b4a54ad52814ad8114d749600942c9a7ad76c8a097010a0565e5ad9e96a6",
       "count": 1,
-      "reason": "The line 7 read uses the literal app.js URL resolved from import.meta.url through fileURLToPath. Inquiry text and HTTP result fixtures cannot change the source filename."
+      "reason": "Re-reviewed after supplying authenticated session state to existing inquiry fixtures. The line 7 read still uses the literal app.js URL resolved from import.meta.url through fileURLToPath. Inquiry text and HTTP result fixtures cannot change the source filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-inquiry-retry-runtime.test.mjs",
+      "sha256": "6c0799432b040f6b7e1acaba3400191dac64e5edd025e1fc382b9be94aef5e2e",
+      "count": 1,
+      "reason": "Re-reviewed after real role-handler/native-disabled-button regressions. The sole line 5 read remains literal app.js relative to import.meta.url. Actual source-extracted role/session helpers, synthetic API responses and controlled promises operate only in memory and cannot select a filesystem path."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-api-read-context-runtime.test.mjs",
+      "sha256": "4ab725adeb9b4d61fe5366ffa5f9f87ba1dc90026938c948b97739a6c9b1baf4",
+      "count": 1,
+      "reason": "The only filesystem read, line 6, uses literal app.js relative to import.meta.url. Source-extracted api/loaders and controlled fetch/JSON promises operate in memory; no session, response, argument or environment value influences the filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-read-context-runtime.test.mjs",
+      "sha256": "2ccb6a96b4dd8aaa33e2d1b12d43ec225699f212c50ad264e0df1719f331c45d",
+      "count": 1,
+      "reason": "The sole read at line 6 resolves a literal app.js URL relative to import.meta.url. Session identities, synthetic response bodies and controlled promise interleavings operate only in memory; none can select or modify the filesystem path."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
