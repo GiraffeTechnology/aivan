@@ -9,6 +9,9 @@ const state = {
   limit: 20,
   total: 0,
   selectedCase: null,
+  authGeneration: 0,
+  caseRequestGeneration: 0,
+  executionHost: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -60,6 +63,15 @@ async function loadUiCatalog(code) {
 }
 
 async function api(path, options = {}) {
+  const session = state.session;
+  const generation = state.authGeneration ?? 0;
+  const assertCurrentSession = () => {
+    if (session !== state.session || generation !== (state.authGeneration ?? 0)) {
+      const error = new Error('The session changed. Reopen the current view.');
+      error.name = 'AbortError';
+      throw error;
+    }
+  };
   const method = String(options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
@@ -69,8 +81,10 @@ async function api(path, options = {}) {
     if (!headers.has('Idempotency-Key')) headers.set('Idempotency-Key', requestId('myaivan'));
   }
   const response = await fetch(path, { ...options, method, headers, credentials: 'same-origin' });
+  assertCurrentSession();
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('json') ? await response.json() : await response.text();
+  assertCurrentSession();
   if (!response.ok) {
     const detail = payload && typeof payload === 'object' ? payload.detail : payload;
     const message = typeof detail === 'string' ? detail : (detail?.error || `HTTP ${response.status}`);
@@ -83,6 +97,8 @@ async function api(path, options = {}) {
 }
 
 function showLogin(message = '') {
+  invalidateCaseView();
+  state.executionHost?.invalidate('signed-out');
   $('#login-view').hidden = false;
   $('#app-shell').hidden = true;
   const error = $('#login-error');
@@ -96,6 +112,7 @@ function showApp() {
 }
 
 function setView(name) {
+  if (name !== 'case-detail') invalidateCaseView();
   window.myAivanAttachments?.dispose();
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
@@ -104,6 +121,14 @@ function setView(name) {
   if (name === 'cases') loadCases();
   if (name === 'relay') loadRelay();
   if (name === 'health') loadHealth();
+}
+
+function invalidateCaseView() {
+  state.executionHost?.invalidate('context-changing');
+  state.caseRequestGeneration = (state.caseRequestGeneration ?? 0) + 1;
+  state.selectedCase = null;
+  const detail = $('#case-detail');
+  if (detail) detail.innerHTML = '';
 }
 
 function populateRoles(roles, selected) {
@@ -118,6 +143,7 @@ function populateRoles(roles, selected) {
 }
 
 async function establishSession() {
+  const generation = state.authGeneration;
   state.csrf = cookie('aivan_csrf');
   try {
     const fragment = new URLSearchParams(location.hash.slice(1));
@@ -130,6 +156,7 @@ async function establishSession() {
         body: JSON.stringify({ ticket: testTicket }),
       });
       const payload = await response.json();
+      if (generation !== state.authGeneration) return;
       if (!response.ok) {
         const error = new Error(payload.detail?.error || t('测试账号不可用'));
         error.status = response.status;
@@ -156,6 +183,7 @@ async function establishSession() {
 }
 
 async function login(event) {
+  const generation = state.authGeneration;
   event.preventDefault();
   const keyInput = $('#access-key');
   const tenantId = $('#tenant-id').value.trim();
@@ -173,6 +201,7 @@ async function login(event) {
       body: '{}',
     });
     const payload = await response.json();
+    if (generation !== state.authGeneration) return;
     if (!response.ok) throw new Error(payload.detail?.error || t('登录失败'));
     state.csrf = payload.csrf_token;
     keyInput.value = '';
@@ -191,13 +220,19 @@ async function login(event) {
 }
 
 async function logout() {
-  try { await api('/api/session/logout', { method: 'POST', body: '{}' }); } catch (_) { /* expire locally */ }
+  state.executionHost?.invalidate('signed-out');
+  const pending = api('/api/session/logout', {method:'POST', body:'{}'}).catch(() => {});
+  state.authGeneration += 1;
   state.csrf = '';
   state.session = null;
+  invalidateCaseView();
   showLogin();
+  await pending;
 }
 
 async function switchRole(event) {
+  state.executionHost?.invalidate('context-changing');
+  invalidateCaseView();
   const previous = state.session.role;
   try {
     const payload = await api('/api/session/role', {
@@ -307,10 +342,16 @@ function savedMessageRow(message) {
 }
 
 async function openCase(caseId) {
+  state.executionHost?.invalidate('context-changing');
   setView('case-detail');
+  const generation = ++state.caseRequestGeneration;
+  const session = state.session;
+  const isCurrent = () => generation === state.caseRequestGeneration && session === state.session;
+  state.selectedCase = null;
   $('#case-detail').innerHTML = `<div class="loading-card">${ht('正在读取共享 Core 数据…')}</div>`;
   try {
     const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
+    if (!isCurrent()) return;
     state.selectedCase = payload;
     const item = payload.case;
     const canExport = state.bootstrap.actor.capabilities.includes('view_audit');
@@ -336,6 +377,7 @@ async function openCase(caseId) {
     </section>
     ${section('Saved conversation', payload.messages, savedMessageRow)}
     <section class="panel" id="case-attachments"></section>
+    <section class="panel"><h2>Execution association</h2><p id="execution-association-status" role="status">Checking the existing association. Execution reads are not enabled.</p></section>
     <div class="detail-grid"><section class="panel"><h2>${ht('需求事实')}</h2><pre class="json-view">${escapeHtml(JSON.stringify(item.requirement || {}, null, 2))}</pre></section>
     <section class="panel"><h2>${ht('参与者与角色')}</h2>${payload.participants.length ? payload.participants.map((p) => `<div class="person"><strong>${escapeHtml(p.display_name || p.actor_id)}</strong><span>${escapeHtml(roleLabel(p.business_role))} · ${escapeHtml(p.conversation_role)}</span></div>`).join('') : emptyHtml()}</section></div>
     ${recommendation}
@@ -347,10 +389,38 @@ async function openCase(caseId) {
     ${section(t('事件时间线'), payload.events, eventRow)}
     ${section(t('审计记录'), payload.audit, (a) => `<article><strong>${escapeHtml(a.event_type)}</strong><span>${escapeHtml(a.actor_role)} · ${escapeHtml(a.actor_id)}</span><code>${escapeHtml(a.source_trace_id)}</code><time>${escapeHtml(formatTime(a.created_at))}</time></article>`)}`;
     window.myAivanAttachments?.mount($('#case-attachments'), item.case_id, api);
+    await loadExecutionAssociation(item.case_id, isCurrent);
   } catch (error) {
+    if (!isCurrent()) return;
     $('#case-detail').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
 }
+
+async function loadExecutionAssociation(caseId, isCurrent) {
+  if (!state.executionHost && window.myAivanExecutionHostContext) {
+    state.executionHost = window.myAivanExecutionHostContext.create();
+    window.myAivanExecutionHostSource = state.executionHost.source;
+  }
+  const generation = state.executionHost?.invalidate('context-changing');
+  try {
+    const association = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}/execution-association`);
+    if (!isCurrent()) return;
+    if (association?.schema_version !== 'aivan.execution-association.v1' || association.case_id !== caseId) {
+      throw new Error('EXECUTION_ASSOCIATION_INVALID');
+    }
+    // A verified provider association is not an authenticated execution route.
+    // No supported resolver exists yet, so never activate its local order ID.
+    state.executionHost?.activate({generation, sessionKey:requestId('execution-view'), orderId:null});
+    $('#execution-association-status').textContent = association.status === 'associated' && association.readback_verified === true
+      ? 'The existing association was read back. Execution reads remain unavailable: authenticated routing is not configured.'
+      : 'No verified execution association is available. Execution reads remain unavailable.';
+  } catch {
+    if (!isCurrent()) return;
+    state.executionHost?.invalidate('context-changing');
+    $('#execution-association-status').textContent = 'Association read failed. No execution mapping or ready state is claimed.';
+  }
+}
+
 
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
