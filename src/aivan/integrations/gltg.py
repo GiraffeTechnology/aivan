@@ -52,9 +52,9 @@ class GLTGClient:
             lead_time_confidence=strategy.lead_time_confidence,
         )
 
-        p50 = int(data["p50_days"])
-        p80 = int(data["p80_days"])
-        p90 = int(data["p90_days"])
+        p50 = float(data["p50_days"])
+        p80 = float(data["p80_days"])
+        p90 = float(data["p90_days"])
         confidence_days = {"P50": p50, "P80": p80, "P90": p90}[strategy.lead_time_confidence]
         risk = data.get("risk_level", "unknown")
 
@@ -70,7 +70,7 @@ class GLTGClient:
             p50_days=p50,
             p80_days=p80,
             p90_days=p90,
-            minimum_feasible_days=int(data.get("minimum_feasible_days") or max(p50 - 5, 1)),
+            minimum_feasible_days=data.get("minimum_feasible_days"),
             supplier_set_feasibility="sufficient" if supplier_count >= 2 else "thin",
             known_suppliers_first_feasibility=self._feasibility(confidence_days, requirement.delivery_days),
             public_bidding_time_cost_days=3 if strategy.public_bidding == "enabled" else 5,
@@ -112,24 +112,23 @@ class GLTGClient:
             lead_time_confidence="P80",
         )
 
-        p50 = int(data["p50_days"])
-        p80 = int(data["p80_days"])
-        p90 = int(data["p90_days"])
-        calculated = int(data["estimated_lead_time_days"])
-        earliest = int(data.get("minimum_feasible_days") or max(calculated - 5, 1))
+        p50 = float(data["p50_days"])
+        p80 = float(data["p80_days"])
+        p90 = float(data["p90_days"])
+        calculated = float(data["estimated_lead_time_days"])
+        earliest = data.get("minimum_feasible_days")
         risk = data.get("risk_level", "unknown")
 
         trace = (data.get("calculation_trace") or [{}])[0]
         components = [
-            LeadTimeComponent(name="material_ready", days=int(trace.get("material_ready_days", 0) or 0), source="gltg"),
-            LeadTimeComponent(
-                name="production",
-                days=int(trace.get("capacity_adjusted_production_days", 0) or 0),
-                source="gltg",
-                notes=f"qty={quantity}",
-            ),
-            LeadTimeComponent(name="qc", days=int(trace.get("qc_days", 0) or 0), source="gltg"),
-            LeadTimeComponent(name="logistics", days=int(trace.get("logistics_days", 0) or 0), source="gltg"),
+            LeadTimeComponent(name=name, days=trace[field], source="gltg")
+            for name, field in (
+                ("material_ready", "material_ready_days"),
+                ("production", "capacity_adjusted_production_days"),
+                ("qc", "qc_days"),
+                ("logistics", "logistics_days"),
+            )
+            if trace.get(field) is not None
         ]
 
         missing_inputs: list[str] = []
@@ -156,9 +155,9 @@ class GLTGClient:
             p90_days=p90,
             risk_buffer_days=max(p80 - p50, 0),
             deadline_days=deadline_days,
-            deadline_feasible=bool(data.get("feasible")) if deadline_days is not None else None,
+            deadline_feasible=self._deadline_feasible(data.get("feasible")) if deadline_days is not None else None,
             deadline_risk_level=risk,
-            critical_path=["material_ready", "production", "logistics"],
+            critical_path=data.get("critical_path") or [],
             components=components,
             missing_inputs=missing_inputs,
             supplier_questions=supplier_questions,
@@ -224,7 +223,9 @@ class GLTGClient:
         p50 = quantiles.get("p50_days")
         p80 = quantiles.get("p80_days")
         p90 = quantiles.get("p90_days")
-        selected = risk.get("selected_confidence_days") or p80
+        selected = risk.get("selected_confidence_days")
+        if selected is None:
+            selected = p80
         if p50 is None or p80 is None or p90 is None or selected is None:
             raise GLTGUnavailableError("GLTG v2 response missing quantiles")
         return {
@@ -238,14 +239,21 @@ class GLTGClient:
             "p50_days": p50,
             "p80_days": p80,
             "p90_days": p90,
-            "minimum_feasible_days": p50,
+            # A quantile is not evidence of the earliest possible delivery.
+            "minimum_feasible_days": None,
             "risk_level": risk.get("deadline_risk_level", "unknown"),
-            "feasible": risk.get("deadline_feasible"),
+            "feasible": GLTGClient._deadline_feasible(risk.get("deadline_feasible")),
             "calculation_trace": [],
         }
 
     @staticmethod
-    def _feasibility(confidence_days: int, deadline_days: int | None) -> str:
+    def _deadline_feasible(value: object) -> bool | None:
+        if value is None or isinstance(value, bool):
+            return value
+        raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
+
+    @staticmethod
+    def _feasibility(confidence_days: float, deadline_days: int | None) -> str:
         if deadline_days is None:
             return "unknown_without_deadline"
         if confidence_days <= deadline_days:

@@ -69,15 +69,15 @@ class GiraffeContext(BaseModel):
 
 
 class GLTGSimulation(BaseModel):
-    p50_days: int
-    p80_days: int
-    p90_days: int
-    minimum_feasible_days: int
+    p50_days: float = Field(ge=0, allow_inf_nan=False)
+    p80_days: float = Field(ge=0, allow_inf_nan=False)
+    p90_days: float = Field(ge=0, allow_inf_nan=False)
+    minimum_feasible_days: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     supplier_set_feasibility: str
     known_suppliers_first_feasibility: str
     public_bidding_time_cost_days: int
     fallback_trigger_recommendation: FallbackTrigger
-    selected_confidence_days: int
+    selected_confidence_days: float = Field(ge=0, allow_inf_nan=False)
     deadline_risk_level: str = "unknown"
     explanation: str = ""
     gltg_run_id: str | None = None
