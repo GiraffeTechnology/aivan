@@ -73,9 +73,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-relay-outcome-runtime.test.mjs",
-      "sha256": "b7d7ac5ba38691c9e8ce120e5e0df5a7a32782ea463f8d7a9d40d2a204577278",
+      "sha256": "1a1c97fd2d7bb05c27e3922806042693d6f1df0eeb9fc01b0b3644714b9d9c96",
       "count": 1,
-      "reason": "The only filesystem read at line 5 resolves the literal app.js URL relative to import.meta.url. Receipt contents, draft/case/channel identities and deferred response fixtures are in-memory function inputs, never filesystem path inputs."
+      "reason": "Re-reviewed after canonical channel alias and edited-receipt readback regressions. The only filesystem read at line 5 remains literal app.js relative to import.meta.url. Receipt references, supported channel aliases and deferred responses are only in-memory function inputs, never filesystem paths."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

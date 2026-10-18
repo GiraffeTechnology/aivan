@@ -591,8 +591,18 @@ async function confirmRelay(event) {
     });
     if (!isCurrent()) return;
     const saved = payload?.receipt;
+    // Match the API's existing canonical channel identity, not an outbox alias.
+    const canonicalChannel = value => {
+      if (typeof value !== 'string') return null;
+      const normalized = value.trim().toLowerCase().replaceAll('_', '-');
+      const aliases = {smtp: 'email', weixin: 'wechat', 'we-chat': 'wechat', 'openclaw-weixin': 'wechat',
+        aliwangwang: 'wangwang', 'ali-wangwang': 'wangwang', 'whats-app': 'whatsapp'};
+      return Object.hasOwn(aliases, normalized) ? aliases[normalized] : normalized;
+    };
     if (payload?.status !== 'relayed' || typeof payload.idempotent_replay !== 'boolean'
-      || !saved || saved.draft_id !== draftId || saved.case_id !== caseId || saved.channel !== channel
+      || !saved || saved.draft_id !== draftId || saved.case_id !== caseId
+      || !canonicalChannel(channel) || canonicalChannel(saved.channel) !== canonicalChannel(channel)
+      || saved.receipt_reference !== receipt
       || !['receipt_id', 'confirmed_by', 'confirmed_at']
         .every(key => typeof saved[key] === 'string' && saved[key].trim())) {
       throw new Error('RELAY_RECEIPT_UNVERIFIED');

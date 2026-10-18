@@ -46,9 +46,18 @@ for (const response of [null, {}, {status: 'sent'}, {status: 'relayed'},
   assert.ok(!h.events.includes('reload'));
 }
 for (const patch of [{draft_id: 'other'}, {case_id: 'other'}, {channel: 'email'},
-  {receipt_id: ''}, {confirmed_at: ''}, {confirmed_by: ''}]) {
+  {receipt_id: ''}, {confirmed_at: ''}, {confirmed_by: ''}, {receipt_reference: 'different-reference'}]) {
   const h = harness(); h.response({...h.valid, receipt: {...h.valid.receipt, ...patch}}); await h.submit();
   assert.equal(h.events.filter(e => e.kind === 'success').length, 0);
+}
+for (const [channel, canonical] of [['weixin', 'wechat'], ['we-chat', 'wechat'],
+  ['openclaw-weixin', 'wechat'], [' OpenClaw_Weixin ', 'wechat'],
+  ['aliwangwang', 'wangwang'], ['ali-wangwang', 'wangwang'], ['smtp', 'email']]) {
+  const h = harness(); h.form.dataset.channel = channel;
+  h.response({...h.valid, receipt: {...h.valid.receipt, channel: canonical}});
+  await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 1,
+    'the supported raw outbox alias must match the backend canonical receipt identity');
 }
 for (const replay of [false, true]) {
   const h = harness(); h.response({...h.valid, idempotent_replay: replay}); await h.submit();
@@ -85,6 +94,11 @@ for (const change of [h => {h.state.session = null;}, h => {h.state.authGenerati
   await h.submit(); h.form.receipt = 'corrected-reference'; await h.submit();
   assert.equal(h.events.filter(e => e.path)[1].options.headers['Idempotency-Key'], 'relay-request-2',
     'changed payload must not silently reuse the prior request identity');
+  h.response({...h.valid, idempotent_replay: true});
+  await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 0,
+    'readback of the original receipt is not persistence of an edited reference');
+  assert.equal(h.form.dataset.relayKey, 'relay-request-2');
 }
 {
   const h = harness(); let release;
