@@ -17,7 +17,9 @@ function harness() {
   let response = valid;
   let accepted = true;
   const context = vm.createContext({state, t: value => value,
-    window: {confirm() { events.push('confirmation'); return accepted; }},
+    window: {confirm() { events.push('confirmation'); return accepted; }, scrollTo() {}},
+    $$: () => [], history: {replaceState() {}},
+    loadCases() {}, loadRelay() {}, loadHealth() {},
     api: async (path, options) => {
       events.push({path, body: JSON.parse(options.body)});
       return typeof response === 'function' ? response() : response;
@@ -26,8 +28,10 @@ function harness() {
     openCase: async id => events.push({opened: id}),
   });
   vm.runInContext(source.slice(start, end), context);
+  vm.runInContext(source.slice(source.indexOf('function setView('), source.indexOf('function populateRoles(')), context);
   return {state, valid, events, submit: () => context.confirmOrder('case-1', 'option-1'),
-    response(value) { response = value; }, accept(value) { accepted = value; }};
+    response(value) { response = value; }, accept(value) { accepted = value; },
+    navigate: name => context.setView(name)};
 }
 
 const invalid = [null, {}, [], {status: 'error'}, {status: 'pending'},
@@ -64,7 +68,7 @@ for (const recovered of [false, true]) {
   assert.ok(!h.events.at(-1).message.includes('private provider'));
 }
 for (const change of [h => {h.state.session = null;}, h => {h.state.authGeneration++;},
-  h => {h.state.caseRequestGeneration++;}, h => {h.state.selectedCase = {case: {case_id: 'other-case'}};}]) {
+  h => {h.navigate('cases');}, h => {h.state.selectedCase = {case: {case_id: 'other-case'}};}]) {
   const h = harness(); let release;
   h.response(() => new Promise(resolve => {release = resolve;}));
   const pending = h.submit(); change(h); release(h.valid); await pending;

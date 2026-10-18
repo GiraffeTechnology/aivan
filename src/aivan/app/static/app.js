@@ -9,6 +9,7 @@ const state = {
   limit: 20,
   total: 0,
   selectedCase: null,
+  caseRequestGeneration: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -96,6 +97,7 @@ function showApp() {
 }
 
 function setView(name) {
+  state.caseRequestGeneration += 1;
   window.myAivanAttachments?.dispose();
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
