@@ -80,13 +80,15 @@ def test_v2_selected_zero_confidence_is_preserved():
     assert result["estimated_lead_time_days"] == 0
 
 
-def test_unknown_feasibility_does_not_become_false(monkeypatch):
-    data = payload(); data["feasible"] = None
-    assert facade(monkeypatch, data).estimate_for_requirement(requirement()).deadline_feasible is None
+@pytest.mark.parametrize("value", [None, False, True])
+def test_unknown_feasibility_does_not_become_false(monkeypatch, value):
+    data = payload(); data["feasible"] = value
+    assert facade(monkeypatch, data).estimate_for_requirement(requirement()).deadline_feasible is value
 
 
-def test_malformed_feasibility_does_not_become_true(monkeypatch):
-    data = payload(); data["feasible"] = "false"
+@pytest.mark.parametrize("value", ["false", "true", "", 0, 1, [], {}])
+def test_malformed_feasibility_does_not_become_true(monkeypatch, value):
+    data = payload(); data["feasible"] = value
     with pytest.raises(GLTGUnavailableError):
         facade(monkeypatch, data).estimate_for_requirement(requirement())
 
