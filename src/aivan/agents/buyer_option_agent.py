@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import os
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -20,7 +21,10 @@ def generate_buyer_options(
     if not supplier_replies:
         return []
 
-    valid_replies = [r for r in supplier_replies if r.unit_price is not None]
+    valid_replies = [
+        r for r in supplier_replies
+        if r.unit_price is not None and math.isfinite(r.unit_price) and r.unit_price >= 0
+    ]
     if not valid_replies:
         return []
 
