@@ -38,9 +38,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-conversation-runtime.test.mjs",
-      "sha256": "200ec4ba4d6bc64f307180d796112f6d4b66c7354bee82abc66daede0ee7ba81",
+      "sha256": "5c02670d21fb07e5860488e9fe7784addaa75daebdd45f43e214565d2c1d0bc0",
       "count": 2,
-      "reason": "Re-reviewed after delegated order-confirmation click regressions. Reads at lines 4 and 5 remain literal app.js and index.html URLs relative to import.meta.url. Conversation data, synthetic click targets and confirmation responses never control filesystem paths."
+      "reason": "Re-reviewed after the order-confirmation response fixture gained verified status and record identities. Reads at lines 4 and 5 remain literal app.js and index.html URLs relative to import.meta.url. Conversation data, synthetic click targets and confirmation responses never control filesystem paths."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
@@ -66,9 +66,16 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-welcome-runtime.test.mjs",
-      "sha256": "b53f5ec8a510f814b6a686ffd458c927784f3d4d2de2bf4201f2210862c22592",
+      "sha256": "c373ac27a3f3976bb240f80f19629445d41473e9c34091a5244d5fe37713a62f",
       "count": 2,
-      "reason": "Reads at lines 5 and 6 use literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
+      "reason": "Re-reviewed after supplying navigation-generation state to the runtime fixture. Reads at lines 5 and 6 remain literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-order-outcome-runtime.test.mjs",
+      "sha256": "32749583b100cca5353697166dad85d419e108a2e49a2cd30f1190156625a224",
+      "count": 1,
+      "reason": "The only filesystem read at line 5 resolves a literal app.js URL relative to import.meta.url. Case/option IDs, response objects, session changes and deferred promise fixtures only exercise functions extracted from that fixed source string; none select or alter a filesystem path."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

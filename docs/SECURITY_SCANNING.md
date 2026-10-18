@@ -137,7 +137,7 @@ finding cannot inherit an exception.
   test/API destinations or fixed localhost URLs, with explicit timeouts. Their
   URL inputs are not application request input. The generic urllib rule matches
   all such uses. These exact two files account for two and three findings.
-- Nine web-only JavaScript runtime tests contain fourteen exact filesystem reads
+- Ten web-only JavaScript runtime tests contain fifteen exact filesystem reads
   of literal application source/template URLs resolved from `import.meta.url`.
   Inquiry, conversation, upload and clipboard fixtures never control those paths.
   Each reviewed rule/path is bound to its own whole-file digest and exact count,
@@ -145,6 +145,9 @@ finding cannot inherit an exception.
   asynchronous preview/copy and focus-recovery regressions; its single literal
   source read is unchanged. The GPM smoke-script review retains its three
   operator-selected/localhost URL destinations and explicit timeouts.
+  The order-outcome test adds one literal app.js read; its synthetic responses
+  and navigation/session changes never choose filesystem paths. Conversation
+  and welcome reviews retain the same literal paths after fixture-state updates.
 - The installer builder has two SHA-1 matches that reconstruct existing Git
   tree/blob object IDs with `usedforsecurity=False`, and its synthetic test has
   one equivalent Git blob fixture. Payload, wheel and installer integrity use
@@ -165,8 +168,8 @@ finding cannot inherit an exception.
   environment variables. Its single dangerous-trigger heuristic is reviewed for
   that exact content. Changing it to `pull_request` would weaken tamper resistance.
 
-The complete-candidate scan retains all thirty-six WARNING findings: five urllib
-calls, fourteen runtime-test source reads, three Git-compatible SHA-1 uses, two
+The complete-candidate scan retains all thirty-seven WARNING findings: five urllib
+calls, fifteen runtime-test source reads, three Git-compatible SHA-1 uses, two
 builder subprocess calls and twelve synthetic-verifier filesystem operations.
 Content drift, a new matching occurrence, or an unrelated rule still fails. The
 older `installer/runtime.py` urllib review is retained without modification but
