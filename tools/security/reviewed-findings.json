@@ -65,6 +65,13 @@
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-read-context-runtime.test.mjs",
+      "sha256": "2ccb6a96b4dd8aaa33e2d1b12d43ec225699f212c50ad264e0df1719f331c45d",
+      "count": 1,
+      "reason": "The sole read at line 6 resolves a literal app.js URL relative to import.meta.url. Session identities, synthetic response bodies and controlled promise interleavings operate only in memory; none can select or modify the filesystem path."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-message-readback-runtime.test.mjs",
       "sha256": "c955daaec62d777ca7ea8a2cbaa9b2a8ea2482182a00f20094694d7d5b637f9e",
       "count": 1,
