@@ -39,8 +39,8 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     price_match = re.search(r'(?:usd|price|单价|¥|\$)\s*([\d.]+)', text_lower)
     unit_price = float(price_match.group(1)) if price_match else None
 
-    day_match = re.search(r'(\d+)\s*(?:days?|天)', text_lower)
-    lead_time = int(day_match.group(1)) if day_match else None
+    day_match = re.search(r'(?<![\d.])(\d+(?:\.\d+)?)\s*(?:days?|天)', text_lower)
+    lead_time = float(day_match.group(1)) if day_match else None
 
     moq_match = re.search(r'moq[:\s]*(\d[\d,]*)', text_lower)
     moq = int(moq_match.group(1).replace(",", "")) if moq_match else None
