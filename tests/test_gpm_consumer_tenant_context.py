@@ -24,7 +24,7 @@ def invoke(monkeypatch, project_tenant, event_tenant):
     def run():
         return create_stage1_gpm_guidance(
             project=SimpleNamespace(tenant_id=project_tenant, project_id='case-1'),
-            event=OpenClawEvent(tenant_id=event_tenant, authenticated_actor_id='operator-1',
+            event=OpenClawEvent(tenant_id=event_tenant, conversation_id='synthetic-conversation', authenticated_actor_id='operator-1',
                                authenticated_actor_role='sales', source_trace_id='trace-1'),
             requirement=requirement, selected_option=option, replies=[reply],
             gltg_result=SimpleNamespace(gltg_run_id='gltg-run-1', source_api_version='v2'))
