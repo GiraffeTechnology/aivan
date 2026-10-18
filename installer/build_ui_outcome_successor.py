@@ -26,6 +26,8 @@ BASE_TREE = "144e6de03528f891944b32f4f50e2eb94a6b2c06"
 SITE = Path("runtime/lib/python3.12/site-packages")
 UI_SOURCE = "src/aivan/app/static/app.js"
 UI_TARGET = str(SITE / "aivan/app/static/app.js")
+BUILD_KIND = "offline-ui-workflow-outcome-successor"
+PROFILE_SHA256 = None
 
 
 def extract_base(installer: Path, destination: Path) -> dict:
@@ -137,8 +139,8 @@ def apply_ui(source: Path, payload: Path, selected: dict) -> None:
     target.write_bytes(content)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(*, description=None):
+    parser = argparse.ArgumentParser(description=description or __doc__)
     parser.add_argument("--base-installer", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--revision", required=True)
@@ -172,7 +174,7 @@ def main():
         base_provenance = json.loads((payload / "derived-build.json").read_text())
         apply_ui(source, payload, selected)
         provenance = {
-            "build_kind": "offline-ui-workflow-outcome-successor", "release": args.release,
+            "build_kind": BUILD_KIND, "release": args.release,
             "base_installer_sha256": BASE_SHA256, "base_manifest_sha256": base_manifest_sha,
             "base_derived_build": base_provenance, "selected_application_source": evidence,
             "runtime_delta": [selected], "builder_sha256": build.digest(Path(__file__)),
@@ -180,6 +182,8 @@ def main():
             "abi_evidence": "Base report retained, not a new host or ABI test",
             "acceptance": "Build integrity only; real-service, MySQL, browser and deployment results are separate",
         }
+        if PROFILE_SHA256 is not None:
+            provenance["profile_sha256"] = PROFILE_SHA256
         metadata = list((payload / SITE).glob("aivan-*.dist-info"))
         if len(metadata) != 1 or not metadata[0].is_dir() or metadata[0].is_symlink():
             raise ValueError("Expected exactly one selected Aivan distribution")
