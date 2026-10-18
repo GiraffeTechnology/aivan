@@ -41,14 +41,15 @@ def test_fixed_base_source_and_bounded_targets():
     m = builder()
     assert m.BASE_SHA256 == 'c08be0645a38dabec08520a3717035889be04b8ea2be3f1f36fe9a456b2b9e62'
     assert m.BASE_REVISION == '22bdf78f393dc8e1a16483280cdf6bfeb019c236'
-    assert m.SOURCE_REVISION == '6707c2b1e73b59fdceac5184e9b561fdd69e9919'
-    assert m.SOURCE_TREE == 'c8e3ec4ffa6444d5a0df4703f10b7514fb7c221d'
+    assert m.SOURCE_REVISION == '66dbe65cb410a7082909c84069ee7c124cd5fa11'
+    assert m.SOURCE_TREE == '3182fff78d771f8119cab96b123f599485c6c194'
     assert len(m.source_targets()) == 12
     assert m.source_targets()['installer/runtime.py'] == 'runtime.py'
     assert all('gpm_guidance.py' not in path and 'gltg.py' not in path for path in m.source_targets())
 
 
-@pytest.mark.parametrize('revision,tree', [('f' * 40, 'f' * 40), ('short', 'f' * 40)])
+@pytest.mark.parametrize('revision,tree', [('f' * 40, 'f' * 40), ('short', 'f' * 40),
+    ('6707c2b1e73b59fdceac5184e9b561fdd69e9919', 'c8e3ec4ffa6444d5a0df4703f10b7514fb7c221d')])
 def test_wrong_candidate_identity_rejected(revision, tree):
     m = builder()
     with pytest.raises(ValueError):
