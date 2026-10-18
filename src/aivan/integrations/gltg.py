@@ -248,9 +248,9 @@ class GLTGClient:
 
     @staticmethod
     def _deadline_feasible(value: object) -> bool | None:
-        if value is not None and type(value) is not bool:
-            raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
-        return value
+        if value is None or isinstance(value, bool):
+            return value
+        raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
 
     @staticmethod
     def _feasibility(confidence_days: float, deadline_days: int | None) -> str:
