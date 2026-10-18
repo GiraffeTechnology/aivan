@@ -407,7 +407,7 @@ function inquirySubmissionOutcome(payload) {
 async function submitInquiry(event) {
   event.preventDefault();
   const form = event.target;
-  if (form.inquirySubmitting || !state.session) return;
+  if (!state.session || form.inquirySubmission?.session === state.session) return;
   const session = state.session;
   const buyerId = $('#buyer-id').value.trim();
   const buyerName = $('#buyer-name').value.trim();
@@ -420,12 +420,15 @@ async function submitInquiry(event) {
         sender_id: buyerId, sender_display_name: buyerName, message_text: text})};
   }
   const attempt = state.inquiryAttempt;
-  const isCurrent = () => session === state.session && attempt === state.inquiryAttempt;
+  const button = event.submitter;
+  const previous = form.inquirySubmission;
+  const submission = {session, button,
+    wasDisabled: previous && previous.button === button ? previous.wasDisabled : button?.disabled};
+  form.inquirySubmission = submission;
+  const isCurrent = () => session === state.session && form.inquirySubmission === submission;
   const inputUnchanged = () => signature === JSON.stringify([
     $('#buyer-id')?.value.trim(), $('#buyer-name')?.value.trim(), $('#inquiry-text')?.value.trim(),
   ]);
-  const button = event.submitter;
-  const wasDisabled = button?.disabled;
   form.inquirySubmitting = true;
   if (button) button.disabled = true;
   const result = $('#inquiry-result');
@@ -445,6 +448,8 @@ async function submitInquiry(event) {
     if (!isCurrent()) return;
     const outcome = inquirySubmissionOutcome(payload);
     if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
+    // A confirmed intake is complete; only unknown outcomes retain their retry identity.
+    if (state.inquiryAttempt === attempt) state.inquiryAttempt = null;
     result.hidden = false;
     const responseMessage = payload.action === 'pending_email_approval' && !outcome.enteredApprovalFlow
       ? t('请求已受理，请按案例提示继续。')
@@ -463,8 +468,11 @@ async function submitInquiry(event) {
   } catch (_) {
     if (isCurrent()) toast(`${t('创建失败：')}${t('服务器未确认案例创建，请检查输入后重试。')}`, 'error');
   } finally {
-    form.inquirySubmitting = false;
-    if (button) button.disabled = wasDisabled;
+    if (form.inquirySubmission === submission) {
+      delete form.inquirySubmission;
+      form.inquirySubmitting = false;
+      if (button) button.disabled = submission.wasDisabled;
+    }
   }
 }
 

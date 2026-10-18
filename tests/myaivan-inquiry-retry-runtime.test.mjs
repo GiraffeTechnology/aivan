@@ -69,4 +69,32 @@ function harness() {
   await pending;
   assert.equal(h.fields['#inquiry-text'].value, 'New unsent instructions.', 'a late accepted response must not erase newer input');
 }
-console.log('Inquiry unknown-outcome replay, changed input, duplicate submit and session/new-input races passed.');
+{
+  const h = harness();
+  const text = h.fields['#inquiry-text'].value;
+  h.response(() => ({status: 'ok', action: 'pending_email_approval', project_id: 'case-1', drafts_created: ['draft-1']}));
+  await h.submit();
+  h.fields['#inquiry-text'].value = text;
+  await h.submit();
+  const requests = h.events.filter(e => e.path);
+  assert.equal(requests.length, 2);
+  assert.notEqual(requests[0].options.headers['Idempotency-Key'], requests[1].options.headers['Idempotency-Key'],
+    'a deliberately repeated inquiry after confirmed acceptance must receive a new identity');
+  assert.notEqual(requests[0].options.body, requests[1].options.body);
+}
+{
+  const h = harness(); const releases = [];
+  h.response(() => new Promise(resolve => releases.push(resolve)));
+  const old = h.submit(); h.state.session = {role: 'buyer'};
+  const current = h.submit();
+  assert.equal(releases.length, 2, 'a new session must not wait for a hung previous-session fetch');
+  releases[0]({status: 'ok', action: 'pending_email_approval', project_id: 'old-case', drafts_created: ['old-draft']});
+  await old;
+  assert.equal(h.submitter.disabled, true, 'old finally must not release the new session submit guard');
+  assert.equal(h.events.filter(e => e.kind).length, 0);
+  releases[1]({status: 'ok', action: 'pending_email_approval', project_id: 'new-case', drafts_created: ['new-draft']});
+  await current;
+  assert.equal(h.submitter.disabled, false);
+  assert.ok(!h.fields['#inquiry-result'].textContent.includes('old-case'));
+}
+console.log('Inquiry unknown retries, fresh accepted submissions and controlled cross-session pending requests passed.');
