@@ -66,9 +66,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-welcome-runtime.test.mjs",
-      "sha256": "b53f5ec8a510f814b6a686ffd458c927784f3d4d2de2bf4201f2210862c22592",
+      "sha256": "48903637ea7e044d4e25f1964d8fc7f79d6f396886e8b675a3905a034c4c5e7e",
       "count": 2,
-      "reason": "Reads at lines 5 and 6 use literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
+      "reason": "Re-reviewed the complete fixture after adding the literal state object and null DOM selector required by host invalidation. The only reads at lines 5 and 6 remain literal index.html and app.js URLs relative to import.meta.url. Neither the added VM state nor the selector, navigation fragments, fixture responses, environment or request input reaches either filename; no filesystem write exists. Existing navigation assertions remain unchanged."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
@@ -111,6 +111,27 @@
       "sha256": "2685549e3c32924f76c04a3f949d11b9b4d8e55915fb22898af257d9ebbfd61c",
       "count": 12,
       "reason": "Reviewed all twelve real scanner matches in the operator-invoked synthetic browser verifier: lines 75, 76, 77, 85, 86, 89, 112, 114, 119, 294, 526 and 562. Prefix, package and evidence roots are explicit operator CLI paths; manifest reads stay within the resolved installed release, which must be an immediate child of the real releases directory; the runner read is __filename. Evidence filenames are literal or formed from the validated alphanumeric/underscore/hyphen run ID and internal numeric sequence. Download content and suggested filenames never select filesystem destinations. No application request, conversation, upload name or fixture controls these paths. This narrow review does not certify browser acceptance or authorize restarts or external delivery."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-handoff-wiring.test.mjs",
+      "sha256": "f1a2d30a37f91edcf85044797c5d69c364a93b3eead99609ede54af052c5a14a",
+      "count": 2,
+      "reason": "Reviewed both scanner matches at lines 7 and 8 against the complete fixture. These are literal app.js and index.html URLs relative to import.meta.url. The synthetic API response and stale-view predicate are used only after these source reads and cannot select either path. There are no filesystem writes, CLI or environment path inputs."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-r6-host-integration.test.mjs",
+      "sha256": "7d1184eea2d358f3accbb4f3a2e7e36e9935e34570f0c5301f06ea59afa5e735",
+      "count": 3,
+      "reason": "Reviewed all three actual scanner matches at lines 10, 88 and 96. The helper reads literal app/context/binding filenames and the JS asset key from the checked-in r6-execution-assets.json; the asset loop reads keys from that same repository-controlled manifest and verifies bytes and SHA-256. HTML uses a literal index.html URL. All resolve from the fixed source-relative static root or literal template URL. No request, synthetic association, fetch response, environment or argument can select these filesystem paths. The manifest is trusted test source, not application input."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/r6-host-vm-support.mjs",
+      "sha256": "8e92d70800846492a86c3aff3d8233b2b5dc16e88583dd83803783ca7422b35e",
+      "count": 1,
+      "reason": "Reviewed the actual scanner match at line 7 and every caller in this helper. The fixed source-relative static root is combined only with literal context/binding/manifest names or the JS key from the checked-in r6-execution-assets.json. No VM state, API response, upload, environment or CLI value selects a path. The helper performs read-only repository fixture loading; it does not expose a filesystem API to application requests."
     }
   ],
   "zizmor": [
