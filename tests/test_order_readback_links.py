@@ -10,11 +10,12 @@ from tests.test_order_confirmation import (
 )
 
 
+@pytest.mark.parametrize('phase', ['reconcile', 'confirm-retry'])
 @pytest.mark.parametrize('mismatch', [
     'graph-case', 'quote-case', 'order-case', 'quote-rfq', 'order-supplier',
     'graph-order-selection', 'graph-quote-supplier', 'quote-tenant',
 ])
-def test_reconcile_does_not_verify_contradictory_readback(monkeypatch, mismatch):
+def test_reconcile_does_not_verify_contradictory_readback(monkeypatch, mismatch, phase):
     fixture = ProviderContractFixture()
     client = _client(monkeypatch, fixture)
     first = client.confirm_order(project_id='project-1',
@@ -43,9 +44,16 @@ def test_reconcile_does_not_verify_contradictory_readback(monkeypatch, mismatch)
 
     client._transport = httpx.MockTransport(mutate)
     with pytest.raises(OrderConfirmationError):
-        client.reconcile_order(procurement_case_id=CASE_ID,
-            supplier_quote_id=first.supplier_quote_id, purchase_order_id=first.purchase_order_id)
-    assert len(fixture.post_calls) == post_count
+        if phase == 'reconcile':
+            client.reconcile_order(procurement_case_id=CASE_ID,
+                supplier_quote_id=first.supplier_quote_id, purchase_order_id=first.purchase_order_id)
+        else:
+            client.confirm_order(project_id='project-1',
+                graph_reference={'procurement_case_id': CASE_ID, 'rfq_id': RFQ_ID},
+                selected_option=_option(), identity=_identity(), request_key='retry-request')
+    if phase == 'reconcile':
+        assert len(fixture.post_calls) == post_count
+    assert len(fixture.quotes) == len(fixture.orders) == 1
 
 def test_compatible_provider_may_omit_optional_identity_echoes(monkeypatch):
     fixture = ProviderContractFixture()
@@ -71,3 +79,28 @@ def test_compatible_provider_may_omit_optional_identity_echoes(monkeypatch):
         supplier_quote_id=result.supplier_quote_id, purchase_order_id=result.purchase_order_id)
     assert recovered.readback_verified is True
     assert recovered.rfq_id == RFQ_ID
+
+
+@pytest.mark.parametrize('mismatch', ['tenant', 'rfq-case', 'rfq-tenant'])
+def test_contradictory_initial_graph_is_rejected_before_writes(monkeypatch, mismatch):
+    fixture = ProviderContractFixture()
+    client = _client(monkeypatch, fixture)
+
+    def mutate(request):
+        response = fixture(request)
+        data = response.json()
+        if mismatch == 'tenant':
+            data['procurement_case']['tenant_id'] = 'other-tenant'
+        elif mismatch == 'rfq-case':
+            data['rfqs'][0]['procurement_case_id'] = 'other-case'
+        else:
+            data['rfqs'][0]['tenant_id'] = 'other-tenant'
+        return httpx.Response(200, json=data)
+
+    client._transport = httpx.MockTransport(mutate)
+    with pytest.raises(OrderConfirmationError):
+        client.confirm_order(project_id='project-1',
+            graph_reference={'procurement_case_id': CASE_ID, 'rfq_id': RFQ_ID},
+            selected_option=_option(), identity=_identity(), request_key='initial-request')
+    assert fixture.post_calls == []
+    assert fixture.quotes == fixture.orders == {}
