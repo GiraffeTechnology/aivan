@@ -122,9 +122,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-r6-host-integration.test.mjs",
-      "sha256": "1c29ee3137376294e44edeee360244c2966e543ce9cf329aaf51e19af4c6e3e8",
+      "sha256": "65400caeb8d806dc4c24dcd17e61cd9de8bb594472a055a689ccbf8e46c341c4",
       "count": 3,
-      "reason": "Reviewed all three actual scanner matches at lines 10, 88 and 96. The helper reads literal app/context/binding filenames and the JS asset key from the checked-in r6-execution-assets.json; the asset loop reads keys from that same repository-controlled manifest and verifies bytes and SHA-256. HTML uses a literal index.html URL. All resolve from the fixed source-relative static root or literal template URL. No request, synthetic association, fetch response, environment or argument can select these filesystem paths. The manifest is trusted test source, not application input. Re-reviewed after stale-session restore and current-denial interleavings were appended: new session objects, deferred Responses and statuses stay in memory and add no filesystem reads or filename inputs. The three read sites and their count remain unchanged."
+      "reason": "Reviewed all three actual scanner matches at lines 10, 88 and 96. The helper reads literal app/context/binding filenames and the JS asset key from the checked-in r6-execution-assets.json; the asset loop reads keys from that same repository-controlled manifest and verifies bytes and SHA-256. HTML uses a literal index.html URL. All resolve from the fixed source-relative static root or literal template URL. No request, synthetic association, fetch response, environment or argument can select these filesystem paths. The manifest is trusted test source, not application input. Re-reviewed after stale-session restore and current-denial interleavings were appended: new session objects, deferred Responses and statuses stay in memory and add no filesystem reads or filename inputs. The three read sites and their count remain unchanged. Re-reviewed the appended superseded-login success/denial/invalid-JSON cases and current denial: only in-memory session and Response values were added; no new filesystem call or path source exists."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

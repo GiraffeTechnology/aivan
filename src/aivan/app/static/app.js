@@ -188,6 +188,7 @@ async function establishSession() {
 
 async function login(event) {
   const generation = state.authGeneration;
+  let expectedSession = state.session;
   event.preventDefault();
   const keyInput = $('#access-key');
   const tenantId = $('#tenant-id').value.trim();
@@ -205,18 +206,20 @@ async function login(event) {
       body: '{}',
     });
     const payload = await response.json();
-    if (generation !== state.authGeneration) return;
+    if (generation !== state.authGeneration || state.session !== expectedSession) return;
     if (!response.ok) throw new Error(payload.detail?.error || t('登录失败'));
     state.csrf = payload.csrf_token;
     keyInput.value = '';
     state.executionHost?.invalidate('context-changing');
     state.session = payload;
+    expectedSession = payload;
     showApp();
     $('#test-account-banner').hidden = true;
     populateRoles(payload.allowed_roles, payload.role);
     await Promise.all([loadBootstrap(), loadCases(true), loadHealth()]);
     setView('welcome');
   } catch (error) {
+    if (generation !== state.authGeneration || state.session !== expectedSession || error.name === 'AbortError') return;
     showLogin(error.message);
   } finally {
     keyInput.value = '';

@@ -263,3 +263,36 @@ test('a current session restore denial still clears the mounted order', async ()
     assert.equal(h.node('#app-shell').hidden, true);
   }
 });
+
+test('a superseded login response cannot replace or clear the newer host lifetime', async () => {
+  for (const replaceGeneration of [false, true]) {
+    for (const result of ['success', 'denied', 'invalid-json']) {
+      const h = harness(); await h.load();
+      const pending = deferred(); h.resourceWith(() => pending.promise);
+      vm.runInContext(selected('async function login(', '\nasync function logout('), h.ctx);
+      h.node('#access-key').value = 'synthetic-key'; h.node('#tenant-id').value = 'synthetic-tenant';
+      const loggingIn = h.ctx.login({preventDefault() {}, submitter: {disabled: false}});
+      const newerSession = {role: 'admin', marker: 'newer-session'};
+      if (replaceGeneration) h.state.authGeneration += 1;
+      h.state.executionHost.invalidate('context-changing'); h.state.session = newerSession;
+      await h.load(); const newerContext = h.current();
+      pending.resolve(new Response(result === 'invalid-json' ? '{' : JSON.stringify({role: 'admin', detail: {error: 'synthetic denial'}}),
+        {status: result === 'denied' ? 403 : 200, headers: {'content-type': 'application/json'}}));
+      await loggingIn;
+      assert.equal(h.state.session, newerSession, 'A superseded login must not adopt its old response');
+      assert.equal(h.current(), newerContext, 'A superseded login must not clear the newer host');
+    }
+  }
+});
+
+test('a current login denial still clears the mounted order', async () => {
+  const h = harness(); await h.load();
+  vm.runInContext(selected('async function login(', '\nasync function logout('), h.ctx);
+  h.node('#access-key').value = 'synthetic-key'; h.node('#tenant-id').value = 'synthetic-tenant';
+  h.resourceWith(async () => new Response(JSON.stringify({detail: {error: 'synthetic denial'}}),
+    {status: 403, headers: {'content-type': 'application/json'}}));
+  await h.ctx.login({preventDefault() {}, submitter: {disabled: false}});
+  assert.equal(h.current(), null);
+  assert.equal(h.node('#login-view').hidden, false);
+  assert.equal(h.node('#app-shell').hidden, true);
+});
