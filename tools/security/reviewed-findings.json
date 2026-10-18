@@ -59,9 +59,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-inquiry-retry-runtime.test.mjs",
-      "sha256": "19dfe232a5ea9d8a9c8ce1af6a3734efe481aa07ec9f035a05dd6fa4372751c8",
+      "sha256": "6c0799432b040f6b7e1acaba3400191dac64e5edd025e1fc382b9be94aef5e2e",
       "count": 1,
-      "reason": "Re-reviewed after confirmed-inquiry identity retirement and controlled cross-session pending-request regressions. The only filesystem read at line 5 still resolves literal app.js relative to import.meta.url. Buyer text, request identities, session changes and promise resolution order affect only in-memory function inputs, never the read path."
+      "reason": "Re-reviewed after real role-handler/native-disabled-button regressions. The sole line 5 read remains literal app.js relative to import.meta.url. Actual source-extracted role/session helpers, synthetic API responses and controlled promises operate only in memory and cannot select a filesystem path."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

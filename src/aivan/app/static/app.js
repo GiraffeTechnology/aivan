@@ -138,6 +138,7 @@ async function establishSession() {
       state.csrf = payload.csrf_token;
     }
     state.session = await api('/api/session');
+    releaseInquirySubmission();
     showApp();
     $('#test-account-banner').hidden = !state.session.test_account;
     $$('.test-account-restricted').forEach((node) => {
@@ -177,6 +178,7 @@ async function login(event) {
     state.csrf = payload.csrf_token;
     keyInput.value = '';
     state.session = payload;
+    releaseInquirySubmission();
     showApp();
     $('#test-account-banner').hidden = true;
     populateRoles(payload.allowed_roles, payload.role);
@@ -194,6 +196,7 @@ async function logout() {
   try { await api('/api/session/logout', { method: 'POST', body: '{}' }); } catch (_) { /* expire locally */ }
   state.csrf = '';
   state.session = null;
+  releaseInquirySubmission();
   showLogin();
 }
 
@@ -204,6 +207,7 @@ async function switchRole(event) {
       method: 'POST', body: JSON.stringify({ role: event.target.value }),
     });
     state.session = payload;
+    releaseInquirySubmission();
     state.csrf = payload.csrf_token;
     state.selectedCase = null;
     setView('dashboard');
@@ -402,6 +406,17 @@ function inquirySubmissionOutcome(payload) {
     projectId,
     enteredApprovalFlow,
   };
+}
+
+function releaseInquirySubmission() {
+  const form = $('#inquiry-form');
+  const pending = form?.inquirySubmission;
+  if (pending) {
+    delete form.inquirySubmission;
+    form.inquirySubmitting = false;
+    if (pending.button) pending.button.disabled = pending.wasDisabled;
+  }
+  state.inquiryAttempt = null;
 }
 
 async function submitInquiry(event) {
