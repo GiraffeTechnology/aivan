@@ -220,12 +220,25 @@ async function switchRole(event) {
 }
 
 async function loadBootstrap() {
-  state.bootstrap = await api('/api/workbench/bootstrap');
-  await window.myAivanI18n?.assertCandidate(state.bootstrap.candidate_sha);
-  const sha = state.bootstrap.candidate_sha;
-  $('#candidate-banner').innerHTML = sha
-    ? `<strong>${ht('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(state.bootstrap.api_version)}</span>`
-    : `<strong>${ht('候选未冻结')}</strong><span>${ht('仅可作为非生产工作台使用。')}</span>`;
+  const session = state.session;
+  if (!session) return;
+  const auth = state.authGeneration ?? 0;
+  const generation = state.bootstrapRequestGeneration = (state.bootstrapRequestGeneration ?? 0) + 1;
+  const isCurrent = () => session === state.session && auth === (state.authGeneration ?? 0)
+    && generation === state.bootstrapRequestGeneration;
+  try {
+    const payload = await api('/api/workbench/bootstrap');
+    if (!isCurrent()) return;
+    await window.myAivanI18n?.assertCandidate(payload.candidate_sha);
+    if (!isCurrent()) return;
+    state.bootstrap = payload;
+    const sha = payload.candidate_sha;
+    $('#candidate-banner').innerHTML = sha
+      ? `<strong>${ht('冻结候选')}</strong><code>${escapeHtml(sha)}</code><span>API ${escapeHtml(payload.api_version)}</span>`
+      : `<strong>${ht('候选未冻结')}</strong><span>${ht('仅可作为非生产工作台使用。')}</span>`;
+  } catch (error) {
+    if (isCurrent()) throw error;
+  }
 }
 
 function caseCard(item) {
@@ -247,23 +260,31 @@ function formatTime(value) {
 }
 
 async function loadCases(reset = false) {
+  const session = state.session;
+  if (!session) return;
+  const auth = state.authGeneration ?? 0;
+  const generation = state.caseListRequestGeneration = (state.caseListRequestGeneration ?? 0) + 1;
+  const isCurrent = () => session === state.session && auth === (state.authGeneration ?? 0)
+    && generation === state.caseListRequestGeneration;
   if (reset) state.offset = 0;
+  const offset = state.offset, limit = state.limit;
   const filter = $('#case-state-filter')?.value || '';
-  const params = new URLSearchParams({ offset: state.offset, limit: state.limit });
+  const params = new URLSearchParams({ offset, limit });
   if (filter) params.set('state', filter);
   try {
     const payload = await api(`/api/workbench/cases?${params}`);
+    if (!isCurrent()) return;
     state.cases = payload.items;
     state.total = payload.page.total;
     const html = payload.items.length ? payload.items.map(caseCard).join('') : emptyHtml();
     $('#case-list').innerHTML = html;
     $('#recent-cases').innerHTML = payload.items.slice(0, 5).map(caseCard).join('') || emptyHtml();
-    $('#page-summary').textContent = `${state.offset + 1}-${Math.min(state.offset + payload.items.length, state.total)} / ${state.total}`;
-    $('#prev-page').disabled = state.offset === 0;
+    $('#page-summary').textContent = `${offset + 1}-${Math.min(offset + payload.items.length, state.total)} / ${state.total}`;
+    $('#prev-page').disabled = offset === 0;
     $('#next-page').disabled = !payload.page.has_more;
     renderMetrics(payload.items);
   } catch (error) {
-    $('#case-list').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
+    if (isCurrent()) $('#case-list').innerHTML = `<p class="error">${ht('读取案例失败：')}${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -620,8 +641,15 @@ async function confirmRelay(event) {
 }
 
 async function loadHealth() {
+  const session = state.session;
+  if (!session) return;
+  const auth = state.authGeneration ?? 0;
+  const generation = state.healthRequestGeneration = (state.healthRequestGeneration ?? 0) + 1;
+  const isCurrent = () => session === state.session && auth === (state.authGeneration ?? 0)
+    && generation === state.healthRequestGeneration;
   try {
     const health = await api('/api/workbench/health');
+    if (!isCurrent()) return;
     const entries = [
       [t('数据库'), health.database.configured, t('运行时配置')],
       ['GPM', !health.gpm.durable_required || health.gpm.backend !== 'memory', health.gpm.backend],
@@ -630,7 +658,9 @@ async function loadHealth() {
       [t('候选版本'), Boolean(health.candidate_sha), health.candidate_sha || t('未冻结')],
     ];
     $('#health-grid').innerHTML = entries.map(([label, ok, note]) => `<article class="health-card ${ok ? 'ok' : 'pending'}"><span class="health-dot" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><p>${escapeHtml(note)}</p></div><span>${ok ? ht('已配置') : ht('待完成')}</span></article>`).join('');
-  } catch (error) { $('#health-grid').innerHTML = `<p class="error">${ht('读取健康状态失败：')}${escapeHtml(error.message)}</p>`; }
+  } catch (error) {
+    if (isCurrent()) $('#health-grid').innerHTML = `<p class="error">${ht('读取健康状态失败：')}${escapeHtml(error.message)}</p>`;
+  }
 }
 
 document.addEventListener('click', async (event) => {
