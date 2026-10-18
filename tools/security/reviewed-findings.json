@@ -17,9 +17,9 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-i18n-runtime.test.mjs",
-      "sha256": "0da4a9bcc1f1da2a1b39301cff24c7b908b14a57dc8ea8b7b593b9b536d3324c",
+      "sha256": "c8beaaca50309298b5f1a606029608876d8e2f668fdd4105b37fcd95c9bd7232",
       "count": 3,
-      "reason": "Re-reviewed after first-visit locale regressions. Exact reads at lines 8, 192 and 289 resolve literal i18n.js, app.js and index.html URLs relative to import.meta.url. No request, environment, argument or fixture controls these paths; saved locale values only select in-memory catalogs."
+      "reason": "Re-reviewed after supplying trusted session state to inquiry outcome fixtures. The three reads still resolve literal i18n.js, app.js and index.html URLs relative to import.meta.url. No request, environment, argument or fixture controls these paths; saved locale values only select in-memory catalogs."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
@@ -52,9 +52,16 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-inquiry-runtime.test.mjs",
-      "sha256": "13b0fb6610f45eafb81a8e8c93db859d66dba1bee322456cbd181239ceb40732",
+      "sha256": "70f3b4a54ad52814ad8114d749600942c9a7ad76c8a097010a0565e5ad9e96a6",
       "count": 1,
-      "reason": "The line 7 read uses the literal app.js URL resolved from import.meta.url through fileURLToPath. Inquiry text and HTTP result fixtures cannot change the source filename."
+      "reason": "Re-reviewed after supplying authenticated session state to existing inquiry fixtures. The line 7 read still uses the literal app.js URL resolved from import.meta.url through fileURLToPath. Inquiry text and HTTP result fixtures cannot change the source filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-inquiry-retry-runtime.test.mjs",
+      "sha256": "d28760f068ac12b896006ee735294b278008e56708233a1c6aaa587164f4dd04",
+      "count": 1,
+      "reason": "The only filesystem read at line 5 resolves a literal app.js URL relative to import.meta.url. Buyer text, deferred HTTP outcomes and session changes affect only in-memory function inputs; no fixture, request or argument controls the read path."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

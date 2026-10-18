@@ -243,6 +243,7 @@ for (const code of ['en', 'zht', 'fr', 'es', 'de', 'ko', 'ja']) {
     let resetCalls = 0;
     let loadCasesCalls = 0;
     const inquiryContext = vm.createContext({
+      state: {session: {}},
       console,
       JSON,
       $: (selector) => fields[selector],

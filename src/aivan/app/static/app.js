@@ -364,7 +364,8 @@ function eventRow(event) {
   return `<article><strong>${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.summary)}</span><time>${escapeHtml(formatTime(event.created_at))}</time>${canReverse ? `<span class="row-actions"><button class="ghost compact" data-action="impact" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('影响预览')}</button><button class="secondary compact" data-action="reverse" data-event-id="${escapeHtml(event.event_id)}" type="button">${ht('纠错')}</button></span>` : ''}</article>`;
 }
 
-async function showInquiryConversation(caseId, input, response) {
+async function showInquiryConversation(caseId, input, response, isCurrent = () => true) {
+  if (!isCurrent()) return;
   const stream = $('#conversation-stream');
   const review = $('#outbound-review-content');
   stream.replaceChildren();
@@ -377,10 +378,12 @@ async function showInquiryConversation(caseId, input, response) {
   review.textContent = 'Loading saved drafts…';
   try {
     const detail = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}`);
+    if (!isCurrent()) return;
     if (!Array.isArray(detail.drafts)) throw new Error('Invalid draft response');
     if (detail.drafts.length) review.innerHTML = detail.drafts.map(draftRow).join('');
     else review.textContent = 'No saved draft is available yet. Open the case for clarification or status.';
   } catch (_) {
+    if (!isCurrent()) return;
     review.textContent = 'The input was accepted, but saved drafts could not be loaded. Reopen the case to retry. No message was sent by this view.';
   }
 }
@@ -403,13 +406,33 @@ function inquirySubmissionOutcome(payload) {
 
 async function submitInquiry(event) {
   event.preventDefault();
+  const form = event.target;
+  if (form.inquirySubmitting || !state.session) return;
+  const session = state.session;
   const buyerId = $('#buyer-id').value.trim();
+  const buyerName = $('#buyer-name').value.trim();
   const text = $('#inquiry-text').value.trim();
-  const conversation = requestId('manual-conversation');
+  const signature = JSON.stringify([buyerId, buyerName, text]);
+  if (!state.inquiryAttempt || state.inquiryAttempt.session !== session || state.inquiryAttempt.signature !== signature) {
+    state.inquiryAttempt = {session, signature, key: requestId('inquiry'),
+      body: JSON.stringify({source: 'myaivan', channel: 'myaivan',
+        conversation_id: requestId('manual-conversation'), message_id: requestId('manual-message'),
+        sender_id: buyerId, sender_display_name: buyerName, message_text: text})};
+  }
+  const attempt = state.inquiryAttempt;
+  const isCurrent = () => session === state.session && attempt === state.inquiryAttempt;
+  const inputUnchanged = () => signature === JSON.stringify([
+    $('#buyer-id')?.value.trim(), $('#buyer-name')?.value.trim(), $('#inquiry-text')?.value.trim(),
+  ]);
+  const button = event.submitter;
+  const wasDisabled = button?.disabled;
+  form.inquirySubmitting = true;
+  if (button) button.disabled = true;
   const result = $('#inquiry-result');
   result.hidden = true;
   result.textContent = '';
   const headers = {
+    'Idempotency-Key': attempt.key,
     'X-AIVAN-Participant-ID': buyerId,
     'X-AIVAN-Participant-Role': 'buyer',
     'X-AIVAN-Participant-Conversation-Role': 'buyer_thread',
@@ -417,12 +440,9 @@ async function submitInquiry(event) {
   try {
     const payload = await api('/invoke', {
       method: 'POST', headers,
-      body: JSON.stringify({
-        source: 'myaivan', channel: 'myaivan', conversation_id: conversation,
-        message_id: requestId('manual-message'), sender_id: buyerId,
-        sender_display_name: $('#buyer-name').value.trim(), message_text: text,
-      }),
+      body: attempt.body,
     });
+    if (!isCurrent()) return;
     const outcome = inquirySubmissionOutcome(payload);
     if (!outcome) throw new Error(t('服务器未确认案例创建，请检查输入后重试。'));
     result.hidden = false;
@@ -431,15 +451,20 @@ async function submitInquiry(event) {
       : (payload.user_control_message || payload.message || payload.reply_text || t('请求已受理，请按案例提示继续。'));
     result.textContent = `${t('案例')} ${outcome.projectId}\n${responseMessage}`;
     await loadCases(true);
-    if ($('#conversation-stream')) await showInquiryConversation(outcome.projectId, text, responseMessage);
+    if (!isCurrent()) return;
+    if ($('#conversation-stream')) await showInquiryConversation(outcome.projectId, text, responseMessage, isCurrent);
+    if (!isCurrent()) return;
     if (outcome.enteredApprovalFlow) {
-      event.target.reset();
+      if (inputUnchanged()) form.reset();
       toast(t('询盘草稿已生成，等待人工审批'), 'success');
     } else {
       toast(t('请求已受理，请按案例提示继续。'), 'info');
     }
-  } catch (error) {
-    toast(`${t('创建失败：')}${error.message}`, 'error');
+  } catch (_) {
+    if (isCurrent()) toast(`${t('创建失败：')}${t('服务器未确认案例创建，请检查输入后重试。')}`, 'error');
+  } finally {
+    form.inquirySubmitting = false;
+    if (button) button.disabled = wasDisabled;
   }
 }
 
