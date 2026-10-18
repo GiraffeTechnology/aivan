@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -134,6 +135,22 @@ def apply_files(source, payload, selected):
         installed.write_bytes(data)
 
 
+def update_selected_record(payload, distribution):
+    """Register newly overlaid members before the retained integrity refresh."""
+    site = payload / SITE
+    record = distribution / 'RECORD'
+    with record.open(newline='') as stream:
+        rows = {row[0]: row for row in csv.reader(stream)}
+    for target in source_targets().values():
+        path = payload / target
+        if path.is_relative_to(site):
+            name = str(path.relative_to(site))
+            rows.setdefault(name, [name, '', ''])
+    with record.open('w', newline='') as stream:
+        csv.writer(stream, lineterminator='\n').writerows(rows[name] for name in sorted(rows))
+    update_record(site, distribution)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ('base-installer', 'source', 'output'):
@@ -169,7 +186,7 @@ def main():
         if len(metadata) != 1 or metadata[0].is_symlink() or not metadata[0].is_dir():
             raise ValueError('Expected one Aivan distribution')
         write_json(metadata[0] / 'DERIVED-BUILD.json', provenance)
-        update_record(payload / SITE, metadata[0])
+        update_selected_record(payload, metadata[0])
         write_json(payload / 'derived-build.json', provenance)
         manifest = copy.deepcopy(baseline)
         component = manifest['components']['aivan']
