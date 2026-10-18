@@ -165,7 +165,9 @@ async function establishSession() {
       }
       state.csrf = payload.csrf_token;
     }
-    state.session = await api('/api/session');
+    const restoredSession = await api('/api/session');
+    state.executionHost?.invalidate('context-changing');
+    state.session = restoredSession;
     showApp();
     $('#test-account-banner').hidden = !state.session.test_account;
     $$('.test-account-restricted').forEach((node) => {
@@ -206,6 +208,7 @@ async function login(event) {
     if (!response.ok) throw new Error(payload.detail?.error || t('登录失败'));
     state.csrf = payload.csrf_token;
     keyInput.value = '';
+    state.executionHost?.invalidate('context-changing');
     state.session = payload;
     showApp();
     $('#test-account-banner').hidden = true;

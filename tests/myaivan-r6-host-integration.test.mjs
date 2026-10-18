@@ -44,10 +44,11 @@ function harness() {
   let current = null, unmounts = 0, nextAssociation = async () => association();
   let nextResource = async () => new Response('denied', {status: 403});
   const ctx = vm.createContext({AbortController, AbortSignal, DOMException, Response, Headers,
-    URL, setTimeout, clearTimeout, console, state, $: node, $$: () => [],
+    URL, URLSearchParams, setTimeout, clearTimeout, console, state, $: node, $$: () => [],
+    t: value => value, populateRoles() {},
     requestId: () => 'synthetic-session', cookie: () => '', clearLocalInputs() {},
     releaseInquirySubmission() {}, history: {replaceState() {}},
-    location: {origin: 'https://host.invalid'},
+    location: {origin: 'https://host.invalid', hash: '', pathname: '/', search: ''},
     fetch: async (url, options) => {
       calls.push({url, options});
       if (String(url).endsWith('/execution-association')) {
@@ -204,3 +205,28 @@ test('missing immutable runtime fails closed without association or execution re
   await h.load(); assert.equal(h.current(), null); assert.equal(h.calls.length, 0);
   assert.match(h.node('#execution-association-status').textContent, /Association read failed/);
 });
+
+for (const transition of ['login', 'restore']) {
+  test(`${transition} adoption clears a mounted order before pending bootstrap returns`, {timeout: 3000}, async () => {
+    const h = harness(); await h.load();
+    assert.equal(h.current().orderId, order);
+    const started = deferred(), bootstrap = deferred();
+    h.ctx.loadBootstrap = () => { started.resolve(); return bootstrap.promise; };
+    h.ctx.loadCases = async () => {}; h.ctx.loadHealth = async () => {};
+    h.ctx.setView = () => {};
+    const session = {role: 'admin', allowed_roles: ['admin'], csrf_token: 'synthetic-csrf', test_account: false};
+    h.resourceWith(async () => new Response(JSON.stringify(session), {headers: {'content-type': 'application/json'}}));
+    vm.runInContext([
+      selected('function showApp(', '\nfunction setView('),
+      selected('async function establishSession(', '\nasync function login('),
+      selected('async function login(', '\nasync function logout('),
+    ].join('\n'), h.ctx);
+    h.node('#access-key').value = 'synthetic-key'; h.node('#tenant-id').value = 'synthetic-tenant';
+    const pending = transition === 'login'
+      ? h.ctx.login({preventDefault() {}, submitter: {disabled: false}})
+      : h.ctx.establishSession();
+    await started.promise;
+    try { assert.equal(h.current(), null, 'Old order must be gone at session adoption, before any later API completes'); }
+    finally { bootstrap.resolve(); await pending; }
+  });
+}
