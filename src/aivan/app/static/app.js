@@ -12,6 +12,7 @@ const state = {
   authGeneration: 0,
   caseRequestGeneration: 0,
   executionHost: null,
+  executionBinding: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -403,24 +404,35 @@ async function loadExecutionAssociation(caseId, isCurrent) {
   }
   const generation = state.executionHost?.invalidate('context-changing');
   try {
+    const container = $('#r6-execution-workspace');
+    if (!state.executionHost || !container || !window.myAivanR6Host) {
+      throw new Error('EXECUTION_ASSETS_UNAVAILABLE');
+    }
+    if (!state.executionBinding) {
+      state.executionBinding = window.myAivanR6Host.bind(container, state.executionHost.source);
+    }
     const association = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}/execution-association`);
     if (!isCurrent()) return;
     if (association?.schema_version !== 'aivan.execution-association.v1' || association.case_id !== caseId) {
       throw new Error('EXECUTION_ASSOCIATION_INVALID');
     }
-    // A verified provider association is not an authenticated execution route.
-    // No supported resolver exists yet, so never activate its local order ID.
-    state.executionHost?.activate({generation, sessionKey:requestId('execution-view'), orderId:null});
-    $('#execution-association-status').textContent = association.status === 'associated' && association.readback_verified === true
-      ? 'The existing association was read back. Execution reads remain unavailable: authenticated routing is not configured.'
-      : 'No verified execution association is available. Execution reads remain unavailable.';
+    const resolveReadPath = window.myAivanR6Host.createReadResolver(caseId, association);
+    const ready = typeof resolveReadPath === 'function';
+    const applied = state.executionHost.activate({
+      generation, sessionKey:requestId('execution-view'),
+      orderId:ready ? association.local_order_id : null,
+      ...(ready ? {resolveReadPath} : {}),
+    });
+    if (!applied || !isCurrent()) return;
+    $('#execution-association-status').textContent = ready
+      ? 'Verified order association. Authorized read routing is configured; resource availability is checked by each read.'
+      : 'Execution reads remain unavailable for this association or session. No ready state is claimed.';
   } catch {
     if (!isCurrent()) return;
     state.executionHost?.invalidate('context-changing');
     $('#execution-association-status').textContent = 'Association read failed. No execution mapping or ready state is claimed.';
   }
 }
-
 
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
@@ -714,3 +726,15 @@ window.addEventListener('myaivan:locale', async () => {
 });
 
 establishSession();
+
+window.addEventListener('pagehide', (event) => {
+  state.executionHost?.invalidate('context-changing');
+  const status = $('#execution-association-status');
+  if (status) status.textContent = 'Execution context cleared. Reopen the case to read current evidence.';
+  if (!event.persisted) {
+    state.executionBinding?.dispose();
+    state.executionBinding = null;
+    state.executionHost?.dispose();
+    state.executionHost = null;
+  }
+});

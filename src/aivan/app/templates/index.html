@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>myAIVAN Workbench</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/r6-workspace-f988a2df90fe83aa.css">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -127,6 +128,9 @@
         <section id="view-case-detail" class="view" aria-labelledby="case-detail-title">
           <button class="back-button" data-open-view="cases" type="button">← Back to cases</button>
           <div id="case-detail" class="detail-layout"></div>
+          <section class="panel" aria-label="Apparel fulfillment evidence">
+            <div id="r6-execution-workspace" aria-live="polite">Select a confirmed order with an available execution association.</div>
+          </section>
         </section>
 
         <section id="view-new-inquiry" class="view" aria-labelledby="new-inquiry-title">
@@ -178,6 +182,8 @@
   <script src="/static/attachments.js" defer></script>
   <script src="/static/draft-preview.js" defer></script>
   <script src="/static/execution-host-context.js" defer></script>
+  <script src="/static/r6-workspace-dbdc4b643d7add02.js" defer></script>
+  <script src="/static/r6-execution-host.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>
