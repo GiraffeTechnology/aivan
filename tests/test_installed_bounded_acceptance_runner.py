@@ -285,6 +285,10 @@ def restart_contract(runner_module, tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps(config))
     calls = []
     faults = {}
+    guidance = {"packet_id": "guidance-new", "tenant_id": "synthetic-primary",
+                "case_id": "case-source", "recommendation": "review",
+                "model_result": {"runtime_status": "disabled", "recommendation": "review"},
+                "lineage": {"case_id": "case-source", "gltg_run_id": "lead-time-source"}}
     def handler(request):
         calls.append((request.method, request.url.path, request))
         assert request.url.port != config["ports"]["abcdyi"]
@@ -296,9 +300,24 @@ def restart_contract(runner_module, tmp_path, monkeypatch):
         if path.endswith("/attachments"):
             return httpx.Response(200, json={"items": [{"attachment_id": "attachment-source"}]})
         if path == "/api/drafts/old":
-            return httpx.Response(200, json={"status": "rejected"})
+            rejected = {"status": "rejected", "sent_at": "2026-01-01T00:00:00Z" if faults.get("rejected-sent") else None}
+            if faults.get("rejected-missing-timestamp"):
+                rejected.pop("sent_at")
+            return httpx.Response(200, json=rejected)
+        if path == "/api/gpm/quote-guidance/guidance-new":
+            recovered = json.loads(json.dumps(guidance))
+            for fault, field, value in (("guidance-id", "packet_id", "other"),
+                                        ("guidance-tenant", "tenant_id", "other"),
+                                        ("guidance-case", "case_id", "other"),
+                                        ("guidance-changed", "recommendation", "changed"),
+                                        ("guidance-model", "model_result", {}),
+                                        ("guidance-lineage", "lineage", {})):
+                if faults.get(fault):
+                    recovered[field] = value
+            return httpx.Response(200, json={} if faults.get("guidance-empty") else recovered)
         if path == "/api/workbench/cases/case-source":
-            return httpx.Response(200, json={"case": {"status": "order_confirmed", "selected_option": {"option_id": "changed" if faults.get("selected") else "selected-new"}}})
+            return httpx.Response(200, json={"case": {"status": "order_confirmed", "selected_option": {"option_id": "changed" if faults.get("selected") else "selected-new"}},
+                "receipts": [{"draft_id": "old", "receipt_id": "unexpected-delivery"}] if faults.get("rejected-receipt") else []})
         if path == "/api/data/purchase-orders/po-source" and request.headers["X-Service-Tenant-ID"] == "synthetic-secondary":
             return httpx.Response(404, json={})
         return httpx.Response(200, json={})
@@ -310,6 +329,7 @@ def restart_contract(runner_module, tmp_path, monkeypatch):
     obj.case_id, obj.option_id, obj.gpm_id = "case-source", "selected-new", "guidance-new"
     obj.po = {"purchase_order_id": "po-source"}
     obj.selected_snapshot = {"option_id": "selected-new"}
+    obj.guidance_snapshot = json.loads(json.dumps(guidance))
     obj.rejected_draft_id = "old"
     obj.attachment_ids = ["attachment-source"]
     real_client = httpx.Client
@@ -317,8 +337,13 @@ def restart_contract(runner_module, tmp_path, monkeypatch):
         assert kwargs["follow_redirects"] is False and kwargs["trust_env"] is False
         return real_client(*args, **kwargs, transport=httpx.MockTransport(handler))
     monkeypatch.setattr(runner_module.httpx, "Client", client)
+    obj.command_calls = []
     def restart(argv, **kwargs):
-        assert argv == [str(tmp_path / "myaivan"), "restart"]
+        obj.command_calls.append(argv[-1])
+        assert argv in ([str(tmp_path / "myaivan"), "restart"], [str(tmp_path / "myaivan"), "verify"])
+        if argv[-1] == "verify":
+            return SimpleNamespace(returncode=1 if faults.get("inventory") else 0,
+                                   stdout=b"synthetic-private-verifier-log", stderr=b"")
         if faults.get("manifest"):
             manifest.write_text('{"release":"unexpected-rollback"}')
         return SimpleNamespace(returncode=1 if faults.get("restart") else 0, stdout=b"synthetic-private-log", stderr=b"")
@@ -330,6 +355,8 @@ def test_restart_recovers_order_and_history_through_fresh_authorized_http_client
     obj, calls, _ = restart_contract
     obj.restart_and_recover()
     assert obj.results["restart"]["exit_code"] == 0
+    assert obj.command_calls == ["restart", "verify"]
+    assert obj.results["restart_inventory"]["exit_code"] == 0
     assert "synthetic-private-log" not in json.dumps(obj.results)
     assert obj.results["milestones"]["bounded_restart_and_authoritative_readback"]
     assert any(method == "POST" and path.endswith("/order-confirmation") for method, path, _ in calls)
@@ -337,14 +364,17 @@ def test_restart_recovers_order_and_history_through_fresh_authorized_http_client
             for _, _, request in calls} == {"synthetic-primary", "synthetic-secondary"}
 
 
-@pytest.mark.parametrize("fault", ["manifest", "restart", "po", "selected"])
+@pytest.mark.parametrize("fault", ["manifest", "restart", "po", "selected", "inventory",
+                                    "guidance-empty", "guidance-id", "guidance-tenant", "guidance-case",
+                                    "guidance-changed", "guidance-model", "guidance-lineage",
+                                    "rejected-sent", "rejected-missing-timestamp", "rejected-receipt"])
 def test_restart_or_readback_failure_never_counts_as_recovery(restart_contract, fault):
     obj, calls, faults = restart_contract
     faults[fault] = True
     with pytest.raises(AssertionError):
         obj.restart_and_recover()
     assert "bounded_restart_and_authoritative_readback" not in obj.results["milestones"]
-    if fault in {"manifest", "restart"}:
+    if fault in {"manifest", "restart", "inventory"}:
         assert calls == []
 
 

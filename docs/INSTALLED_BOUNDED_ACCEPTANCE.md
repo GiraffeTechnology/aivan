@@ -18,7 +18,9 @@ schema, alter cloud configuration or choose service ports.
 The current profile uses the installation's bundled DB, GLTG and GPM APIs.
 An existing configured language API may replace the bundled language service.
 Other provider configurations remain outside this runner profile, not outside
-the product. SQL settings and service credentials stay in the existing private
+the product. Likewise, this requested MySQL-specific deployment profile is not
+a product-wide restriction on supported database vendors. SQL settings and
+service credentials stay in the existing private
 installation configuration; never pass credentials on the command line.
 
 External email and OpenClaw business channels must be disabled for this synthetic
@@ -82,6 +84,11 @@ The bounded path verifies:
 - Restart of the selected installation, unchanged candidate identity, fresh
   authenticated clients using the recorded current ports, and durable order,
   rejected-draft, guidance and attachment readback without industry writes.
+  The full installed-file verifier must succeed again after restart; an unchanged
+  manifest alone is insufficient. Guidance must match its packet, tenant and
+  case, contain recommendation/model output/lineage, and equal the complete
+  pre-restart snapshot. The rejected draft must explicitly retain a null
+  `sent_at` and have no relay receipt in the case before and after restart.
 
 The run records actual package/runner/helper/component identities, HTTP statuses
 and response digests. Unexpected HTTP responses and transport failures are not

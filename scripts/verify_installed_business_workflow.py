@@ -705,9 +705,30 @@ class BoundedAcceptance(Acceptance):
         export = self.request("web", "GET", f"/api/workbench/cases/{self.case_id}/export")
         assert self.draft_id.encode() in export.content and self.rejected_draft_id.encode() in export.content
         (self.evidence / "case-export.md").write_bytes(export.content)
+        self.guidance_snapshot = self.guidance_readback()
+        self.rejected_readback(detail)
         self.results["external_messages_sent"] = None
         self.results["external_delivery_evidence"] = "Not measured; external channels disabled and manual approval returned sent=false"
         self.checkpoint("bounded_audit_export_and_selected_english_readback", industry_execution="not_run")
+
+    def guidance_readback(self):
+        guidance = self.request("gpm", "GET", f"/api/gpm/quote-guidance/{self.gpm_id}")
+        assert isinstance(guidance, dict)
+        assert guidance.get("packet_id") == self.gpm_id
+        assert guidance.get("tenant_id") == self.primary_tenant
+        assert guidance.get("case_id") == self.case_id
+        assert isinstance(guidance.get("recommendation"), str) and guidance["recommendation"].strip()
+        assert isinstance(guidance.get("model_result"), dict) and guidance["model_result"]
+        assert isinstance(guidance.get("lineage"), dict) and guidance["lineage"].get("case_id") == self.case_id
+        return guidance
+
+    def rejected_readback(self, detail):
+        rejected = self.request("web", "GET", f"/api/drafts/{self.rejected_draft_id}")
+        assert rejected["status"] == "rejected"
+        assert "sent_at" in rejected and rejected["sent_at"] is None
+        assert isinstance(detail.get("receipts"), list)
+        assert all(isinstance(item, dict) and item.get("draft_id") != self.rejected_draft_id
+                   for item in detail["receipts"])
 
     def restart_and_recover(self):
         for client in self.clients.values():
@@ -721,6 +742,13 @@ class BoundedAcceptance(Acceptance):
         if ((self.prefix / "current").resolve() != self.release or
                 file_sha(self.release / "manifest.json") != self.results["manifest_sha256"]):
             raise AssertionError("Restart did not preserve the selected installed candidate")
+        verified = subprocess.run([str(self.prefix / "myaivan"), "verify"], capture_output=True, timeout=90)
+        self.results["restart_inventory"] = {"exit_code": verified.returncode,
+                                             "stdout_sha256": sha(verified.stdout),
+                                             "stderr_sha256": sha(verified.stderr)}
+        self.flush()
+        if verified.returncode:
+            raise AssertionError("Restarted candidate inventory verification failed; inspect private installation logs")
         self.config = json.loads((self.prefix / "config.json").read_text())
         validate_bounded_options(self.args, self.config)
         self.clients = {name: httpx.Client(base_url=self.config.get("external", {}).get(name, f"http://127.0.0.1:{port}"),
@@ -738,9 +766,8 @@ class BoundedAcceptance(Acceptance):
         self.request("database", "GET", f"/api/data/purchase-orders/{self.po['purchase_order_id']}")
         self.request("database", "GET", f"/api/data/purchase-orders/{self.po['purchase_order_id']}",
                      tenant=self.secondary_tenant, expected=(404,))
-        self.request("gpm", "GET", f"/api/gpm/quote-guidance/{self.gpm_id}")
-        rejected = self.request("web", "GET", f"/api/drafts/{self.rejected_draft_id}")
-        assert rejected["status"] == "rejected"
+        assert self.guidance_readback() == self.guidance_snapshot
+        self.rejected_readback(detail)
         attachments = self.request("web", "GET", f"/api/workbench/cases/{self.case_id}/attachments")
         assert set(self.attachment_ids) <= {item["attachment_id"] for item in attachments["items"]}
         self.checkpoint("bounded_restart_and_authoritative_readback", industry_execution="not_run")
