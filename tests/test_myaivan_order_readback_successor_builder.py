@@ -13,7 +13,7 @@ FIELDS = ('BASE_SHA256', 'BASE_REVISION', 'BASE_TREE', 'UI_SOURCE', 'UI_TARGET',
 
 def builder():
     directory = Path(__file__).resolve().parents[1] / 'installer'
-    path = directory / 'build_gltg_order_readback_successor.py'
+    path = directory / 'build_order_readback_successor.py'
     assert path.is_file(), 'the bounded order_readback successor profile is not implemented'
     sys.path.insert(0, str(directory))
     spec = importlib.util.spec_from_file_location('order_readback_successor_under_test', path)
