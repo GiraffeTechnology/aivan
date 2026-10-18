@@ -59,6 +59,20 @@ def extract_base(installer: Path, destination: Path) -> dict:
     return manifest
 
 
+def fixed_base_tool(source: Path, name: str) -> str:
+    try:
+        original = build.subprocess.check_output(
+            ["git", "-C", str(source), "show", BASE_REVISION + ":" + name],
+            stderr=build.subprocess.PIPE,
+        )
+    except build.subprocess.CalledProcessError:
+        raise ValueError("Unselected build input is absent from the fixed base") from None
+    digest = build.digest(build.safe_source_file(source, name))
+    if digest != hashlib.sha256(original).hexdigest():
+        raise ValueError("Unselected build input differs from the fixed base")
+    return digest
+
+
 def verify_selection(source: Path, manifest: dict) -> dict:
     component = manifest["components"]["aivan"]
     baseline = {}
@@ -74,6 +88,10 @@ def verify_selection(source: Path, manifest: dict) -> dict:
     unchanged_tools = {}
     for name in baseline:
         selected[name] = build.digest(build.safe_source_file(source, name))
+        if selected[name] != baseline[name] and name.startswith(("scripts/", "installer/")):
+            # Preserve accepted repair-base scripts separately from historical wheel inputs.
+            unchanged_tools[name] = fixed_base_tool(source, name)
+            baseline[name] = unchanged_tools[name]
     for directory in ("src", "api", "generators", "alembic", "scripts", "installer"):
         root = source / directory
         if root.is_symlink():
@@ -89,17 +107,7 @@ def verify_selection(source: Path, manifest: dict) -> dict:
                     raise ValueError("Runtime additions or removals are not selected")
                 # Some retained build tools are outside the wheel inventory.
                 # They are accepted only when byte-identical to the fixed base Git blob.
-                try:
-                    original = build.subprocess.check_output(
-                        ["git", "-C", str(source), "show", BASE_REVISION + ":" + name],
-                        stderr=build.subprocess.PIPE,
-                    )
-                except build.subprocess.CalledProcessError:
-                    raise ValueError("Unselected build input is absent from the fixed base") from None
-                digest = build.digest(build.safe_source_file(source, name))
-                if digest != hashlib.sha256(original).hexdigest():
-                    raise ValueError("Unselected build input differs from the fixed base")
-                unchanged_tools[name] = digest
+                unchanged_tools[name] = fixed_base_tool(source, name)
     changed = {name for name, sha in selected.items() if sha != baseline[name]}
     if changed != {UI_SOURCE}:
         raise ValueError("Only the selected UI source may differ")

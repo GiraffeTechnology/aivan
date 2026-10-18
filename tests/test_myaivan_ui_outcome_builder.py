@@ -280,3 +280,22 @@ def test_unlisted_build_tool_requires_exact_immutable_base_blob(tmp_path, monkey
         with pytest.raises(ValueError):
             module.verify_selection(source, manifest)
     assert calls == [["git", "-C", str(source), "show", module.BASE_REVISION + ":" + name]]
+
+
+@pytest.mark.parametrize("kind", ["fixed-base", "unselected"])
+def test_retained_script_repair_is_not_mistaken_for_a_new_source_change(tmp_path, monkeypatch, kind):
+    module = builder()
+    source, manifest = selection(tmp_path, module)
+    name = "scripts/run_gpm_giraffe_db_http_acceptance.py"
+    path = source / name
+    path.parent.mkdir()
+    path.write_bytes(b"historical wheel-origin script\n")
+    manifest["components"]["aivan"]["verified_build_input_files"] = {name: module.build.digest(path)}
+    path.write_bytes(b"fixed repair-base script\n" if kind == "fixed-base" else b"new unselected change\n")
+    monkeypatch.setattr(module.build.subprocess, "check_output", lambda *args, **kwargs: b"fixed repair-base script\n")
+    if kind == "fixed-base":
+        selected = module.verify_selection(source, manifest)
+        assert selected["unchanged_base_build_inputs"][name] == module.build.digest(path)
+    else:
+        with pytest.raises(ValueError):
+            module.verify_selection(source, manifest)

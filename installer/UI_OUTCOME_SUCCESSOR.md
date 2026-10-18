@@ -32,6 +32,10 @@ rechecked immediately before packaging. The base installer is read once so its
 fixed checksum authenticates the same bytes that are parsed and extracted.
 The requested release must differ from the base release, and preflight protects
 both companion JSON evidence files as well as the installer and checksum files.
+Historical wheel-input hashes are retained as provenance, not overwritten to
+hide an earlier repair. If a script or installer input was already repaired in
+the fixed base, its current bytes must match that exact base Git blob and its
+verified hash is recorded separately. No new unrelated input change is allowed.
 
 This performs no installation, SQL connection/migration, service restart, model
 call, channel action, listener change or public publication. It creates no account
