@@ -65,6 +65,13 @@
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-api-read-context-runtime.test.mjs",
+      "sha256": "4ab725adeb9b4d61fe5366ffa5f9f87ba1dc90026938c948b97739a6c9b1baf4",
+      "count": 1,
+      "reason": "The only filesystem read, line 6, uses literal app.js relative to import.meta.url. Source-extracted api/loaders and controlled fetch/JSON promises operate in memory; no session, response, argument or environment value influences the filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-read-context-runtime.test.mjs",
       "sha256": "2ccb6a96b4dd8aaa33e2d1b12d43ec225699f212c50ad264e0df1719f331c45d",
       "count": 1,
