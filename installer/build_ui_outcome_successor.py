@@ -71,6 +71,7 @@ def verify_selection(source: Path, manifest: dict) -> dict:
                 raise ValueError("Pinned source inventories disagree")
             baseline[name] = sha
     selected = {}
+    unchanged_tools = {}
     for name in baseline:
         selected[name] = build.digest(build.safe_source_file(source, name))
     for directory in ("src", "api", "generators", "alembic", "scripts", "installer"):
@@ -83,14 +84,30 @@ def verify_selection(source: Path, manifest: dict) -> dict:
             if (path.is_file() and "__pycache__" not in path.parts
                     and not any(part.endswith(".egg-info") for part in path.parts)
                     and str(path.relative_to(source)) not in baseline):
-                raise ValueError("Runtime additions or removals are not selected")
+                name = str(path.relative_to(source))
+                if directory not in {"installer", "scripts"}:
+                    raise ValueError("Runtime additions or removals are not selected")
+                # Some retained build tools are outside the wheel inventory.
+                # They are accepted only when byte-identical to the fixed base Git blob.
+                try:
+                    original = build.subprocess.check_output(
+                        ["git", "-C", str(source), "show", BASE_REVISION + ":" + name],
+                        stderr=build.subprocess.PIPE,
+                    )
+                except build.subprocess.CalledProcessError:
+                    raise ValueError("Unselected build input is absent from the fixed base") from None
+                digest = build.digest(build.safe_source_file(source, name))
+                if digest != hashlib.sha256(original).hexdigest():
+                    raise ValueError("Unselected build input differs from the fixed base")
+                unchanged_tools[name] = digest
     changed = {name for name, sha in selected.items() if sha != baseline[name]}
     if changed != {UI_SOURCE}:
         raise ValueError("Only the selected UI source may differ")
     if manifest["files"].get(UI_TARGET) != baseline[UI_SOURCE]:
         raise ValueError("Installed UI differs from its declared source baseline")
     return {"source_path": UI_SOURCE, "target": UI_TARGET,
-            "base_sha256": baseline[UI_SOURCE], "candidate_sha256": selected[UI_SOURCE]}
+            "base_sha256": baseline[UI_SOURCE], "candidate_sha256": selected[UI_SOURCE],
+            "unchanged_base_build_inputs": unchanged_tools}
 
 
 def verify_git_ui(source: Path, revision: str, selected: dict) -> None:

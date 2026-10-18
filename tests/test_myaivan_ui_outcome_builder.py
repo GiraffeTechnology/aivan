@@ -257,3 +257,26 @@ def test_selected_ui_bytes_must_equal_the_pinned_git_blob(tmp_path, monkeypatch,
         with pytest.raises(ValueError):
             module.verify_git_ui(source, "a" * 40, selected)
     assert calls == [["git", "-C", str(source), "show", "a" * 40 + ":" + module.UI_SOURCE]]
+
+
+@pytest.mark.parametrize("kind", ["unchanged", "changed", "added"])
+def test_unlisted_build_tool_requires_exact_immutable_base_blob(tmp_path, monkeypatch, kind):
+    module = builder()
+    source, manifest = selection(tmp_path, module)
+    name = "installer/build_successor.py"
+    path = source / name
+    path.parent.mkdir()
+    path.write_bytes(b"original build tool\n" if kind != "changed" else b"changed build tool\n")
+    calls = []
+    def read_base(argv, **kwargs):
+        calls.append(argv)
+        if kind == "added":
+            raise module.build.subprocess.CalledProcessError(1, argv)
+        return b"original build tool\n"
+    monkeypatch.setattr(module.build.subprocess, "check_output", read_base)
+    if kind == "unchanged":
+        assert module.verify_selection(source, manifest)["source_path"] == module.UI_SOURCE
+    else:
+        with pytest.raises(ValueError):
+            module.verify_selection(source, manifest)
+    assert calls == [["git", "-C", str(source), "show", module.BASE_REVISION + ":" + name]]

@@ -24,7 +24,10 @@ separately, including the preceding repair provenance.
 
 The complete pinned source and build-input inventories are compared, including
 API, migration, generator, script and installer inputs; only the selected app.js
-may differ. Its bytes must match the immutable Git blob. Source identity is
+may differ. Retained script/installer tools outside the wheel inventory must
+match their immutable fixed-base Git blobs; their paths and hashes are recorded,
+not silently ignored. Additions or changes fail. The UI bytes must match its
+immutable selected Git blob. Source identity is
 rechecked immediately before packaging. The base installer is read once so its
 fixed checksum authenticates the same bytes that are parsed and extracted.
 The requested release must differ from the base release, and preflight protects
