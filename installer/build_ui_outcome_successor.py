@@ -29,9 +29,10 @@ UI_TARGET = str(SITE / "aivan/app/static/app.js")
 
 
 def extract_base(installer: Path, destination: Path) -> dict:
-    if build.digest(installer) != BASE_SHA256:
+    raw = installer.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != BASE_SHA256:
         raise ValueError("Selected runtime-repair installer checksum mismatch")
-    pieces = installer.read_bytes().split(b"__MYAIVAN_PAYLOAD__\n", 1)
+    pieces = raw.split(b"__MYAIVAN_PAYLOAD__\n", 1)
     if len(pieces) != 2:
         raise ValueError("Selected payload marker is missing")
     header, data = pieces
@@ -59,19 +60,30 @@ def extract_base(installer: Path, destination: Path) -> dict:
 
 
 def verify_selection(source: Path, manifest: dict) -> dict:
-    baseline = {name: sha for name, sha in manifest["components"]["aivan"]["included_source_files"].items()
-                if name.startswith("src/")}
-    root = source / "src"
-    if root.is_symlink():
-        raise ValueError("Source directory links are not permitted")
+    component = manifest["components"]["aivan"]
+    baseline = {}
+    for field in ("included_source_files", "verified_build_input_files"):
+        pinned = component.get(field, {})
+        if not isinstance(pinned, dict):
+            raise ValueError("Invalid pinned source inventory")
+        for name, sha in pinned.items():
+            if name in baseline and baseline[name] != sha:
+                raise ValueError("Pinned source inventories disagree")
+            baseline[name] = sha
     selected = {}
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            raise ValueError("Source links are not permitted")
-        if path.is_file() and "__pycache__" not in path.parts:
-            selected[str(path.relative_to(source))] = build.digest(path)
-    if selected.keys() != baseline.keys():
-        raise ValueError("Runtime additions or removals are not selected")
+    for name in baseline:
+        selected[name] = build.digest(build.safe_source_file(source, name))
+    for directory in ("src", "api", "generators", "alembic", "scripts", "installer"):
+        root = source / directory
+        if root.is_symlink():
+            raise ValueError("Source directory links are not permitted")
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise ValueError("Source links are not permitted")
+            if (path.is_file() and "__pycache__" not in path.parts
+                    and not any(part.endswith(".egg-info") for part in path.parts)
+                    and str(path.relative_to(source)) not in baseline):
+                raise ValueError("Runtime additions or removals are not selected")
     changed = {name for name, sha in selected.items() if sha != baseline[name]}
     if changed != {UI_SOURCE}:
         raise ValueError("Only the selected UI source may differ")
@@ -81,16 +93,23 @@ def verify_selection(source: Path, manifest: dict) -> dict:
             "base_sha256": baseline[UI_SOURCE], "candidate_sha256": selected[UI_SOURCE]}
 
 
+def verify_git_ui(source: Path, revision: str, selected: dict) -> None:
+    content = build.subprocess.check_output(["git", "-C", str(source), "show", revision + ":" + UI_SOURCE])
+    if hashlib.sha256(content).hexdigest() != selected["candidate_sha256"]:
+        raise ValueError("Selected UI differs from its pinned Git blob")
+
+
 def apply_ui(source: Path, payload: Path, selected: dict) -> None:
     if selected.get("source_path") != UI_SOURCE or selected.get("target") != UI_TARGET:
         raise ValueError("Unexpected UI source or target")
     candidate = build.safe_source_file(source, UI_SOURCE)
     target = build.safe_source_file(payload, UI_TARGET)
-    if build.digest(candidate) != selected["candidate_sha256"]:
+    content = candidate.read_bytes()
+    if hashlib.sha256(content).hexdigest() != selected["candidate_sha256"]:
         raise ValueError("Selected source changed after verification")
     if build.digest(target) != selected["base_sha256"]:
         raise ValueError("Installed baseline changed after verification")
-    shutil.copyfile(candidate, target)
+    target.write_bytes(content)
 
 
 def main():
@@ -110,15 +129,20 @@ def main():
         raise ValueError("Selected candidate must be clean and exact")
     args.output.mkdir(parents=True, exist_ok=True)
     destination = args.output / f"myaivan-{args.release}-linux-x86_64.run"
-    if any(path.exists() for path in (destination, destination.with_suffix(".tar.gz"), destination.with_suffix(".run.sha256"))):
+    companions = [args.output / f"{args.release}-{name}.json" for name in ("manifest", "derived-build")]
+    if any(path.exists() or path.is_symlink() for path in (
+            destination, destination.with_suffix(".tar.gz"), destination.with_suffix(".run.sha256"), *companions)):
         raise ValueError("Refusing to overwrite an existing artifact")
     with tempfile.TemporaryDirectory(prefix="myaivan-ui-successor-", dir=args.output) as temporary:
         payload = Path(temporary) / "payload"
         payload.mkdir()
         baseline = extract_base(args.base_installer, payload)
+        if args.release == baseline["release"]:
+            raise ValueError("Select a new release name, not the base release")
         if build.digest(source / "installer/requirements.lock") != baseline["requirements_lock_sha256"]:
             raise ValueError("Frozen runtime dependency lock changed")
         selected = verify_selection(source, baseline)
+        verify_git_ui(source, args.revision, selected)
         base_manifest_sha = build.digest(payload / "manifest.json")
         base_provenance = json.loads((payload / "derived-build.json").read_text())
         apply_ui(source, payload, selected)
@@ -156,6 +180,8 @@ def main():
             raise ValueError("Payload changed outside UI and exact provenance metadata")
         manifest["files"] = actual
         write_json(payload / "manifest.json", manifest)
+        if build.source_evidence(source, args.revision, args.tree) != evidence:
+            raise ValueError("Selected source changed during packaging")
         build.write_installer(payload, destination)
         for name in ("manifest", "derived-build"):
             shutil.copy2(payload / f"{name}.json", args.output / f"{args.release}-{name}.json")

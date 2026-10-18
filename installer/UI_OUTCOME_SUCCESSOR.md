@@ -22,6 +22,14 @@ rejected. A new release name is required; existing artifacts are never overwritt
 The selected source revision and retained base wheel/build identities are recorded
 separately, including the preceding repair provenance.
 
+The complete pinned source and build-input inventories are compared, including
+API, migration, generator, script and installer inputs; only the selected app.js
+may differ. Its bytes must match the immutable Git blob. Source identity is
+rechecked immediately before packaging. The base installer is read once so its
+fixed checksum authenticates the same bytes that are parsed and extracted.
+The requested release must differ from the base release, and preflight protects
+both companion JSON evidence files as well as the installer and checksum files.
+
 This performs no installation, SQL connection/migration, service restart, model
 call, channel action, listener change or public publication. It creates no account
 or deployment requirement. Use existing operator-owned configuration and the
