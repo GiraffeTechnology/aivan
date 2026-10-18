@@ -107,3 +107,9 @@ def test_missing_evidence_does_not_claim_fastest_or_supplier_reliability(visible
     assert all(option.option_type not in {"fastest", "safest"} for option in result)
     assert all(option.risk_level == "unknown" for option in result)
     assert all("strong track record" not in option.reasoning for option in result)
+
+
+def test_calculation_trace_keeps_the_selected_quote_currency(visible_prices):
+    result = options([quote_for("gbp-source", 2.0, "GBP")])
+    assert result[0].quote.currency == "GBP"
+    assert result[0].quote.calculation_trace[-1].endswith(" GBP")
