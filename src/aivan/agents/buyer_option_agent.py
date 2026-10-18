@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import os
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -25,7 +26,8 @@ def generate_buyer_options(
     current_by_supplier: dict[str, SupplierReply] = {}
     anonymous_replies: list[SupplierReply] = []
     for reply in supplier_replies:
-        if reply.unit_price is None:
+        if (reply.unit_price is None or not math.isfinite(reply.unit_price)
+                or reply.unit_price < 0):
             continue
         business_identity = (reply.supplier_id or reply.candidate_id).strip()
         if business_identity:
@@ -143,6 +145,10 @@ def generate_buyer_options(
                 warnings.append(warning)
         if reply.moq and requirement.quantity and requirement.quantity < reply.moq:
             warnings.append(f"Your order quantity ({requirement.quantity}) is below supplier MOQ ({reply.moq}).")
+        # Keep parsed notes visible without claiming they are verified supplier
+        # facts or deriving an unsupported global risk severity from their count.
+        for note in reply.risks:
+            warnings.append(f"Parsed reply risk note: {note}")
         if lt and "lead_time_too_aggressive" in (getattr(reply, "risks", []) or []):
             warnings.append("Supplier's stated lead time appears aggressive vs calculated estimate.")
 
@@ -157,7 +163,7 @@ def generate_buyer_options(
             source_quote_reference=source_quote_reference(reply),
             lead_time_estimate=lt,
             quote=quote,
-            risk_level="low" if not reply.risks else "medium",
+            risk_level="unknown",
             deadline_feasible=lt.deadline_feasible if lt else None,
             deadline_risk_level=lt.deadline_risk_level if lt else "unknown",
             reasoning=reasoning,
@@ -170,7 +176,7 @@ def generate_buyer_options(
         key=lambda x: (x[1].expected_days, x[0].supplier_id or x[0].candidate_id),
     )
     by_price = (
-        sorted(scored, key=lambda x: (x[0].unit_price or 999, -x[3]))
+        sorted(scored, key=lambda x: (x[0].unit_price, -x[3]))
         if price_basis_comparable
         else []
     )
@@ -200,11 +206,11 @@ def generate_buyer_options(
         elif len(by_price) > 1:
             r, lt, _, _, _ = by_price[1]
             reason = f"Next comparable quote: {r.currency} {r.unit_price:.2f}/pc"
-            opt = make_option(r, lt, "lowest_cost", "Option B — Best Value", reason)
+            opt = make_option(r, lt, "alternative", "Option B — Comparable Alternative", reason)
             result_options.append(opt)
             added.add(reply_key(r))
 
-    if len(result_options) < 2 and scored:
+    if len(result_options) < 3 and scored:
         for r, lt, score, _, _ in scored:
             if reply_key(r) not in added:
                 label = f"Option {chr(65+len(result_options))} — Alternative"
