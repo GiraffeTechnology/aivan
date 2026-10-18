@@ -19,8 +19,8 @@ from build_derived import inventory, update_record, write_json
 BASE_SHA256 = 'c08be0645a38dabec08520a3717035889be04b8ea2be3f1f36fe9a456b2b9e62'
 BASE_REVISION = '22bdf78f393dc8e1a16483280cdf6bfeb019c236'
 BASE_TREE = 'ed8d2431f014e144ca24074b785f8c7b320e6a1b'
-SOURCE_REVISION = '2e84d6247989f9d6a136681afd29889ee12f5138'
-SOURCE_TREE = 'a94ab1864a1fe34fc0428d7b0b3795d72628faa7'
+SOURCE_REVISION = '20d8ba75ed21b183a5857beaf270eaeb6bbb9c5e'
+SOURCE_TREE = 'e7466054feeee470ff2bd4e810f1f349799d132b'
 ASSET_REVISION = 'da881d30ded1d89df987c0e7d9e3cccb1902c3fc'
 ASSET_NAMES = ('r6-workspace-dbdc4b643d7add02.js', 'r6-workspace-f988a2df90fe83aa.css',
                'r6-execution-LICENSES.txt', 'r6-execution-NOTICES.txt')
