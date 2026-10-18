@@ -1,0 +1,144 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const source = fs.readFileSync(new URL('../src/aivan/app/static/app.js', import.meta.url), 'utf8');
+const start = source.indexOf('async function confirmRelay(');
+const end = source.indexOf('async function loadHealth(', start);
+assert.ok(start >= 0 && end > start);
+
+function harness(translate = value => value) {
+  const events = [];
+  const state = {session: {}, authGeneration: 1, relayRequestGeneration: 1};
+  const button = {disabled: false};
+  const form = {dataset: {draftId: 'draft-1', caseId: 'case-1', channel: 'wechat',
+    previewId: 'preview-1', contentSha256: 'a'.repeat(64)},
+    receipt: 'manual-reference-1', querySelector: () => button};
+  const valid = {status: 'relayed', idempotent_replay: false, receipt: {
+    receipt_id: 'receipt-1', draft_id: 'draft-1', case_id: 'case-1', channel: 'wechat',
+    receipt_reference: form.receipt, confirmed_by: 'operator-1', confirmed_at: '2026-10-18T00:00:00Z',
+  }};
+  let response = valid;
+  let requestCount = 0;
+  const ctx = vm.createContext({state, t: translate,
+    requestId: () => `relay-request-${++requestCount}`,
+    $$: () => [], history: {replaceState() {}}, window: {scrollTo() {}},
+    loadCases() {}, loadHealth() {},
+    FormData: class {constructor(target) {this.target = target;} get() {return this.target.receipt;}},
+    api: async (path, options) => {
+      events.push({path, options});
+      return typeof response === 'function' ? response() : response;
+    },
+    toast: (message, kind) => events.push({message, kind}),
+    loadRelay: async () => events.push('reload'),
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  vm.runInContext(source.slice(source.indexOf('function setView('), source.indexOf('function populateRoles(')), ctx);
+  return {state, events, valid, form, button,
+    submit: () => ctx.confirmRelay({preventDefault() {}, target: form}),
+    response(value) {response = value;}, navigate: name => ctx.setView(name)};
+}
+
+for (const response of [null, {}, {status: 'sent'}, {status: 'relayed'},
+  {status: 'relayed', idempotent_replay: false, receipt: {draft_id: 'other-draft'}}]) {
+  const h = harness(); h.response(response); await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 0, 'missing/mismatched receipt is not a recorded manual send');
+  assert.ok(!h.events.includes('reload'));
+}
+for (const patch of [{draft_id: 'other'}, {case_id: 'other'}, {channel: 'email'},
+  {receipt_id: ''}, {confirmed_at: ''}, {confirmed_by: ''}, {receipt_reference: 'different-reference'}]) {
+  const h = harness(); h.response({...h.valid, receipt: {...h.valid.receipt, ...patch}}); await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 0);
+}
+for (const [channel, canonical] of [['weixin', 'wechat'], ['we-chat', 'wechat'],
+  ['openclaw-weixin', 'wechat'], [' OpenClaw_Weixin ', 'wechat'],
+  ['aliwangwang', 'wangwang'], ['ali-wangwang', 'wangwang'], ['smtp', 'email']]) {
+  const h = harness(); h.form.dataset.channel = channel;
+  h.response({...h.valid, receipt: {...h.valid.receipt, channel: canonical}});
+  await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 1,
+    'the supported raw outbox alias must match the backend canonical receipt identity');
+}
+for (const replay of [false, true]) {
+  const h = harness(); h.response({...h.valid, idempotent_replay: replay}); await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 1);
+  assert.equal(h.events.at(-1), 'reload');
+  const request = h.events.find(e => e.path);
+  assert.equal(request.options.headers['Idempotency-Key'], 'relay-request-1');
+  const body = JSON.parse(request.options.body);
+  assert.equal(body.preview_id, 'preview-1');
+  assert.equal(body.content_sha256, 'a'.repeat(64));
+  assert.equal(h.form.dataset.relayKey, undefined);
+}
+{
+  const h = harness(); h.response(() => {throw Error('private remote response');}); await h.submit();
+  assert.equal(h.form.dataset.relayKey, 'relay-request-1', 'uncertain retry keeps its key');
+  assert.ok(!h.events.at(-1).message.includes('private remote'));
+  h.response(h.valid); await h.submit();
+  assert.equal(h.events.filter(e => e.path)[1].options.headers['Idempotency-Key'], 'relay-request-1');
+}
+{
+  const h = harness(); h.form.receipt = ' '; await h.submit();
+  assert.equal(h.events.filter(e => e.path).length, 0);
+}
+for (const change of [h => {h.state.session = null;}, h => {h.state.authGeneration++;},
+  h => {h.navigate('dashboard');}]) {
+  const h = harness(); let release;
+  h.response(() => new Promise(resolve => {release = resolve;}));
+  const pending = h.submit(); change(h); release(h.valid); await pending;
+  assert.equal(h.events.filter(e => e.kind).length, 0);
+  assert.ok(!h.events.includes('reload'), 'stale view/session must not reload another context');
+}
+{
+  const h = harness(); h.response(() => {throw Error('uncertain');});
+  await h.submit(); h.form.receipt = 'corrected-reference'; await h.submit();
+  assert.equal(h.events.filter(e => e.path)[1].options.headers['Idempotency-Key'], 'relay-request-2',
+    'changed payload must not silently reuse the prior request identity');
+  h.response({...h.valid, idempotent_replay: true});
+  await h.submit();
+  assert.equal(h.events.filter(e => e.kind === 'success').length, 0,
+    'readback of the original receipt is not persistence of an edited reference');
+  assert.equal(h.form.dataset.relayKey, 'relay-request-2');
+}
+{
+  const h = harness(); let release;
+  h.response(() => new Promise(resolve => {release = resolve;}));
+  const pending = h.submit(); await h.submit();
+  assert.equal(h.events.filter(e => e.path).length, 1);
+  release(h.valid); await pending;
+  assert.equal(h.button.disabled, false);
+}
+assert.ok(source.includes('data-case-id="${escapeHtml(item.project_id)}" data-channel="${escapeHtml(item.channel)}"'),
+  'the rendered form must carry the actual draft case/channel, not guessed identities');
+console.log('Manual relay receipt identity, unknown outcome, retry key, stale view and duplicate submission checks passed.');
+
+const relayCatalogKeys = new Set(['已记录 relayed 回执', '确认失败：', '读取转发队列失败：', '正在读取转发队列…',
+  'AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。']);
+function localized(key) {
+  assert.ok(relayCatalogKeys.has(key), 'relay feedback must use existing registered catalog messages');
+  return `LOCALIZED:${key}`;
+}
+for (const replay of [false, true]) {
+  const h = harness(localized); h.response({...h.valid, idempotent_replay: replay});
+  await h.submit();
+  const success = h.events.find(e => e.kind === 'success');
+  assert.ok(success.message.startsWith('LOCALIZED:'), 'new and replayed receipts must use locale rendering');
+  assert.ok(success.message.includes(localized('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')));
+}
+{
+  const h = harness(localized); h.response(() => {throw Error('private upstream failure');});
+  await h.submit();
+  assert.ok(h.events.at(-1).message.startsWith('LOCALIZED:'));
+  assert.ok(!h.events.at(-1).message.includes('private upstream'));
+  assert.equal(h.form.dataset.relayKey, 'relay-request-1');
+}
+{
+  const list = {innerHTML: ''};
+  const ctx = vm.createContext({state: {session: {}, relayRequestGeneration: 0},
+    $: () => list, ht: localized, api: async () => {throw Error('private upstream failure');}});
+  vm.runInContext(source.slice(source.indexOf('async function loadRelay('), start), ctx);
+  await ctx.loadRelay();
+  assert.ok(list.innerHTML.includes(localized('读取转发队列失败：')));
+  assert.ok(!list.innerHTML.includes('private upstream'));
+}
+console.log('Relay success, replay and failures use the existing translated catalog and preserve manual-send safety.');

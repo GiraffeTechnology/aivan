@@ -66,9 +66,16 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-welcome-runtime.test.mjs",
-      "sha256": "b53f5ec8a510f814b6a686ffd458c927784f3d4d2de2bf4201f2210862c22592",
+      "sha256": "b0fae225d6d75aa3bc1dc5ea0e0b1e4363ed8ec96f4f0beb82feb3197f13992f",
       "count": 2,
-      "reason": "Reads at lines 5 and 6 use literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
+      "reason": "Re-reviewed after supplying relay navigation-generation state to the runtime fixture. Reads at lines 5 and 6 remain literal index.html and app.js URLs relative to import.meta.url. No user- or fixture-controlled filesystem destination exists."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-relay-outcome-runtime.test.mjs",
+      "sha256": "7b02739e2805fe2ef837cc91c07161f2483bc9ef463121d8404e599add6f9dcd",
+      "count": 1,
+      "reason": "Re-reviewed after existing-catalog relay feedback regressions. The sole line 5 read remains literal app.js relative to import.meta.url. Receipt/channel values, session/promise order and the marker-only translation fixture affect only in-memory calls; no fixture changes the source filename."
     },
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",

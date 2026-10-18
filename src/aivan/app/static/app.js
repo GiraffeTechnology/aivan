@@ -9,6 +9,7 @@ const state = {
   limit: 20,
   total: 0,
   selectedCase: null,
+  relayRequestGeneration: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -96,6 +97,7 @@ function showApp() {
 }
 
 function setView(name) {
+  if (name !== 'relay') state.relayRequestGeneration += 1;
   window.myAivanAttachments?.dispose();
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
@@ -544,31 +546,80 @@ async function reverseEvent(eventId) {
 }
 
 async function loadRelay() {
+  const session = state.session;
+  const generation = ++state.relayRequestGeneration;
+  const isCurrent = () => session === state.session && generation === state.relayRequestGeneration;
   const list = $('#relay-list');
   list.innerHTML = `<div class="loading-card">${ht('正在读取转发队列…')}</div>`;
   try {
     const payload = await api('/api/relay/outbox');
+    if (!isCurrent()) return;
     list.innerHTML = payload.outbox.length ? payload.outbox.map((item) => `<article class="relay-card">
       <div><span class="status-pill">${escapeHtml(item.channel)}</span><code>${escapeHtml(item.draft_id)}</code></div>
       <p>${escapeHtml(item.copy_payload?.message_text || '')}</p>
       <p>${escapeHtml(item.render_error || `Target language: ${item.target_language || 'en'}`)}</p>
       <button class="secondary" ${item.render_error ? 'disabled' : ''} data-preview-id="${escapeHtml(item.preview_id || '')}" data-action="copy" data-copy="${escapeHtml(item.copy_payload?.message_text || '')}" data-copy-case-id="${escapeHtml(item.project_id)}" data-draft-id="${escapeHtml(item.draft_id)}" data-content-sha256="${escapeHtml(item.content_sha256)}" type="button">${ht('复制内容')}</button>
-      <form class="relay-confirm" data-preview-id="${escapeHtml(item.preview_id || '')}" data-content-sha256="${escapeHtml(item.content_sha256 || '')}" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
+      <form class="relay-confirm" data-case-id="${escapeHtml(item.project_id)}" data-channel="${escapeHtml(item.channel)}" data-preview-id="${escapeHtml(item.preview_id || '')}" data-content-sha256="${escapeHtml(item.content_sha256 || '')}" data-draft-id="${escapeHtml(item.draft_id)}"><label>${ht('发送后的回执编号')}<input name="receipt" required placeholder="${ht('外部消息 ID 或人工回执编号')}"></label><button class="primary" type="submit">${ht('确认已人工转发')}</button></form>
     </article>`).join('') : emptyHtml();
-  } catch (error) { list.innerHTML = `<p class="error">${ht('读取转发队列失败：')}${escapeHtml(error.message)}</p>`; }
+  } catch (_) {
+    if (isCurrent()) list.innerHTML = `<p class="error">${ht('读取转发队列失败：')}${ht('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')}</p>`;
+  }
 }
 
 async function confirmRelay(event) {
   event.preventDefault();
-  const draftId = event.target.dataset.draftId;
-  const receipt = new FormData(event.target).get('receipt').trim();
+  const form = event.target;
+  if (form.relaySubmitting || !state.session) return;
+  const {draftId, caseId, channel} = form.dataset;
+  const receipt = String(new FormData(form).get('receipt') || '').trim();
+  if (!draftId || !caseId || !channel || !receipt) return;
+  const session = state.session;
+  const authGeneration = state.authGeneration;
+  const generation = state.relayRequestGeneration;
+  const isCurrent = () => session === state.session && authGeneration === state.authGeneration
+    && generation === state.relayRequestGeneration;
+  const body = JSON.stringify({receipt_reference: receipt, preview_id: form.dataset.previewId || undefined,
+    content_sha256: form.dataset.contentSha256 || undefined, metadata: {source: 'myaivan_mobile'}});
+  if (form.relayAttemptBody !== body) {
+    form.relayAttemptBody = body;
+    form.dataset.relayKey = requestId('relay');
+  }
+  const button = form.querySelector('button[type="submit"]');
+  form.relaySubmitting = true;
+  if (button) button.disabled = true;
   try {
-    await api(`/api/relay/${encodeURIComponent(draftId)}/confirm`, {
-      method: 'POST', body: JSON.stringify({ receipt_reference: receipt, preview_id: event.target.dataset.previewId || undefined, content_sha256: event.target.dataset.contentSha256 || undefined, metadata: { source: 'myaivan_mobile' } }),
+    const payload = await api(`/api/relay/${encodeURIComponent(draftId)}/confirm`, {
+      method: 'POST', headers: {'Idempotency-Key': form.dataset.relayKey}, body,
     });
-    toast(t('已记录 relayed 回执'), 'success');
+    if (!isCurrent()) return;
+    const saved = payload?.receipt;
+    // Match the API's existing canonical channel identity, not an outbox alias.
+    const canonicalChannel = value => {
+      if (typeof value !== 'string') return null;
+      const normalized = value.trim().toLowerCase().replaceAll('_', '-');
+      const aliases = {smtp: 'email', weixin: 'wechat', 'we-chat': 'wechat', 'openclaw-weixin': 'wechat',
+        aliwangwang: 'wangwang', 'ali-wangwang': 'wangwang', 'whats-app': 'whatsapp'};
+      return Object.hasOwn(aliases, normalized) ? aliases[normalized] : normalized;
+    };
+    if (payload?.status !== 'relayed' || typeof payload.idempotent_replay !== 'boolean'
+      || !saved || saved.draft_id !== draftId || saved.case_id !== caseId
+      || !canonicalChannel(channel) || canonicalChannel(saved.channel) !== canonicalChannel(channel)
+      || saved.receipt_reference !== receipt
+      || !['receipt_id', 'confirmed_by', 'confirmed_at']
+        .every(key => typeof saved[key] === 'string' && saved[key].trim())) {
+      throw new Error('RELAY_RECEIPT_UNVERIFIED');
+    }
+    delete form.dataset.relayKey;
+    delete form.relayAttemptBody;
+    // Both new and replayed receipts are recorded; neither means Aivan sent a message.
+    toast(`${t('已记录 relayed 回执')} ${t('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')}`, 'success');
     await loadRelay();
-  } catch (error) { toast(`${t('确认失败：')}${error.message}`, 'error'); }
+  } catch (_) {
+    if (isCurrent()) toast(`${t('确认失败：')}${t('AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。')}`, 'error');
+  } finally {
+    form.relaySubmitting = false;
+    if (button) button.disabled = false;
+  }
 }
 
 async function loadHealth() {
