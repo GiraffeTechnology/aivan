@@ -88,6 +88,8 @@ def test_contradictory_initial_graph_is_rejected_before_writes(monkeypatch, mism
 
     def mutate(request):
         response = fixture(request)
+        if not request.url.path.endswith('/transaction-graph'):
+            return response
         data = response.json()
         if mismatch == 'tenant':
             data['procurement_case']['tenant_id'] = 'other-tenant'
