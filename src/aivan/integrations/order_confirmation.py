@@ -208,6 +208,50 @@ class GiraffeDBOrderConfirmationClient:
                 "ORDER_CONFIRMATION_INDETERMINATE_COMMIT:readback"
             ) from None
 
+    def _verify_readback_links(
+        self, quote: dict, order: dict, graph: dict, *, case_id: str,
+        quote_id: str, order_id: str, rfq_id: str | None = None,
+        supplier_id: str | None = None,
+    ) -> str:
+        """Reject contradictory evidence without requiring new provider echoes."""
+        code = "ORDER_CONFIRMATION_READBACK_MISMATCH"
+
+        def check(record, expected):
+            if not isinstance(record, dict) or any(
+                key in record and record[key] != value for key, value in expected.items()
+            ):
+                raise OrderConfirmationError(code)
+
+        case = graph.get("procurement_case")
+        if not isinstance(case, dict) or case.get("procurement_case_id") != case_id:
+            raise OrderConfirmationError(code)
+        check(case, {"tenant_id": self.tenant_id})
+        rfq_id = rfq_id or _provider_id(order.get("rfq_id"), code=code)
+        supplier_id = supplier_id or quote.get("supplier_id") or order.get("supplier_id")
+        common = {"tenant_id": self.tenant_id, "procurement_case_id": case_id, "rfq_id": rfq_id}
+        if supplier_id is not None:
+            common["supplier_id"] = supplier_id
+        check(quote, common)
+        check(order, common)
+        if case.get("buyer_id") is not None:
+            check(order, {"buyer_id": case["buyer_id"]})
+        for row in graph.get("supplier_quotes", []):
+            if isinstance(row, dict) and row.get("quote_id") == quote_id:
+                check(row, common)
+        for row in graph.get("purchase_orders", []):
+            if isinstance(row, dict) and row.get("po_id") == order_id:
+                check(row, {**common, "selected_quote_id": quote_id, "status": "confirmed"})
+        # The graph may omit optional collections, but supplied relationships
+        # must agree with the exact direct-record readback.
+        if "rfqs" in graph:
+            rfqs = graph["rfqs"]
+            matches = [row for row in rfqs if isinstance(row, dict) and row.get("id") == rfq_id] if isinstance(rfqs, list) else []
+            if not matches:
+                raise OrderConfirmationError(code)
+            for row in matches:
+                check(row, {"tenant_id": self.tenant_id, "procurement_case_id": case_id})
+        return rfq_id
+
     def _post(
         self,
         operation: str,
@@ -312,12 +356,13 @@ class GiraffeDBOrderConfirmationClient:
             for item in graph_orders
         ):
             raise OrderConfirmationError("ORDER_CONFIRMATION_GRAPH_ORDER_MISSING")
+        rfq_id = self._verify_readback_links(
+            quote_readback, order_readback, final_graph,
+            case_id=procurement_case_id, quote_id=supplier_quote_id, order_id=purchase_order_id,
+        )
         return OrderConfirmationResult(
             procurement_case_id=procurement_case_id,
-            rfq_id=_provider_id(
-                order_readback.get("rfq_id"),
-                code="ORDER_CONFIRMATION_READBACK_MISMATCH",
-            ),
+            rfq_id=rfq_id,
             supplier_quote_id=supplier_quote_id,
             purchase_order_id=purchase_order_id,
             status="confirmed",
@@ -481,6 +526,11 @@ class GiraffeDBOrderConfirmationClient:
         ):
             raise OrderConfirmationError("ORDER_CONFIRMATION_GRAPH_ORDER_MISSING")
 
+        self._verify_readback_links(
+            quote_readback, order_readback, final_graph,
+            case_id=procurement_case_id, quote_id=supplier_quote_id, order_id=purchase_order_id,
+            rfq_id=rfq_id, supplier_id=supplier_id,
+        )
         return OrderConfirmationResult(
             procurement_case_id=procurement_case_id,
             rfq_id=rfq_id,
