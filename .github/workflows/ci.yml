@@ -177,6 +177,7 @@ jobs:
           node ../../tests/myaivan-inquiry-runtime.test.mjs
           node ../../tests/myaivan-clipboard-runtime.test.mjs
           node ../../tests/myaivan-conversation-runtime.test.mjs
+          node ../../tests/myaivan-order-outcome-runtime.test.mjs
           node ../../tests/myaivan-copy-audit-runtime.test.mjs
           node ../../tests/myaivan-message-readback-runtime.test.mjs
           node ../../tests/myaivan-attachments-runtime.test.mjs

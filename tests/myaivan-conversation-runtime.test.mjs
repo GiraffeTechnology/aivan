@@ -40,11 +40,17 @@ const confirmations = [];
 const posts = [];
 let accepted = true;
 const actionContext = vm.createContext({
+  state: {session: {}, authGeneration: 1, caseRequestGeneration: 1,
+    selectedCase: {case: {case_id: 'case-confirm'}}},
   document: { addEventListener(type, listener) { delegated.set(type, listener); } },
   window: { confirm(message) { confirmations.push(message); return accepted; } },
   t: value => value, toast() {}, setView() {},
   openCase: async caseId => navigation.push(caseId),
-  api: async (path, request) => { posts.push({ path, request }); return { recovered: false }; },
+  api: async (path, request) => { posts.push({ path, request }); return {
+    status: 'confirmed', readback_verified: true, recovered: false,
+    selected_option_id: 'selected-option', purchase_order_id: 'po-1',
+    supplier_quote_id: 'quote-1', procurement_case_id: 'procurement-1', rfq_id: 'rfq-1',
+  }; },
 });
 const confirmStart = app.indexOf('async function confirmOrder(');
 vm.runInContext(app.slice(confirmStart, app.indexOf('async function copyDraftText(', confirmStart)), actionContext);

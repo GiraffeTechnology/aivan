@@ -460,16 +460,34 @@ async function rejectDraft(draftId) {
 }
 
 async function confirmOrder(caseId, optionId) {
+  const session = state.session;
+  const authGeneration = state.authGeneration;
+  const generation = state.caseRequestGeneration;
+  const isCurrent = () => session === state.session && authGeneration === state.authGeneration
+    && generation === state.caseRequestGeneration && state.selectedCase?.case?.case_id === caseId;
+  if (!session || !isCurrent() || !optionId || state.orderConfirmationRequest) return;
   if (!window.confirm(t('确认将当前选定报价写入订单？此操作需要人工授权。'))) return;
+  const request = {caseId, optionId};
+  state.orderConfirmationRequest = request;
   try {
     const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}/order-confirmation`, {
       method: 'POST',
       body: JSON.stringify({ selected_option_id: optionId }),
     });
+    if (!isCurrent()) return;
+    if (!payload || Array.isArray(payload) || payload.status !== 'confirmed'
+      || payload.readback_verified !== true || payload.selected_option_id !== optionId
+      || typeof payload.recovered !== 'boolean'
+      || !['purchase_order_id', 'supplier_quote_id', 'procurement_case_id', 'rfq_id']
+        .every(key => typeof payload[key] === 'string' && payload[key].trim())) {
+      throw new Error('ORDER_CONFIRMATION_UNVERIFIED');
+    }
     toast(payload.recovered ? t('订单已恢复并通过数据库回读') : t('订单已确认并通过数据库回读'), 'success');
     await openCase(caseId);
-  } catch (error) {
-    toast(`${t('订单确认失败：')}${error.message}`, 'error');
+  } catch (_) {
+    if (isCurrent()) toast('Order confirmation could not be verified. Reopen this case to check its saved state before retrying. No successful confirmation is claimed.', 'error');
+  } finally {
+    if (state.orderConfirmationRequest === request) state.orderConfirmationRequest = null;
   }
 }
 
