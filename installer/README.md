@@ -34,6 +34,11 @@ Use distinct database namespaces: the three applications contain overlapping tab
 names. For PostgreSQL, distinct preconfigured schemas are also supported with a
 `schema` field; the connected account's actual default schema must match. The
 installer does not create DB servers, database accounts or physical databases.
+SQL targets are not an account-count requirement: the installer does not require
+different usernames. An existing account can serve more than one target only
+where its owner-approved grants permit access to those distinct namespaces.
+Do not create extra accounts or borrow another service's credentials merely to
+match the number of entries in this example.
 Fresh MySQL tables use binary UTF-8 identity comparisons. The plan reports existing
 incompatible identity collations; it does not automatically convert their data.
 Actual target addresses and SSH metadata belong only in the private manual
@@ -284,7 +289,10 @@ installation-owned identity. Credentials and provider IDs remain separate.
 
 Install with `--no-start` first. On the target's private interactive terminal, run
 `myaivan database-configure --file /absolute/private/database-config.json` to enter
-the three existing MySQL connections. Password input is hidden and never accepted
+the existing MySQL connections required by the selected installation profile:
+Aivan and abcdYi, plus the provider when it is bundled. With an external provider
+HTTP API selected, omit the provider SQL entry. This is not a requirement for
+three accounts. Password input is hidden and never accepted
 from command arguments. Select the resulting file with `prepare
 --database-config-file /absolute/private/database-config.json`. The tool does not
 create database users, accounts, grants or physical databases. An existing approved
