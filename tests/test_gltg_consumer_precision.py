@@ -69,13 +69,13 @@ def test_missing_components_and_critical_path_are_not_fabricated(monkeypatch):
 
 
 def test_v2_quantile_is_not_evidence_of_an_earliest_delivery():
-    result = GLTGClient._normalize_v2_result({"quantiles": {"p50_days": 10.25, "p80_days": 12.5, "p90_days": 14.75},
+    result = GLTGClient._normalize_v2_result({"ok": True, "quantiles": {"p50_days": 10.25, "p80_days": 12.5, "p90_days": 14.75},
                                             "risk": {"selected_confidence_days": 12.5}})
     assert result.get("minimum_feasible_days") is None
 
 
 def test_v2_selected_zero_confidence_is_preserved():
-    result = GLTGClient._normalize_v2_result({"quantiles": {"p50_days": 0, "p80_days": 1.25, "p90_days": 2.5},
+    result = GLTGClient._normalize_v2_result({"ok": True, "quantiles": {"p50_days": 0, "p80_days": 1.25, "p90_days": 2.5},
                                             "risk": {"selected_confidence_days": 0}})
     assert result["estimated_lead_time_days"] == 0
 
