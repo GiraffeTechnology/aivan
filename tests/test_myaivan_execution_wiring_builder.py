@@ -1,5 +1,7 @@
 """Bounded packaging unit fixtures; never installation or native-runtime QA."""
 import hashlib
+import base64
+import csv
 import importlib.util
 import json
 from pathlib import Path
@@ -156,3 +158,29 @@ def test_entrypoint_preserves_retained_artifacts_and_source(tmp_path, monkeypatc
     with pytest.raises(ValueError):
         m.main()
     assert existing.read_bytes() == b'retained artifact fixture'
+
+
+def test_record_includes_all_added_source_and_asset_members(tmp_path):
+    m = builder()
+    site = tmp_path / m.SITE
+    distribution = site / 'aivan-0.3.0.dist-info'
+    distribution.mkdir(parents=True)
+    record = distribution / 'RECORD'
+    record.write_text('aivan-0.3.0.dist-info/RECORD,,\n')
+    (distribution / 'DERIVED-BUILD.json').write_bytes(b'{}')
+    expected = {}
+    for target in m.source_targets().values():
+        if not target.startswith(str(m.SITE) + '/'):
+            continue
+        path = tmp_path / target
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = ('synthetic ' + target).encode()
+        path.write_bytes(content)
+        expected[str(path.relative_to(site))] = [
+            'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip('='), str(len(content))]
+    m.update_selected_record(tmp_path, distribution)
+    with record.open() as stream:
+        rows = {row[0]: row[1:] for row in csv.reader(stream)}
+    assert len(expected) == 11
+    assert all(rows[name] == value for name, value in expected.items())
+    assert rows['aivan-0.3.0.dist-info/RECORD'] == ['', '']
