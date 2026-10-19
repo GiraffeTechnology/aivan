@@ -30,7 +30,6 @@
     '微信 / 旺旺人工转发': 'WeChat / WangWang guided relay', '发送后的回执编号': 'Receipt reference after relay',
     '确认已人工转发': 'Confirm manual relay', '依赖健康': 'Dependency health',
     'AIVAN 只生成转发卡。必须由人员复制、在目标客户端发送并填写回执，系统不会自动外发个人 IM。': 'AIVAN creates relay cards only. A person must copy, send in the destination client, and enter the receipt; the system never sends personal IM automatically.',
-    '此页面只显示配置状态，不主动连接外部依赖，也不替代 CTYun、桥接、备份恢复和真机五轮验收证据。': 'This page shows configuration status only. It does not connect to external dependencies or replace CTYun, bridge, backup-restore, and five-round device evidence.',
     '暂无数据': 'No data', '当前筛选条件下没有可显示的记录。': 'No records match the current filter.',
     '正在读取案例…': 'Loading cases…', '询盘': 'Inquiry', '寻源': 'Sourcing',
     '等待供应商': 'Awaiting supplier', '供应商已回复': 'Supplier replied',

@@ -40,7 +40,11 @@ def _environment(path, candidate, *, cors="https://myaivan.com"):
                 "AIVAN_HOST=127.0.0.1",
                 "AIVAN_PORT=8765",
                 "AIVAN_DB_URL=sqlite:///./data/aivan.db",
-                "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin",
+                "AIVAN_NON_CHINA_EGRESS_POLICY=example-egress-bridge",
+                "AIVAN_EXPECTED_EGRESS_POLICY=example-egress-bridge",
+                "AIVAN_DEPLOYMENT_PROFILE=example-aivan",
+                "AIVAN_DEPLOYMENT_CLOUD=example-cloud",
+                "AIVAN_REVERSE_BRIDGE_PORT=18765",
                 f"AIVAN_CORS_ORIGINS={cors}",
                 "AIVAN_REQUIRE_HUMAN_APPROVAL=true",
                 "AIVAN_EXTERNAL_MODEL_API_ENABLED=false",
@@ -74,17 +78,17 @@ def _topology(path, *, preserved=True):
     observations["protected_ports_preserved"] = preserved
     payload = {
         "schema_version": 1,
-        "profile": "ctyun-aivan-myaivan",
-        "cloud": "ctyun-cn",
+        "profile": "example-aivan",
+        "cloud": "example-cloud",
         "install_path": "/opt/giraffe/aivan",
         "service_name": "myaivan.service",
         "bind_host": "127.0.0.1",
         "bind_port": 8765,
         "database_profile": "sqlite:///./data/aivan.db",
-        "non_china_egress_bridge": "abcdyi-sin",
+        "non_china_egress_bridge": "example-egress-bridge",
         "protected_port_owners": {"443": "nginx", "8443": "stalwart"},
         "reverse_bridge": {
-            "remote_host_profile": "abcdyi-sin",
+            "remote_host_profile": "example-egress-bridge",
             "remote_bind": "127.0.0.1",
             "remote_port": 18765,
             "health_path": "/health",
@@ -270,3 +274,48 @@ def test_predeployment_rejects_invalid_or_reserved_port_configuration(
     failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
     assert result["status"] == "failed_closed"
     assert expected_failure in failed
+
+
+@pytest.mark.parametrize("key,value,expected_failure", [
+    ("AIVAN_EXPECTED_EGRESS_POLICY", "", "configured_egress_policy"),
+    ("AIVAN_EXPECTED_EGRESS_POLICY", "different-route", "configured_egress_policy"),
+    ("AIVAN_DEPLOYMENT_PROFILE", "", "topology_profile"),
+    ("AIVAN_DEPLOYMENT_PROFILE", "different-profile", "topology_profile"),
+    ("AIVAN_DEPLOYMENT_CLOUD", "", "topology_cloud"),
+    ("AIVAN_DEPLOYMENT_CLOUD", "different-provider", "topology_cloud"),
+    ("AIVAN_REVERSE_BRIDGE_PORT", "", "reverse_bridge_contract"),
+    ("AIVAN_REVERSE_BRIDGE_PORT", "65536", "reverse_bridge_contract"),
+    ("AIVAN_REVERSE_BRIDGE_PORT", "18766", "reverse_bridge_contract"),
+])
+def test_target_configuration_is_required_and_must_match(tmp_path, monkeypatch, key, value, expected_failure):
+    repository = _repository(tmp_path)
+    candidate = "a" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate)
+    _topology(topology)
+    lines = environment.read_text().splitlines()
+    environment.write_text("\n".join(line for line in lines if not line.startswith(key + "=")) + f"\n{key}={value}\n")
+    result = run_predeployment_gate(repository_root=repository, candidate_commit=candidate,
+        environment_file=environment, topology_file=topology, output_path=tmp_path / "evidence.jsonl")
+    failed = {item["code"] for item in result["checks"] if item["result"] == "failed"}
+    assert result["status"] == "failed_closed"
+    assert expected_failure in failed
+
+
+def test_alternative_target_configuration_is_supported(tmp_path, monkeypatch):
+    repository = _repository(tmp_path)
+    candidate = "b" * 40
+    monkeypatch.setattr("scripts.run_stage7f_predeployment._checkout_commit", lambda _: candidate)
+    environment = tmp_path / "production.env"
+    topology = tmp_path / "topology.json"
+    _environment(environment, candidate)
+    _topology(topology)
+    for path in (environment, topology):
+        text = path.read_text().replace("example-aivan", "second-example-app").replace("example-cloud", "second-example-provider").replace("example-egress-bridge", "second-example-route").replace("18765", "19000")
+        path.write_text(text)
+    result = run_predeployment_gate(repository_root=repository, candidate_commit=candidate,
+        environment_file=environment, topology_file=topology, output_path=tmp_path / "evidence.jsonl")
+    assert result["status"] == "passed"
+    assert result["production_acceptance"] is False

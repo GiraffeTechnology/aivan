@@ -107,8 +107,9 @@ def _readiness_snapshot(
         .lower()
         == "true"
         and os.environ.get("OLLAMA_MODEL", "").strip() == "qwen3.5:9b",
-        "non_china_policy_declared": os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
-        == "abcdyi-sin",
+        "non_china_policy_declared": _configured("AIVAN_EXPECTED_EGRESS_POLICY")
+        and os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
+        == os.environ.get("AIVAN_EXPECTED_EGRESS_POLICY", "").strip(),
     }
     checks.update(production_policy_checks())
     results = run_dependency_probes(correlation_id=correlation_id)

@@ -1,8 +1,7 @@
 """Run the non-production Stage 6A five-run gate and append safe JSON evidence.
 
 This runner deliberately cannot issue production-acceptance evidence. Real
-channel receipts, CTYun deployment checks, backup restores, and supervisor
-sign-off remain external gates described by the Stage 6 PRD.
+channel receipts, deployment checks and backup restores require separate evidence.
 """
 
 from __future__ import annotations

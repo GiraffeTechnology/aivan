@@ -1,19 +1,18 @@
 {
   "schema_version": 1,
-  "profile": "ctyun-aivan-myaivan",
-  "cloud": "ctyun-cn",
+  "profile": "example-aivan",
+  "cloud": "example-cloud",
   "install_path": "/opt/giraffe/aivan",
   "service_name": "myaivan.service",
   "bind_host": "127.0.0.1",
   "bind_port": 8765,
   "database_profile": "sqlite:///./data/aivan.db",
-  "non_china_egress_bridge": "abcdyi-sin",
+  "non_china_egress_bridge": "example-egress-bridge",
   "protected_port_owners": {
-    "443": "nginx",
-    "8443": "stalwart"
+    "2222": "example-existing-service"
   },
   "reverse_bridge": {
-    "remote_host_profile": "abcdyi-sin",
+    "remote_host_profile": "example-egress-bridge",
     "remote_bind": "127.0.0.1",
     "remote_port": 18765,
     "health_path": "/health"

@@ -2,7 +2,7 @@
 """AIVAN production operational smoke test (post-PR29).
 
 Exercises the private-domain safety invariants against the configured local
-model (on CTYUN: ollama + qwen3.5:2b). Each scenario asserts SAFETY, not model
+model (on deployment host: ollama + qwen3.5:2b). Each scenario asserts SAFETY, not model
 accuracy: no external API call, no silent mock fallback, no outbound before
 approval, correct gating, and deterministic fallback on local-model failure.
 

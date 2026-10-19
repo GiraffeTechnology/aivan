@@ -77,7 +77,7 @@ def test_benchmark_mode_c_fails_on_mock_fallback(monkeypatch, _cases):
 
 
 def test_partial_local_failures_keep_integrity_thresholds_passing(monkeypatch):
-    # The real CTYUN scenario: Ollama is alive (some cases succeed) but the tiny
+    # The real deployment host scenario: Ollama is alive (some cases succeed) but the tiny
     # 2b model fails structured extraction on others. Those are attempted-but-
     # failed calls (measured capability), NOT integrity violations, so hard
     # thresholds still pass while the failures are reported per case.
