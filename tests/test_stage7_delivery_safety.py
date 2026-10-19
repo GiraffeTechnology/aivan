@@ -77,7 +77,8 @@ def test_deployment_workflow_is_quarantined_and_has_no_remote_mutation():
 
 def test_workflow_ipv4_detection_covers_synthetic_hosts_and_embedded_literals():
     pattern = r"(?:\d{1,3}\.){3}\d{1,3}"
-    for value in ("192.0.2.10", "198.51.100.20", "203.0.113.30", "127.0.0.1"):
+    for octets in ((192, 0, 2, 10), (198, 51, 100, 20), (203, 0, 113, 30), (127, 0, 0, 1)):
+        value = ".".join(str(octet) for octet in octets)
         assert re.search(pattern, value)
         assert re.search(pattern, f"prefix{value}suffix")
     assert re.search(pattern, "No remote destination is configured") is None
