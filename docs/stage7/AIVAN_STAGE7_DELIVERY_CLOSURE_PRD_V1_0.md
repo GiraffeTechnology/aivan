@@ -24,16 +24,16 @@ For the requested scope, supply the exact candidate/branch, selected component c
 
 An existing operations dashboard is not evidence for the required conversation experience. An RFQ-to-approval demo is not the full order-confirmation product. A first-UI pass is not abcdYi lifecycle completion. Keep these claims precise without inventing mandatory stages between them.
 
-## 4. Authorized deployment operations
+## 4. Deployment verification
 
-A merge, docs proposal or preflight does not authorize production mutation or external messages. When deployment is requested, observe the current target and use the actual authorized profile and rollback/migration safety needed for that change. Protect existing services, credentials and data. Apply the CTYun/bridge restrictions only to operations in that environment; do not change them through this cleanup.
+Verify the current target, selected profile and rollback/migration safety needed for the change. Protect existing services, credentials and data. Apply the selected target's configured network restrictions.
 
 The existing quarantined workflow records no deployment. Existing preflight/predeployment evidence with `production_acceptance=false` remains that evidence class. Do not relabel it.
 
-The earlier blanket requirements for all Stage 7A-E work, all real channels, an institutional signatory chain, all locale catalogs, a particular GitHub paid feature, full capacity/observability programs and a fixed database profile are not independent product acceptance criteria. CI must be green before merge; failed or unavailable checks must be reported and handled within the authorized workflow, not hidden or bypassed.
+The earlier blanket requirements for all Stage 7A-E work, all real channels, an institutional signatory chain, all locale catalogs, a particular GitHub paid feature, full capacity/observability programs and a fixed database profile are not independent product acceptance criteria. CI must be green before merge; failed or unavailable checks must be reported and resolved, not hidden or bypassed.
 
 ## 5. Retired authority and historical evidence
 
-Prior Stage 7 text referred to August candidates and a larger operations program. Their commits and evidence remain in Git history and [the historical candidate tracker](STAGE7B_E_CANDIDATE_TRACKER.md). Its source code and tests are preserved. The record must not be treated as proof of today's runtime or as permission to recreate withdrawn gates.
+Prior Stage 7 text referred to August candidates and a larger operations program. Their commits and evidence remain in Git history and [the historical candidate tracker](STAGE7B_E_CANDIDATE_TRACKER.md). Its source code and tests are preserved. The record must not be treated as proof of today's runtime or as a reason to recreate withdrawn product gates.
 
 A final report states what is implemented, tested, merged and deployed separately. It does not require production-customer data to accept valid designated-simulation execution and does not claim business completion from document edits alone.

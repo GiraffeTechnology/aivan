@@ -1,6 +1,6 @@
 # Aivan / OpenClaw Deployment Safety Notice
 
-Reconciled: 2026-10-02. The existing deployment workflow is quarantined: it records a candidate/authorization reference and performs no deployment. A documentation change or successful workflow does not authorize production mutation.
+The existing workflow records candidate metadata and performs no deployment.
 
 ## Existing workflow meaning
 
@@ -8,12 +8,12 @@ Reconciled: 2026-10-02. The existing deployment workflow is quarantined: it reco
 
 ## Target-specific protections retained
 
-For authorized CTYun Aivan operations, respect the existing protected services/ports and Singapore bridge policy. Do not take over or modify Aivan host ports 443/8443 or their existing services. CTYun connections outside mainland China use the authorized `abcdyi-sin` route; do not invent a bypass. Resolve actual target identity/configuration through the authorized operations inventory rather than stale addresses in historical documents.
+Deployment-specific reserved ports, service ownership and egress routes come from the selected target configuration. Verify that configuration before deployment; preserve existing services and the configured network route.
 
-Secrets stay in the authorized configuration/secret store, not source, Action inputs, logs or evidence. Production deployment, migration, database mutation, service/network changes and external business/test messages each require the applicable authorization. A known channel or approved draft does not authorize arbitrary new sending.
+Secrets belong in the configuration/secret store, not source, Action inputs, logs or evidence.
 
-## Scope of a future operation
+## Deployment verification
 
-When a deployment is requested, identify its exact candidate, target, applicable DB profile, planned changes and rollback/recovery needs. Verify only the operational safeguards needed for that authorized change, preserve data and existing services, and report actual deployed revision and results. Existing predeployment/migration tools may help, but their old fixed-provider/stage assumptions must not silently override current product requirements.
+Identify the exact candidate, target, applicable DB profile, planned changes and rollback/recovery needs. Verify the applicable operational safeguards, preserve data and existing services, and report the actual deployed revision and results. Existing predeployment/migration tools may help, but their old fixed-provider/stage assumptions must not silently override current product requirements.
 
 There is no mandatory Stage 7F product phase, all-channel test bundle, institutional signature chain or full capacity/observability program imposed by this notice. Functional acceptance using the designated simulated DBs follows [Acceptance Criteria](ACCEPTANCE_CRITERIA.md); it is not dependent on first performing a production-host deployment.

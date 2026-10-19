@@ -1,26 +1,26 @@
 # Target-Specific Predeployment Reference
 
-Reconciled: 2026-10-02. The legacy Stage 7F path is retained for links. This reference is not product acceptance, a mandatory product stage, or permission to execute host changes.
+Reconciled: 2026-10-02. The legacy Stage 7F path is retained for links. This reference is not product acceptance or a mandatory product stage.
 
-## Before an authorized deployment
+## Before deployment
 
-Identify the actual target and exact candidate revision. Observe current branch/service/route and the selected DB provider/profile; do not assume historical August topology is current. Preserve the permanent `myaivan-web` release boundary. CI must be green before merge; deployment requires its own authorization.
+Identify the actual target and exact candidate revision. Observe current branch/service/route and the selected DB provider/profile; do not assume historical August topology is current. Preserve the permanent `myaivan-web` release boundary. CI must be green before merge.
 
-Determine changes, safe recovery/rollback and data backup needs for this specific operation. Use least-privilege credentials from the approved store. Do not disclose raw secrets or private rows in evidence.
+Determine changes, safe recovery/rollback and data backup needs for this specific operation. Use least-privilege credentials from the configured secret store. Do not disclose raw secrets or private rows in evidence.
 
-For the CTYun Aivan target, retain existing protected-port/service and `abcdyi-sin` routing restrictions in [the safety notice](../DEPLOY_OPENCLAW_AIVAN_SOP.md). A failed readiness check is a real observation to investigate, not permission to take over protected services or bypass the route.
+Retain the selected target's configured protected ports, services and egress route, as described in [the safety notice](../DEPLOY_OPENCLAW_AIVAN_SOP.md). A failed readiness check is a real observation to investigate, not permission to take over protected services or bypass the route.
 
 ## Existing predeployment tool
 
 `scripts/run_stage7f_predeployment.py` produces the existing `production_predeployment` evidence class with `production_acceptance=false`. It is not deployment or application-function evidence. Its fixed-profile inputs and historical prerequisites are implementation constraints to inspect against the selected target; this document does not change the runner or order every old stage check for every delivery.
 
-The application port comes from `AIVAN_PORT` and must match the descriptor’s integer `bind_port` within 1–65535. The descriptor’s `protected_port_owners` map lists the actual deployment reservations; it may be empty when none are reserved. The application port must not appear in that map. No port is reserved merely because the environment is CTYun or SIN. Before running this read-only check, verify current listeners and complete the existing `protected_ports_preserved` observation and evidence digest. The runner validates supplied evidence; it does not probe listeners or establish that a port is currently free. Runtime readiness uses the optional comma-separated `AIVAN_RESERVED_PORTS` setting from the same deployment inventory; an empty value reserves no ports. Keep it aligned with the descriptor. Invalid ports or malformed reservation lists fail readiness.
+The application port comes from `AIVAN_PORT` and must match the descriptor’s integer `bind_port` within 1–65535. The descriptor’s `protected_port_owners` map lists the actual deployment reservations; it may be empty when none are reserved. The application port must not appear in that map. Environment names alone do not establish port reservations. Before running this read-only check, verify current listeners and complete the existing `protected_ports_preserved` observation and evidence digest. The runner validates supplied evidence; it does not probe listeners or establish that a port is currently free. Runtime readiness uses the optional comma-separated `AIVAN_RESERVED_PORTS` setting from the same deployment inventory; an empty value reserves no ports. Keep it aligned with the descriptor. Invalid ports or malformed reservation lists fail readiness.
 
-For a target that actually uses the existing migration tooling, preview the plan, preserve a verified recoverable backup where changes require it, apply only within authorization, and verify convergence/readback. A different compatible private DB provider may need a different reviewed migration or no migration. Do not force one physical schema solely because this historical script used it.
+For a target that actually uses the existing migration tooling, preview the plan, preserve a verified recoverable backup where changes require it, apply the reviewed migration plan, and verify convergence/readback. A different compatible private DB provider may need a different reviewed migration or no migration. Do not force one physical schema solely because this historical script used it.
 
-## After activation, if authorized
+## After activation
 
-Record the actual deployed SHA, selected dependency/provider versions, relevant health/session/data checks and the user flow exercised on that target. Verify DB process state/readback and correct authorization/channel behavior. If the change fails, follow the authorized recovery plan and report the failed candidate honestly.
+Record the actual deployed SHA, selected dependency/provider versions, relevant health/session/data checks and the user flow exercised on that target. Verify DB process state/readback and correct authorization/channel behavior. If the change fails, follow the recovery plan and report the failed candidate honestly.
 
 The two designated simulated DBs are valid functional acceptance sources. A deployment observation does not turn a simulated dataset into production-customer data, and it need not do so. Conversely, a local mock transport or skipped test is not a live integration pass.
 
