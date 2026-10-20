@@ -746,3 +746,11 @@ def _register_attachment_routes():
 
 
 _register_attachment_routes()
+
+
+def _register_execution_association_routes():
+    from aivan.api.execution_association_routes import router as association_router
+    router.include_router(association_router)
+
+
+_register_execution_association_routes()
