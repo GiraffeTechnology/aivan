@@ -51,3 +51,7 @@ CI must be green before merging.
 Follow [the current security scan policy](docs/SECURITY_SCANNING.md) for scanner coverage, failure thresholds, reviewed findings and evidence. The license-available scans differ from CodeQL security-extended; do not claim equivalence or hide failures. Historical CodeQL/Dependency Review references do not restore an unavailable paid service as a product requirement.
 
 Before handoff: identify the exact scope and revision, run relevant checks, distinguish passed/failed/skipped/not-run, record evidence and limitations, and avoid new gates. Draft PRs and docs do not prove code implementation, merge, functional acceptance or production deployment.
+
+## Operational authorization and publication safety
+
+Documentation and passing CI do not grant permission to deploy, migrate data, restart services, change accounts or network settings, or send external messages. Perform those actions only within the operator-authorized scope; preserve existing service protections and do not bypass a denied operation. Repository content must be suitable for public disclosure: exclude credentials, private conversations, counterparty data, host secrets and unapproved source attachments.

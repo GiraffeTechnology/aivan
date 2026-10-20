@@ -25,3 +25,7 @@ Record the actual deployed SHA, selected dependency/provider versions, relevant 
 The two designated simulated DBs are valid functional acceptance sources. A deployment observation does not turn a simulated dataset into production-customer data, and it need not do so. Conversely, a local mock transport or skipped test is not a live integration pass.
 
 Use [Acceptance Criteria](../ACCEPTANCE_CRITERIA.md) and [MyAivan requirements](../MYAIVAN_WEB_PRD.md), including their five-run UI scope. Do not add an all-live-channel, full-operations or multi-signature prerequisite from the historical Stage 7F label.
+
+## Authorized execution
+
+Execute host changes, activation, migrations and recovery only within the authorized operation and its target-specific scope. Successful preflight or CI is not permission to expand access, restart unrelated services or bypass a denied operation. Keep private records and credentials out of public source and evidence.

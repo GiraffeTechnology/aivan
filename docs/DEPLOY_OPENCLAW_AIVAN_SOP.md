@@ -17,3 +17,7 @@ Secrets belong in the configuration/secret store, not source, Action inputs, log
 Identify the exact candidate, target, applicable DB profile, planned changes and rollback/recovery needs. Verify the applicable operational safeguards, preserve data and existing services, and report the actual deployed revision and results. Existing predeployment/migration tools may help, but their old fixed-provider/stage assumptions must not silently override current product requirements.
 
 There is no mandatory Stage 7F product phase, all-channel test bundle, institutional signature chain or full capacity/observability program imposed by this notice. Functional acceptance using the designated simulated DBs follows [Acceptance Criteria](ACCEPTANCE_CRITERIA.md); it is not dependent on first performing a production-host deployment.
+
+## Authorization boundary
+
+The record-only workflow and this document do not authorize deployment. Obtain the applicable operator authorization for the exact target and planned deployment, migration, database mutation, service restart, account or network change. External business or test messages require their own authorized recipient and purpose. Preserve privacy, least privilege and secret-store boundaries; do not bypass a denied action or disclose private operational data.
