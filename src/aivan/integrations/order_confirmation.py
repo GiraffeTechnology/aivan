@@ -162,27 +162,95 @@ class GiraffeDBOrderConfirmationClient:
         )
 
     def _recover_write(self, operation: str, idempotency_key: str) -> dict[str, Any]:
+        code = f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
         encoded_key = quote_path_segment(idempotency_key, safe="")
-        response = self._request(
-            "GET", f"/api/data/write-results/{operation}/{encoded_key}"
-        )
-        if response.status_code == 404:
-            raise OrderConfirmationError(
-                f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
+        try:
+            response = self._request(
+                "GET", f"/api/data/write-results/{operation}/{encoded_key}"
             )
+        except OrderConfirmationError:
+            # A failed recovery read cannot establish that the earlier POST
+            # failed or authorize creating a different commercial operation.
+            raise OrderConfirmationError(code) from None
         if response.status_code != 200:
-            raise OrderConfirmationError(
-                f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
-            )
-        payload = self._json_object(
-            response, code=f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
-        )
+            raise OrderConfirmationError(code)
+        payload = self._json_object(response, code=code)
         record = payload.get("record")
-        if payload.get("status") != "committed" or not isinstance(record, dict):
-            raise OrderConfirmationError(
-                f"ORDER_CONFIRMATION_INDETERMINATE_COMMIT:{operation}"
-            )
+        primary_key = {"supplier_quotes": "quote_id", "purchase_orders": "po_id"}.get(operation)
+        if (primary_key is None or payload.get("status") != "committed"
+                or not self._valid_write_record(record, operation, idempotency_key)
+                or payload.get("target_id") != record[primary_key]):
+            raise OrderConfirmationError(code)
         return record
+
+    def _valid_write_record(self, record, operation: str, idempotency_key: str) -> bool:
+        primary_key = {"supplier_quotes": "quote_id", "purchase_orders": "po_id"}.get(operation)
+        if not isinstance(record, dict) or primary_key is None:
+            return False
+        value = record.get(primary_key)
+        if not isinstance(value, str) or not _SAFE_PROVIDER_ID.fullmatch(value):
+            return False
+        # Trust the authenticated tenant/key-scoped endpoint. Compatible
+        # providers need not add echoes; if supplied, they must not disagree.
+        if "tenant_id" in record and record["tenant_id"] != self.tenant_id:
+            return False
+        if "idempotency_key" in record and record["idempotency_key"] != idempotency_key:
+            return False
+        return True
+
+    def _read_after_write(self, path: str, *, not_found_code: str) -> dict[str, Any]:
+        try:
+            return self._get(path, not_found_code=not_found_code)
+        except OrderConfirmationError:
+            # Both provider writes have returned a record. Missing/unavailable
+            # readback is not evidence that those writes did not commit.
+            raise OrderConfirmationError(
+                "ORDER_CONFIRMATION_INDETERMINATE_COMMIT:readback"
+            ) from None
+
+    def _verify_readback_links(
+        self, quote: dict, order: dict, graph: dict, *, case_id: str,
+        quote_id: str, order_id: str, rfq_id: str | None = None,
+        supplier_id: str | None = None,
+    ) -> str:
+        """Reject contradictory evidence without requiring new provider echoes."""
+        code = "ORDER_CONFIRMATION_READBACK_MISMATCH"
+
+        def check(record, expected):
+            if not isinstance(record, dict) or any(
+                key in record and record[key] != value for key, value in expected.items()
+            ):
+                raise OrderConfirmationError(code)
+
+        case = graph.get("procurement_case")
+        if not isinstance(case, dict) or case.get("procurement_case_id") != case_id:
+            raise OrderConfirmationError(code)
+        check(case, {"tenant_id": self.tenant_id})
+        rfq_id = rfq_id or _provider_id(order.get("rfq_id"), code=code)
+        supplier_id = supplier_id or quote.get("supplier_id") or order.get("supplier_id")
+        common = {"tenant_id": self.tenant_id, "procurement_case_id": case_id, "rfq_id": rfq_id}
+        if supplier_id is not None:
+            common["supplier_id"] = supplier_id
+        check(quote, common)
+        check(order, common)
+        if case.get("buyer_id") is not None:
+            check(order, {"buyer_id": case["buyer_id"]})
+        for row in graph.get("supplier_quotes", []):
+            if isinstance(row, dict) and row.get("quote_id") == quote_id:
+                check(row, common)
+        for row in graph.get("purchase_orders", []):
+            if isinstance(row, dict) and row.get("po_id") == order_id:
+                check(row, {**common, "selected_quote_id": quote_id, "status": "confirmed"})
+        # The graph may omit optional collections, but supplied relationships
+        # must agree with the exact direct-record readback.
+        if "rfqs" in graph:
+            rfqs = graph["rfqs"]
+            matches = [row for row in rfqs if isinstance(row, dict) and row.get("id") == rfq_id] if isinstance(rfqs, list) else []
+            if not matches:
+                raise OrderConfirmationError(code)
+            for row in matches:
+                check(row, {"tenant_id": self.tenant_id, "procurement_case_id": case_id})
+        return rfq_id
 
     def _post(
         self,
@@ -207,11 +275,14 @@ class GiraffeDBOrderConfirmationClient:
 
         if response.status_code == 200:
             try:
-                return self._json_object(
+                record = self._json_object(
                     response, code="ORDER_CONFIRMATION_DB_INVALID_RESPONSE"
                 )
             except OrderConfirmationError:
                 return self._recover_write(operation, idempotency_key)
+            if not self._valid_write_record(record, operation, idempotency_key):
+                return self._recover_write(operation, idempotency_key)
+            return record
         if response.status_code in {401, 403}:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_AUTH_REJECTED")
         if response.status_code == 409:
@@ -285,12 +356,13 @@ class GiraffeDBOrderConfirmationClient:
             for item in graph_orders
         ):
             raise OrderConfirmationError("ORDER_CONFIRMATION_GRAPH_ORDER_MISSING")
+        rfq_id = self._verify_readback_links(
+            quote_readback, order_readback, final_graph,
+            case_id=procurement_case_id, quote_id=supplier_quote_id, order_id=purchase_order_id,
+        )
         return OrderConfirmationResult(
             procurement_case_id=procurement_case_id,
-            rfq_id=_provider_id(
-                order_readback.get("rfq_id"),
-                code="ORDER_CONFIRMATION_READBACK_MISMATCH",
-            ),
+            rfq_id=rfq_id,
             supplier_quote_id=supplier_quote_id,
             purchase_order_id=purchase_order_id,
             status="confirmed",
@@ -342,6 +414,8 @@ class GiraffeDBOrderConfirmationClient:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_INVALID")
         if procurement_case.get("procurement_case_id") != procurement_case_id:
             raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_MISMATCH")
+        if "tenant_id" in procurement_case and procurement_case["tenant_id"] != self.tenant_id:
+            raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_MISMATCH")
         buyer_id = _provider_id(
             procurement_case.get("buyer_id"),
             code="ORDER_CONFIRMATION_BUYER_ID_REQUIRED",
@@ -351,6 +425,12 @@ class GiraffeDBOrderConfirmationClient:
             isinstance(item, dict) and item.get("id") == rfq_id for item in rfqs
         ):
             raise OrderConfirmationError("ORDER_CONFIRMATION_RFQ_NOT_FOUND")
+        for row in rfqs:
+            if isinstance(row, dict) and row.get("id") == rfq_id and any(
+                key in row and row[key] != value
+                for key, value in {"tenant_id": self.tenant_id, "procurement_case_id": procurement_case_id}.items()
+            ):
+                raise OrderConfirmationError("ORDER_CONFIRMATION_DB_GRAPH_MISMATCH")
 
         authorization = {
             "actor_id": identity.actor_id,
@@ -421,15 +501,15 @@ class GiraffeDBOrderConfirmationClient:
             code="ORDER_CONFIRMATION_ORDER_RESPONSE_INVALID",
         )
 
-        quote_readback = self._get(
+        quote_readback = self._read_after_write(
             f"/api/data/supplier-quotes/{quote_path_segment(supplier_quote_id, safe='')}",
             not_found_code="ORDER_CONFIRMATION_QUOTE_READBACK_MISSING",
         )
-        order_readback = self._get(
+        order_readback = self._read_after_write(
             f"/api/data/purchase-orders/{quote_path_segment(purchase_order_id, safe='')}",
             not_found_code="ORDER_CONFIRMATION_ORDER_READBACK_MISSING",
         )
-        final_graph = self._get(
+        final_graph = self._read_after_write(
             f"/api/data/procurement-cases/{quote_path_segment(procurement_case_id, safe='')}/transaction-graph",
             not_found_code="ORDER_CONFIRMATION_DB_GRAPH_NOT_FOUND",
         )
@@ -454,6 +534,11 @@ class GiraffeDBOrderConfirmationClient:
         ):
             raise OrderConfirmationError("ORDER_CONFIRMATION_GRAPH_ORDER_MISSING")
 
+        self._verify_readback_links(
+            quote_readback, order_readback, final_graph,
+            case_id=procurement_case_id, quote_id=supplier_quote_id, order_id=purchase_order_id,
+            rfq_id=rfq_id, supplier_id=supplier_id,
+        )
         return OrderConfirmationResult(
             procurement_case_id=procurement_case_id,
             rfq_id=rfq_id,
