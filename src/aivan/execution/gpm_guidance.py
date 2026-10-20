@@ -67,6 +67,18 @@ def create_stage1_gpm_guidance(
 ) -> dict:
     """Create advisory guidance without approving, rejecting, or dispatching."""
 
+    project_tenant = project.tenant_id
+    event_tenant = event.tenant_id
+    if any(value is not None and (
+        not isinstance(value, str) or (value and not value.strip())
+    ) for value in (project_tenant, event_tenant)):
+        raise GPMGuidanceUnavailableError("GPM_TRUSTED_PROFILE_MISSING")
+    if project_tenant and event_tenant and project_tenant != event_tenant:
+        raise GPMGuidanceUnavailableError("GPM_TENANT_CONTEXT_MISMATCH")
+    tenant_id = project_tenant or event_tenant
+    if not tenant_id:
+        raise GPMGuidanceUnavailableError("GPM_TRUSTED_PROFILE_MISSING")
+
     selected_reply = next(
         (
             item
@@ -90,7 +102,6 @@ def create_stage1_gpm_guidance(
     if ((quote.currency or "").strip().upper() != (selected_reply.currency or "").strip().upper()
             or (not bound_reference and quote.unit_price != selected_reply.unit_price)):
         raise GPMGuidanceUnavailableError("GPM_SOURCE_QUOTE_MISMATCH")
-    tenant_id = project.tenant_id or event.tenant_id or "legacy"
     trace_seed = event.source_trace_id or event.message_id or project.project_id
     trace_id = event.source_trace_id or (
         "trace_" + hashlib.sha256(trace_seed.encode("utf-8")).hexdigest()[:24]

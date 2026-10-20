@@ -385,6 +385,8 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
             "ABCDYI_PRIVATE_DATA_TENANT_MAP": json.dumps({item["tenant_id"]: tenant for tenant, item in mapping.items()}),
             "MYAIVAN_FULFILLMENT_TENANTS": json.dumps(mapping),
             "MYAIVAN_FULFILLMENT_API_KEYS": json.dumps(config["tenants"]),
+            "MYAIVAN_EXECUTION_BASE_URL": urls["abcdyi"],
+            "MYAIVAN_EXECUTION_WEB_ACTOR_ID": "installation-operator",
             "ABCDYI_LANGUAGE_SKILL_BASE_URL": config["language"]["url"] or urls["language"],
         })
     env.update(load_deployment_module().credential_environment(config))

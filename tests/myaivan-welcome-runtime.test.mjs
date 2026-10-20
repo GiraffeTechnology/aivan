@@ -17,6 +17,8 @@ const views = ['welcome', 'new-inquiry', 'dashboard'].map(name => ({
 }));
 let fragment;
 const context = vm.createContext({
+  state: {selectedCase: null, caseRequestGeneration: 0, executionHost: null},
+  $: () => null,
   $$: selector => selector === '.view' ? views : [],
   history: { replaceState(_state, _title, value) { fragment = value; } },
   window: { scrollTo() {} },
