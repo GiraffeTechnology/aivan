@@ -217,7 +217,7 @@ class GLTGClient:
             p90_days=p90,
             risk_buffer_days=max(p80 - p50, 0),
             deadline_days=deadline_days,
-            deadline_feasible=bool(data.get("feasible")) if deadline_days is not None else None,
+            deadline_feasible=self._deadline_feasible(data.get("feasible")) if deadline_days is not None else None,
             deadline_risk_level=risk,
             critical_path=list(data.get("critical_path") or []),
             components=components,
@@ -389,6 +389,12 @@ class GLTGClient:
         if not math.isfinite(value) or value < 0:
             raise GLTGUnavailableError("GLTG_RESPONSE_QUANTILES_INVALID")
         return float(value)
+
+    @staticmethod
+    def _deadline_feasible(value: object) -> bool | None:
+        if value is None or isinstance(value, bool):
+            return value
+        raise GLTGUnavailableError("GLTG_RESPONSE_INVALID")
 
     @staticmethod
     def _feasibility(confidence_days: float, deadline_days: int | None) -> str:
