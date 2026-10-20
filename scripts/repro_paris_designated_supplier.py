@@ -4,7 +4,7 @@ Original input: the unchanged Chinese RFQ_ZH constant below.
 English meaning: "Request quotes for 5000 high-quality plaid shirts, delivered to Paris within 45 days, from the designated supplier abcdyi."
 Observed on device: "⚠️ Agent couldn't generate a response. Please try again."
 
-This runs the REAL AIVAN pipeline locally (no CTYUN). It measures:
+This runs the REAL AIVAN pipeline locally (no deployment host). It measures:
   1. How many llm_complete_json calls the pipeline makes for this input.
   2. Total wall time if the local model is *slow/unhealthy* (simulated).
   3. Whether the backend still returns a usable reply_text through /invoke.

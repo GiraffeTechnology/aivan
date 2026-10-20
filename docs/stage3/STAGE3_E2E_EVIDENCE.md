@@ -31,6 +31,5 @@ trusted AIVAN actors or roles; that production-mode binding is explicitly deferr
 to Stage 4. The bridge must not be cut over for multi-participant role attribution
 until that requirement is implemented and tested against the real Core.
 
-For CTYun deployment, any access to IP addresses outside China must use the
-existing Singapore bridge (`Aivan` to `abcdyi-sin`). Stage 3 does not add a
-direct CTYun-to-GitHub/npm path and does not embed bridge credentials.
+Deployment network access follows the configured egress route. This evidence
+does not establish that a route is reachable and does not contain bridge credentials.

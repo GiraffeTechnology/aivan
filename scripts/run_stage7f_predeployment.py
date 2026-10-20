@@ -2,7 +2,7 @@
 """Run the read-only Stage 7F production-predeployment gate.
 
 This command validates an immutable candidate, a secret-bearing environment
-file without printing or hashing secret values, the approved CTYun/Singapore
+file without printing or hashing secret values, the configured deployment
 topology descriptor, and the current database schema. It never deploys,
 migrates, restarts services, changes ports, or emits production-acceptance
 evidence.
@@ -196,6 +196,10 @@ def run_predeployment_gate(
     def check(code: str, passed: bool) -> None:
         checks.append({"code": code, "result": "passed" if passed else "failed"})
 
+    def matches_configuration(value: Any, key: str) -> bool:
+        expected = (environment.get(key) or "").strip()
+        return bool(expected) and isinstance(value, str) and value == expected
+
     check("descriptor_contains_no_secret_fields", not _descriptor_has_forbidden_keys(topology))
     check("environment_is_production", environment.get("AIVAN_ENV") == "production")
     check("candidate_matches_checkout", checkout_commit == candidate_commit)
@@ -207,8 +211,10 @@ def run_predeployment_gate(
     check("application_port_valid", application_port is not None)
     check("fixed_database_profile", environment.get("AIVAN_DB_URL") == DATABASE_PROFILE)
     check(
-        "singapore_egress_policy",
-        environment.get("AIVAN_NON_CHINA_EGRESS_POLICY") == "abcdyi-sin",
+        "configured_egress_policy",
+        matches_configuration(
+            environment.get("AIVAN_NON_CHINA_EGRESS_POLICY"), "AIVAN_EXPECTED_EGRESS_POLICY"
+        ),
     )
     origins = {
         origin.strip()
@@ -246,8 +252,10 @@ def run_predeployment_gate(
         "giraffe_db_auth_configured",
         _has_value(environment, "GIRAFFE_DB_SERVICE_AUTH_SECRET"),
     )
-    check("topology_profile", topology.get("profile") == "ctyun-aivan-myaivan")
-    check("topology_cloud", topology.get("cloud") == "ctyun-cn")
+    check("topology_profile", matches_configuration(
+        topology.get("profile"), "AIVAN_DEPLOYMENT_PROFILE"
+    ))
+    check("topology_cloud", matches_configuration(topology.get("cloud"), "AIVAN_DEPLOYMENT_CLOUD"))
     check("fixed_install_path", topology.get("install_path") == "/opt/giraffe/aivan")
     check("fixed_service_name", topology.get("service_name") == "myaivan.service")
     check("topology_loopback_bind", topology.get("bind_host") == "127.0.0.1")
@@ -260,7 +268,9 @@ def run_predeployment_gate(
         and topology_port == application_port,
     )
     check("topology_database_profile", topology.get("database_profile") == DATABASE_PROFILE)
-    check("topology_bridge", topology.get("non_china_egress_bridge") == "abcdyi-sin")
+    check("topology_bridge", matches_configuration(
+        topology.get("non_china_egress_bridge"), "AIVAN_EXPECTED_EGRESS_POLICY"
+    ))
     protected_port_owners = topology.get("protected_port_owners")
     protected_ports_valid = _valid_protected_port_owners(protected_port_owners)
     check("protected_port_owners", protected_ports_valid)
@@ -272,13 +282,17 @@ def run_predeployment_gate(
         and str(application_port) not in protected_port_owners,
     )
     bridge = topology.get("reverse_bridge") or {}
+    bridge_port = _tcp_port(environment.get("AIVAN_REVERSE_BRIDGE_PORT"))
+    bridge_profile = (environment.get("AIVAN_EXPECTED_EGRESS_POLICY") or "").strip()
     check(
         "reverse_bridge_contract",
-        bridge
+        bool(bridge_profile)
+        and bridge_port is not None
+        and bridge
         == {
-            "remote_host_profile": "abcdyi-sin",
+            "remote_host_profile": bridge_profile,
             "remote_bind": "127.0.0.1",
-            "remote_port": 18765,
+            "remote_port": bridge_port,
             "health_path": "/health",
         },
     )

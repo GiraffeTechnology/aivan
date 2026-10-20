@@ -34,12 +34,10 @@ idempotent re-apply behavior.
 These are deterministic local acceptance runs. They do not claim a live mobile
 WeChat delivery.
 
-## Historical target-specific operational record
+## Deployment verification limits
 
-- Do not stop, rebind, or modify AIVAN server ports `443` or `8443`; they are
-  reserved by existing SSH/mail services.
-- Any CTYun path to a non-China IP must traverse the existing `abcdyi-sin`
-  Singapore bridge.
+- Preserve the selected deployment's configured reserved ports and existing services.
+- Deployment traffic must follow its configured egress route.
 - Inject channel credentials and API keys from the authorized secret store;
   never place them in the repository or test evidence.
 - Run the Stage 4 migration only after a database backup.

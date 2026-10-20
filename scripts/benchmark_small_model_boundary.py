@@ -5,7 +5,7 @@ Runs the RFQ benchmark cases through the private-domain intake + readiness
 pipeline under modes A/B/C/D, captures quality/efficiency metrics, enforces the
 hard product thresholds, and writes JSON + markdown reports.
 
-Daily-development / CTYUN local-only ergonomics:
+Daily-development / deployment host local-only ergonomics:
     --max-cases N          run only the first N (post-filter) cases
     --case-id ID           run only this case (repeatable)
     --progress             print a live per-case line as each case finishes
@@ -13,7 +13,7 @@ Daily-development / CTYUN local-only ergonomics:
     --fail-fast            stop at the first failing case
     incremental results are always streamed to artifacts/benchmark_events.jsonl
 
-Smoke (fast local check against CTYUN qwen3.5:2b):
+Smoke (fast local check against deployment host qwen3.5:2b):
     uv run python scripts/benchmark_small_model_boundary.py \
         --modes C --max-cases 3 --progress --fail-on-threshold
 
@@ -83,7 +83,7 @@ def main() -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     events_path = out_dir / EVENTS_FILENAME
-    # Fresh incremental log so a long CTYUN run is inspectable while in flight.
+    # Fresh incremental log so a long deployment host run is inspectable while in flight.
     events_fh = events_path.open("w", encoding="utf-8")
 
     def make_on_case():

@@ -14,10 +14,7 @@ on:
       target_environment:
         description: "Recorded target; this workflow never connects to it"
         required: true
-        default: ctyun-aivan
-        type: choice
-        options:
-          - ctyun-aivan
+        type: string
 
 permissions:
   contents: read
@@ -62,10 +59,10 @@ jobs:
             echo "- deployment_performed: \`false\`"
             echo "- secrets_read: \`false\`"
             echo "- remote_connections_opened: \`false\`"
-            echo "- protected_ports_443_8443_touched: \`false\`"
+            echo "- protected_ports_touched: \`false\`"
             echo "- non_china_traffic_emitted: \`false\`"
             echo ""
-            echo "Production deployment remains blocked until Stage 7F approval,"
-            echo "environment protection, backup/rollback evidence, Singapore bridge"
+            echo "This workflow records metadata only; deployment requires the applicable"
+            echo "change authority, environment protection, backup/rollback evidence, configured egress"
             echo "routing, and port-safety preflight are all independently satisfied."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from pathlib import Path
 
 from aivan.db.repositories.draft_repo import DraftRepository
@@ -65,16 +66,25 @@ def test_deployment_workflow_is_quarantined_and_has_no_remote_mutation():
         "pkill",
         "systemctl",
         "openclaw gateway restart",
-        "113.249." + "119.30",
         "443:",
         "8443:",
     )
     assert all(token not in workflow for token in forbidden)
+    assert re.search(r"(?:\d{1,3}\.){3}\d{1,3}", workflow) is None
     assert "deployment_performed: \\`false\\`" in workflow
     assert "remote_connections_opened: \\`false\\`" in workflow
 
 
-def test_ctyun_document_is_non_executable_and_preserves_infrastructure_constraints():
+def test_workflow_ipv4_detection_covers_synthetic_hosts_and_embedded_literals():
+    pattern = r"(?:\d{1,3}\.){3}\d{1,3}"
+    for octets in ((192, 0, 2, 10), (198, 51, 100, 20), (203, 0, 113, 30), (127, 0, 0, 1)):
+        value = ".".join(str(octet) for octet in octets)
+        assert re.search(pattern, value)
+        assert re.search(pattern, f"prefix{value}suffix")
+    assert re.search(pattern, "No remote destination is configured") is None
+
+
+def test_deployment_document_is_non_executable_and_uses_target_configuration():
     notice = (ROOT / "docs" / "DEPLOYMENT_CTYUN.md").read_text(encoding="utf-8")
     forbidden = (
         "git fetch",
@@ -86,10 +96,11 @@ def test_ctyun_document_is_non_executable_and_preserves_infrastructure_constrain
         "systemctl start",
     )
     assert all(token not in notice for token in forbidden)
-    assert "abcdyi-sin" in notice
-    assert "443" in notice and "8443" in notice
-    assert "qwen3.5:9b" in notice
-    assert "NO DEPLOYMENT AUTHORIZED" in notice
+    assert "AIVAN_EXPECTED_EGRESS_POLICY" in notice
+    assert "AIVAN_DEPLOYMENT_PROFILE" in notice
+    assert "AIVAN_REVERSE_BRIDGE_PORT" in notice
+    assert "Missing or mismatched configuration fails closed" in notice
+    assert "protected-port" in notice
 
 
 def test_production_template_documents_fail_closed_identity_and_persistence():
@@ -102,7 +113,11 @@ def test_production_template_documents_fail_closed_identity_and_persistence():
     assert "AIVAN_UI_SESSION_SECRET=" in template
     assert "AIVAN_UI_ALLOWED_ROLES=" in template
     assert "AIVAN_CANDIDATE_SHA=" in template
-    assert "AIVAN_NON_CHINA_EGRESS_POLICY=abcdyi-sin" in template
+    assert "AIVAN_NON_CHINA_EGRESS_POLICY=" in template
+    assert "AIVAN_EXPECTED_EGRESS_POLICY=" in template
+    assert "AIVAN_DEPLOYMENT_PROFILE=" in template
+    assert "AIVAN_DEPLOYMENT_CLOUD=" in template
+    assert "AIVAN_REVERSE_BRIDGE_PORT=" in template
     assert "AIVAN_DB_URL=" in template
     assert "GIRAFFE_DB_BASE_URL=" in template
     assert "OLLAMA_MODEL=qwen3.5:9b" in template

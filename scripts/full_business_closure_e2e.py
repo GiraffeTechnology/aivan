@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AIVAN full simulated business-closure E2E (local, no CTYUN required).
+"""AIVAN full simulated business-closure E2E (local, no deployment host required).
 
 Runs the complete loop against latest `main` using in-repo fakes for the
 external network services that are not reachable from this sandbox:
@@ -509,7 +509,7 @@ def main() -> int:
 def _render_md(report, names, top10, outbox) -> str:
     L = ["# AIVAN Full Business-Closure E2E Report (local simulation)", ""]
     L.append(f"- Commit tested: `{report.get('commit')}`")
-    L.append("- Environment: local sandbox (CTYUN unreachable — port 22 blocked); external network services faked in-repo")
+    L.append("- Environment: local sandbox; remote deployment not exercised; external network services faked in-repo")
     L.append("- Model policy: AIVAN_LLM_PROVIDER=ollama, OLLAMA_MODEL=qwen3.5:2b, external model/VLM APIs OFF")
     L.append("- Simulated services: giraffe-language-skill (MockTransport), GLTG (fake transport), OpenClaw send (mock)")
     L.append("")
