@@ -533,7 +533,6 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
                 "p80_days": gltg_payload.get("p80_days"),
                 "p90_days": gltg_payload.get("p90_days"),
                 "deadline_risk_level": gltg_payload.get("deadline_risk_level"),
-                "recommendation_score": 0.7,
                 "recommendation_reason_json": {"source": "aivan", "human_approval_required": True},
                 "tradeoff_summary_json": {"gltg": gltg_payload},
                 "status": "draft",
@@ -587,10 +586,13 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         "comparison_snapshots": "metadata_json",
     }
     for section, lineage_field in lineage_fields.items():
+        identity_field, expected_identity = expected_readback[section]
         records = graph[section]
         records = [records] if isinstance(records, dict) else records
+        # A historical row cannot supply the lineage proof for another ID.
         matching_lineage = any(
             isinstance(record, dict)
+            and record.get(identity_field) == expected_identity
             and isinstance(record.get(lineage_field), dict)
             and record[lineage_field].get("source_trace_id") == trace["source_trace_id"]
             for record in records
