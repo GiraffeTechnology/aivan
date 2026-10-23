@@ -23,6 +23,14 @@ _STUB_SUPPLIERS_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "demo" / "stub_suppliers.json"
 )
 
+# The type remains a machine enum; its display label is canonical English.
+_SUPPLIER_SCOPE_LABELS = {
+    "known_suppliers_only": "The selected sourcing strategy is to use only known suppliers.",
+    "known_suppliers_first": "The selected sourcing strategy is to prioritize known suppliers.",
+    "public_bidding_first": "The selected sourcing strategy is to prioritize public bidding.",
+    "parallel_known_and_public": "The selected sourcing strategy evaluates known suppliers and public bidding in parallel.",
+}
+
 
 class GiraffeDBContextError(RuntimeError):
     """Stable, non-sensitive failure raised by the private-data context client."""
@@ -514,7 +522,7 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
                 "procurement_case_id": procurement_case_id,
                 "rfq_id": rfq_id,
                 "buyer_id": buyer_id,
-                "option_label": "known_suppliers_first",
+                "option_label": _SUPPLIER_SCOPE_LABELS[strategy_payload["supplier_scope"]],
                 "option_type": strategy_payload.get("supplier_scope", "known_suppliers_first"),
                 "gltg_run_ids_json": [gltg_run_id],
                 "pricing_input_ids_json": [pricing_input_id],
@@ -525,7 +533,6 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
                 "p80_days": gltg_payload.get("p80_days"),
                 "p90_days": gltg_payload.get("p90_days"),
                 "deadline_risk_level": gltg_payload.get("deadline_risk_level"),
-                "recommendation_score": 0.7,
                 "recommendation_reason_json": {"source": "aivan", "human_approval_required": True},
                 "tradeoff_summary_json": {"gltg": gltg_payload},
                 "status": "draft",
@@ -579,10 +586,13 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         "comparison_snapshots": "metadata_json",
     }
     for section, lineage_field in lineage_fields.items():
+        identity_field, expected_identity = expected_readback[section]
         records = graph[section]
         records = [records] if isinstance(records, dict) else records
+        # A historical row cannot supply the lineage proof for another ID.
         matching_lineage = any(
             isinstance(record, dict)
+            and record.get(identity_field) == expected_identity
             and isinstance(record.get(lineage_field), dict)
             and record[lineage_field].get("source_trace_id") == trace["source_trace_id"]
             for record in records
