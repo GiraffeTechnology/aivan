@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import os
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -20,9 +21,28 @@ def generate_buyer_options(
     if not supplier_replies:
         return []
 
-    valid_replies = [r for r in supplier_replies if r.unit_price is not None]
+    current_by_supplier: dict[str, SupplierReply] = {}
+    anonymous_replies: list[SupplierReply] = []
+    for reply in supplier_replies:
+        if (reply.unit_price is None or not math.isfinite(reply.unit_price)
+                or reply.unit_price < 0):
+            continue
+        business_identity = (reply.supplier_id or reply.candidate_id).strip()
+        if business_identity:
+            # Persisted input order is revision order; invalid follow-ups
+            # cannot evict the previous valid quote.
+            current_by_supplier[business_identity] = reply
+        else:
+            anonymous_replies.append(reply)
+    valid_replies = [*current_by_supplier.values(), *anonymous_replies]
     if not valid_replies:
         return []
+
+    normalized_currencies = [(reply.currency or "").strip().upper() for reply in valid_replies]
+    price_basis_comparable = (
+        all(normalized_currencies) and len(set(normalized_currencies)) == 1
+        and (requirement.quantity_unit or "").strip().lower() in {"pc", "pcs", "piece", "pieces"}
+    )
 
     lt_by_id: dict[str, LeadTimeEstimate] = {}
     for lt in lead_time_estimates:
@@ -36,7 +56,14 @@ def generate_buyer_options(
         lt = lt_by_id.get(reply.supplier_id) or lt_by_id.get(reply.candidate_id)
         deadline_days = requirement.delivery_days
 
-        price_score = 1.0 - min(1.0, max(0.0, (reply.unit_price - (requirement.target_unit_price or reply.unit_price)) / max(requirement.target_unit_price or 1, 0.01)))
+        target_currency_matches = (
+            not requirement.target_currency
+            or requirement.target_currency.strip().upper() == (reply.currency or "").strip().upper()
+        )
+        if not price_basis_comparable or not target_currency_matches:
+            price_score = 0.5
+        else:
+            price_score = 1.0 - min(1.0, max(0.0, (reply.unit_price - (requirement.target_unit_price or reply.unit_price)) / max(requirement.target_unit_price or 1, 0.01)))
         lt_score = 1.0
         if lt and deadline_days:
             if lt.deadline_feasible is False:
@@ -68,6 +95,7 @@ def generate_buyer_options(
             quantity=requirement.quantity or 1000,
             moq=reply.moq or 0,
             margin_rate=margin_rate,
+            currency=reply.currency,
         )
         quote = QuoteCalculation(
             supplier_id=reply.supplier_id,
@@ -87,10 +115,14 @@ def generate_buyer_options(
         )
 
         warnings = []
+        if not price_basis_comparable:
+            warnings.append("Quote currencies or unit bases are not directly comparable; no lowest-cost ranking was applied.")
         if lt and lt.deadline_feasible is False:
             warnings.append(f"Lead time ({lt.expected_days} days) exceeds your deadline ({requirement.delivery_days} days).")
         if reply.moq and requirement.quantity and requirement.quantity < reply.moq:
             warnings.append(f"Your order quantity ({requirement.quantity}) is below supplier MOQ ({reply.moq}).")
+        for note in reply.risks:
+            warnings.append(f"Parsed reply risk note: {note}")
         if lt and "lead_time_too_aggressive" in (getattr(reply, "risks", []) or []):
             warnings.append("Supplier's stated lead time appears aggressive vs calculated estimate.")
 
@@ -104,7 +136,7 @@ def generate_buyer_options(
             supplier_display_name=sup_display,
             lead_time_estimate=lt,
             quote=quote,
-            risk_level="low" if not reply.risks else "medium",
+            risk_level="unknown",
             deadline_feasible=lt.deadline_feasible if lt else None,
             deadline_risk_level=lt.deadline_risk_level if lt else "unknown",
             reasoning=reasoning,
@@ -112,51 +144,48 @@ def generate_buyer_options(
             status="draft",
         )
 
-    by_lt = sorted(scored, key=lambda x: (x[1].expected_days if x[1] else 999, -x[4]))
-    by_price = sorted(scored, key=lambda x: (x[0].unit_price or 999, -x[3]))
-    by_reliability = sorted(scored, key=lambda x: (-x[2]))
+    by_lt = sorted(
+        (item for item in scored if item[1] is not None),
+        key=lambda x: (x[1].expected_days, x[0].supplier_id or x[0].candidate_id),
+    )
+    by_price = sorted(scored, key=lambda x: (x[0].unit_price, -x[3])) if price_basis_comparable else []
 
     added = set()
     result_options = []
 
+    def reply_key(reply: SupplierReply) -> str:
+        return reply.supplier_id or reply.candidate_id or reply.raw_text
+
     if by_lt:
         r, lt, _, lt_s, p_s = by_lt[0]
-        reason = f"Fastest option: {'estimated ' + str(lt.expected_days) + ' days delivery' if lt else 'shortest stated lead time'}"
+        reason = f"Fastest option by expected lead time: {lt.expected_days} days."
         if lt and lt.deadline_feasible is False:
             reason += f" (WARNING: may not meet {requirement.delivery_days}-day deadline)"
         opt = make_option(r, lt, "fastest", "Option A — Fastest", reason)
         result_options.append(opt)
-        added.add(id(r))
+        added.add(reply_key(r))
 
     if by_price:
         r, lt, _, _, _ = by_price[0]
-        if id(r) not in added:
-            reason = f"Lowest cost: {reply.currency} {r.unit_price:.2f}/pc"
+        if reply_key(r) not in added:
+            reason = f"Lowest cost: {r.currency} {r.unit_price:.2f}/pc"
             opt = make_option(r, lt, "lowest_cost", "Option B — Lowest Cost", reason)
             result_options.append(opt)
-            added.add(id(r))
+            added.add(reply_key(r))
         elif len(by_price) > 1:
             r, lt, _, _, _ = by_price[1]
-            reason = f"Best value: {r.currency if r else 'USD'} {r.unit_price:.2f}/pc"
-            opt = make_option(r, lt, "lowest_cost", "Option B — Best Value", reason)
+            reason = f"Next comparable quote: {r.currency} {r.unit_price:.2f}/pc"
+            opt = make_option(r, lt, "alternative", "Option B — Comparable Alternative", reason)
             result_options.append(opt)
-            added.add(id(r))
+            added.add(reply_key(r))
 
-    if by_reliability:
-        for r, lt, score, _, _ in by_reliability:
-            if id(r) not in added:
-                reason = f"Most reliable: strong track record, risk score {score:.2f}"
-                opt = make_option(r, lt, "safest", "Option C — Most Reliable", reason)
-                result_options.append(opt)
-                added.add(id(r))
-                break
-
-    if len(result_options) < 2 and scored:
+    if len(result_options) < 3 and scored:
         for r, lt, score, _, _ in scored:
-            if id(r) not in added:
+            if reply_key(r) not in added:
                 label = f"Option {chr(65+len(result_options))} — Alternative"
                 opt = make_option(r, lt, "alternative", label, "Additional option for consideration")
                 result_options.append(opt)
+                added.add(reply_key(r))
                 if len(result_options) >= 3:
                     break
 
