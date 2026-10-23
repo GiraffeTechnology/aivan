@@ -68,6 +68,10 @@ from aivan.execution.supplier_routing import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.execution.conversation_history import persist_canonical_message
 from aivan.execution.inbound_receipt import replay_inbound_receipt
+from aivan.execution.saved_attachment_source import (
+    RECEIPT_FIELD, authorize_saved_attachment, resolve_saved_attachment,
+    source_request_fingerprint, validate_source_replay,
+)
 from aivan.domain.roles import (
     BusinessRole,
     Capability,
@@ -108,6 +112,8 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         InboundEventRepository,
         build_inbound_idempotency_key,
     )
+    source_project = authorize_saved_attachment(event, db)
+    source_fingerprint = source_request_fingerprint(event)
 
     idem_key = build_inbound_idempotency_key(
         tenant_id=event.tenant_id or "legacy",
@@ -123,9 +129,11 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     if idem_key:
         existing = repo.get(idem_key)
         if existing is not None:
+            validate_source_replay(existing, source_fingerprint, event)
             # Replay the stored result; create no new project/RFQ/draft/event.
             db.info["aivan_inbound_replayed"] = True
             return replay_inbound_receipt(existing, trace_id=event.source_trace_id)
+    event = resolve_saved_attachment(event, source_project)
 
     # Script shape is not language identification: Latin input may be French,
     # Spanish, German, or another language. The shared language service must
@@ -146,18 +154,25 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     })
     claim = None
     if idem_key:
-        claim, acquired = repo.claim(idem_key, tenant_id=event.tenant_id or "legacy")
+        claim_kwargs = {"tenant_id": event.tenant_id or "legacy"}
+        if source_fingerprint:
+            claim_kwargs["source_request_fingerprint"] = source_fingerprint
+        claim, acquired = repo.claim(idem_key, **claim_kwargs)
         if not acquired:
+            validate_source_replay(claim, source_fingerprint, event)
             db.info["aivan_inbound_replayed"] = True
             return replay_inbound_receipt(claim, trace_id=event.source_trace_id)
     result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
 
     if claim is not None:
+        receipt_result = result.model_dump()
+        if source_fingerprint:
+            receipt_result[RECEIPT_FIELD] = source_fingerprint
         repo.complete(
             claim,
             project_id=result.project_id,
             event_type=result.event_type,
-            result_json=result.model_dump(),
+            result_json=receipt_result,
         )
     return result
 
@@ -791,6 +806,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             strategy,
             supplier_count=len(all_replies),
             supplier_id=reply.supplier_id or None,
+            supplier_reply=reply,
             tenant_id=project.tenant_id or event.tenant_id,
             source_trace_id=event.source_trace_id,
         )
