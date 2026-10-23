@@ -8,8 +8,12 @@ from aivan.utils.time_utils import utcnow_iso
 
 def _declared_lead_time_values(clauses: list[str]) -> set[float]:
     """Read the existing literal day clauses, excluding unrelated durations."""
+    # These explicitly labelled material fields have their own source-backed
+    # meaning; neither a substage nor a time delta is the total supplier lead time.
     lead_clauses = [clause for clause in clauses if re.search(
-        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)]
+        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)
+        and not re.search(r'^\s*(?:raw\s+material\s+lead\s*time|substitute\s+material\s+lead\s*time\s+effect)\b',
+                          clause, re.IGNORECASE)]
     return {float(value) for clause in lead_clauses for value in re.findall(
         r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
 
