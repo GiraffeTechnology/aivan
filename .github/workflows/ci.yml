@@ -174,6 +174,7 @@ jobs:
         run: |
           node ../../tests/myaivan-i18n-runtime.test.mjs
           node ../../tests/myaivan-welcome-runtime.test.mjs
+          node --test ../../tests/myaivan-case-revision-runtime.test.mjs
           node ../../tests/myaivan-inquiry-runtime.test.mjs
           node ../../tests/myaivan-clipboard-runtime.test.mjs
           node ../../tests/myaivan-conversation-runtime.test.mjs

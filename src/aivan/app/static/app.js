@@ -98,6 +98,8 @@ async function api(path, options = {}) {
 }
 
 function showLogin(message = '') {
+  for (const input of $('[data-text-input]')) input.value = '';
+  for (const status of $('[data-local-text-status]')) status.textContent = '';
   invalidateCaseView();
   state.executionHost?.invalidate('signed-out');
   $('#login-view').hidden = false;
@@ -115,6 +117,8 @@ function showApp() {
 function setView(name) {
   if (name !== 'case-detail') invalidateCaseView();
   window.myAivanAttachments?.dispose();
+  for (const input of $('[data-text-input]')) input.value = '';
+  for (const status of $('[data-local-text-status]')) status.textContent = '';
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
   history.replaceState(null, '', `#${name}`);
@@ -233,7 +237,21 @@ async function logout() {
   state.authGeneration += 1;
   state.csrf = '';
   state.session = null;
+  state.bootstrap = null;
+  state.cases = [];
+  state.offset = 0;
+  state.total = 0;
   invalidateCaseView();
+  window.myAivanAttachments?.dispose();
+  for (const selector of ['#case-list', '#conversation-stream', '#outbound-review-content',
+    '#relay-list', '#health-grid', '#manual-copy-text', '#inquiry-result',
+    '#buyer-id', '#buyer-name', '#inquiry-text']) {
+    const node = $(selector);
+    if (!node) continue;
+    node.innerHTML = '';
+    if ('value' in node) node.value = '';
+  }
+  $('#manual-copy-dialog')?.close?.();
   showLogin();
   await pending;
 }
@@ -391,6 +409,7 @@ async function openCase(caseId) {
     ${recommendation}
     ${confirmedOrder}
     ${section('Quote options', buyerOptions, buyerOptionRow)}
+    ${caseRevisionForm(payload)}
     ${section(t('待办与草稿'), payload.drafts, draftRow)}
     ${section(t('审批'), payload.approvals, (a) => `<article><strong>${escapeHtml(a.status)}</strong><span>${escapeHtml(a.approver_id || t('待审批'))}</span><time>${escapeHtml(formatTime(a.decided_at || a.created_at))}</time></article>`)}
     ${section(t('回执'), payload.receipts, (r) => `<article><strong>${escapeHtml(r.channel)} · ${escapeHtml(r.receipt_id)}</strong><span>${escapeHtml(r.receipt_reference || r.external_message_id || t('摘要回执'))}</span><time>${escapeHtml(formatTime(r.confirmed_at))}</time></article>`)}
@@ -444,7 +463,7 @@ async function loadExecutionAssociation(caseId, isCurrent) {
 function draftRow(draft) {
   const canApprove = state.bootstrap.actor.capabilities.includes('approve_outbound');
   const actions = draft.status === 'pending_approval' && canApprove
-    ? `<button class="secondary compact" data-action="reject" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('拒绝')}</button><button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">Review / approve</button>` : '';
+    ? `<button class="secondary compact" data-action="reject" data-case-id="${escapeHtml(draft.case_id)}" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">${ht('拒绝')}</button><button class="primary compact" data-action="approve" data-draft-id="${escapeHtml(draft.draft_id)}" type="button">Review / approve</button>` : '';
   return `<article class="draft-card"><div><strong>${escapeHtml(draft.target_role)} · ${escapeHtml(draft.channel)}</strong><span class="status-pill">${escapeHtml(draft.status)}</span></div><p>${escapeHtml(draft.message_text)}</p><div class="row-actions"><button class="ghost compact" data-action="copy" data-copy="${escapeHtml(draft.message_text)}" data-copy-case-id="${escapeHtml(draft.case_id)}" data-draft-id="${escapeHtml(draft.draft_id)}" data-content-sha256="${escapeHtml(draft.content_sha256)}" type="button">${ht('复制')}</button>${actions}</div></article>`;
 }
 
@@ -539,13 +558,109 @@ async function approveDraft(draftId) {
   }});
 }
 
-async function rejectDraft(draftId) {
-  if (!window.confirm(t('确认拒绝当前草稿并返回修订？'))) return;
+async function rejectDraft(draftId, caseId) {
+  if (!caseId || !window.confirm(t('确认拒绝当前草稿并返回修订？'))) return;
+  const session = state.session;
+  const generation = state.caseRequestGeneration;
+  const isCurrent = () => session === state.session && generation === state.caseRequestGeneration;
   try {
-    await api(`/api/drafts/${encodeURIComponent(draftId)}/reject`, { method: 'POST', body: '{}' });
+    const result = await api(`/api/drafts/${encodeURIComponent(draftId)}/reject`, { method: 'POST', body: '{}' });
+    if (!isCurrent()) return;
+    if (result?.draft_id !== draftId || result.status !== 'rejected') {
+      throw new Error('The server did not confirm this rejection. Refresh the case before retrying.');
+    }
     toast(t('已拒绝，案例可继续修订'), 'success');
-    if (state.selectedCase) await openCase(state.selectedCase.case.case_id);
-  } catch (error) { toast(`${t('拒绝失败：')}${error.message}`, 'error'); }
+    await openCase(caseId);
+  } catch (error) {
+    if (isCurrent()) toast(`${t('拒绝失败：')}${error.message}`, 'error');
+  }
+}
+
+function caseRevisionContext(payload) {
+  const item = payload?.case;
+  if (!state.session || !state.bootstrap?.actor?.capabilities?.includes('create_inquiry')) return null;
+  if (typeof item?.case_id !== 'string' || !item.case_id.trim()
+    || typeof item.customer_id !== 'string' || !item.customer_id.trim()) return null;
+  const conversation = payload.conversations?.find(entry => entry.role === 'buyer_thread'
+    && entry.channel === 'myaivan' && typeof entry.external_conversation_id === 'string'
+    && entry.external_conversation_id.trim());
+  return { caseId: item.case_id, buyerId: item.customer_id,
+    buyerName: item.customer_display_name || '', conversationId: conversation?.external_conversation_id };
+}
+
+function caseRevisionForm(payload) {
+  const context = caseRevisionContext(payload);
+  if (!context) return '';
+  return `<section class="panel"><h2>Revise this case</h2>
+    <p>Describe the changes or clarification for this case. Existing rejection history is retained. Any new draft requires a fresh review; this form does not send it.</p>
+    <form id="case-revision-form" data-case-id="${escapeHtml(context.caseId)}">
+      <label for="case-revision-text">Revision instructions</label>
+      <textarea id="case-revision-text" name="revision_text" required maxlength="20000" rows="4"></textarea>
+      <label for="case-revision-file">Read a UTF-8 TXT into these instructions (64 KiB and 20,000 characters maximum)</label>
+      <input id="case-revision-file" type="file" accept=".txt,text/plain" data-text-input="case-revision-text" data-text-status="case-revision-file-status">
+      <p id="case-revision-file-status" data-local-text-status role="status">Local import only. Use empty instructions, review the text, then submit this case revision. The file itself is not uploaded or saved.</p>
+      <button class="primary" type="submit">Submit revision / regenerate</button>
+      <p class="revision-result" role="status" aria-live="polite"></p>
+    </form></section>`;
+}
+
+async function submitCaseRevision(event) {
+  event.preventDefault();
+  const form = event.target;
+  if (form.revisionSubmitting) return;
+  const selected = state.selectedCase;
+  const context = caseRevisionContext(selected);
+  const field = form.elements.namedItem('revision_text');
+  const text = field?.value?.trim();
+  if (!context || form.dataset.caseId !== context.caseId || !text || text.length > 20000) return;
+  const session = state.session;
+  const generation = state.caseRequestGeneration;
+  const isCurrent = () => session === state.session && generation === state.caseRequestGeneration
+    && selected === state.selectedCase;
+  const result = form.querySelector('.revision-result');
+  const button = event.submitter || form.querySelector('button[type="submit"]');
+  // Preserve the exact request identity for an unchanged, uncertain retry in this view.
+  const key = JSON.stringify([context.caseId, context.buyerId, context.conversationId, text]);
+  if (form.revisionAttempt?.key !== key) {
+    form.revisionAttempt = { key, messageId: requestId('case-revision-message'),
+      conversationId: context.conversationId || requestId('case-revision-conversation') };
+  }
+  const attempt = form.revisionAttempt;
+  form.revisionSubmitting = true;
+  if (button) button.disabled = true;
+  if (result) result.textContent = 'Submitting revision. No outbound message is authorized by this action.';
+  try {
+    const payload = await api('/invoke', {
+      method: 'POST', headers: {
+        'Idempotency-Key': attempt.messageId,
+        'X-AIVAN-Participant-ID': context.buyerId,
+        'X-AIVAN-Participant-Role': 'buyer',
+        'X-AIVAN-Participant-Conversation-Role': 'buyer_thread',
+      },
+      body: JSON.stringify({source: 'myaivan', channel: 'myaivan', project_id: context.caseId,
+        conversation_id: attempt.conversationId, message_id: attempt.messageId,
+        sender_id: context.buyerId, sender_display_name: context.buyerName, message_text: text}),
+    });
+    if (!isCurrent()) return;
+    const outcome = inquirySubmissionOutcome(payload);
+    if (!outcome || outcome.projectId !== context.caseId) {
+      throw new Error('The server did not confirm this case revision. Refresh the case before retrying.');
+    }
+    const message = outcome.enteredApprovalFlow
+      ? 'Revised drafts are saved for a fresh human review. No message was sent by this form.'
+      : 'Revision accepted for this case. Check the saved case for clarification or dependency status; draft regeneration is not confirmed.';
+    if (result) result.textContent = message;
+    toast(message, outcome.enteredApprovalFlow ? 'success' : 'info');
+    await openCase(context.caseId);
+  } catch (error) {
+    if (!isCurrent()) return;
+    const message = 'Revision could not be confirmed. Your instructions are retained. Refresh or retry the unchanged request; no successful regeneration is claimed.';
+    if (result) result.textContent = message;
+    toast(message, 'error');
+  } finally {
+    form.revisionSubmitting = false;
+    if (button) button.disabled = false;
+  }
 }
 
 async function confirmOrder(caseId, optionId) {
@@ -687,7 +802,7 @@ document.addEventListener('click', async (event) => {
     await copyAndRecordDraft(action);
   }
   if (action.dataset.action === 'approve') await approveDraft(action.dataset.draftId);
-  if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId);
+  if (action.dataset.action === 'reject') await rejectDraft(action.dataset.draftId, action.dataset.caseId);
   if (action.dataset.action === 'confirm-order') await confirmOrder(action.dataset.caseId, action.dataset.optionId);
   if (action.dataset.action === 'impact') await showImpact(action.dataset.eventId);
   if (action.dataset.action === 'reverse') await reverseEvent(action.dataset.eventId);
@@ -701,6 +816,7 @@ document.addEventListener('keydown', (event) => {
 document.addEventListener('submit', (event) => {
   if (event.target.id === 'login-form') login(event);
   if (event.target.id === 'inquiry-form') submitInquiry(event);
+  if (event.target.id === 'case-revision-form') submitCaseRevision(event);
   if (event.target.matches('.relay-confirm')) confirmRelay(event);
 });
 
@@ -714,6 +830,49 @@ $('#paste-inquiry')?.addEventListener('click', async () => {
     $('#input-status').textContent = 'Clipboard access is unavailable. Use Ctrl+V or Cmd+V in the input.';
   }
   field.focus();
+});
+const localTextReads = new WeakMap();
+document.addEventListener('change', async event => {
+  const input = event.target.closest?.('input[data-text-input]');
+  if (!input) return;
+  const field = document.getElementById(input.dataset.textInput);
+  const status = document.getElementById(input.dataset.textStatus);
+  const attempt = {};
+  localTextReads.set(input, attempt);
+  const file = input.files?.[0];
+  if (!field || !status || !file) return;
+  const session = state.session;
+  const generation = state.authGeneration;
+  const caseGeneration = state.caseRequestGeneration;
+  const current = () => session && session === state.session
+    && generation === state.authGeneration && caseGeneration === state.caseRequestGeneration
+    && input.isConnected && field.isConnected && localTextReads.get(input) === attempt;
+  if (!current()) { input.value = ''; return; }
+  if (field.value) {
+    status.textContent = 'Your existing input was kept. Clear it yourself before importing a TXT file.';
+    input.value = '';
+    return;
+  }
+  status.textContent = 'Reading local text; nothing has been submitted or saved.';
+  try {
+    const limit = field.maxLength > 0 ? field.maxLength : Infinity;
+    const text = await window.myAivanAttachments.readInputText(file, limit);
+    if (!current()) return;
+    if (field.value) {
+      status.textContent = 'Your new input was kept. The local file was not imported.';
+      return;
+    }
+    field.value = text;
+    status.textContent = 'Local text copied into the input. Review and submit it explicitly. The file has not been uploaded or saved.';
+    field.focus();
+  } catch (error) {
+    if (!current()) return;
+    status.textContent = error.message === 'TEXT_TOO_LONG'
+      ? 'The text exceeds this input limit. Nothing was truncated or submitted; choose a smaller file or enter an excerpt yourself.'
+      : 'Cannot import this file. Choose non-empty UTF-8 TXT up to 64 KiB without binary control characters. Nothing was submitted.';
+  } finally {
+    if (localTextReads.get(input) === attempt) input.value = '';
+  }
 });
 $('#role-select').addEventListener('change', switchRole);
 $('#case-state-filter').addEventListener('change', () => loadCases(true));
