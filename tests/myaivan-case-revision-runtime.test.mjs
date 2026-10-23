@@ -10,6 +10,9 @@ assert.match(html, /data-open-view="new-inquiry"[^>]*>Start Working</);
 assert.match(app, /recoverableViews\.includes\(requestedView\) \? requestedView : 'welcome'/);
 assert.match(app.slice(app.indexOf('async function login'), app.indexOf('async function logout')), /setView\('welcome'\)/);
 
+assert.match(html, /id="input-status"[^>]*data-local-text-status/);
+assert.match(html, /data-text-status="input-status"/);
+
 const active = new Set();
 const views = ['welcome', 'new-inquiry', 'dashboard'].map(name => ({
   id: `view-${name}`,
@@ -80,7 +83,7 @@ test('login and view changes clear every local selector without iterating a sing
   const x = setup();
   const inputs = [{value:'old-a'}, {value:'old-b'}];
   const statuses = [{textContent:'old-a'}, {textContent:'old-b'}];
-  x.context.$ = selector => selector === '[data-text-input]' ? inputs
+  x.context.$$ = selector => selector === '[data-text-input]' ? inputs
     : selector === '[data-local-text-status]' ? statuses : [];
   x.context.showLogin();
   assert.ok(inputs.every(input => input.value === ''));
