@@ -19,10 +19,12 @@ class OpenClawClient:
 
     def send_message(self, request: OpenClawSendRequest) -> OpenClawSendResponse:
         if self.mock_mode:
+            # A simulation is not a transport acknowledgement. Callers persist
+            # sent only on success; never let a mock create that business fact.
             return OpenClawSendResponse(
-                success=True,
-                message_id=f"mock_msg_{request.conversation_id}_{utcnow_iso()}",
-                sent_at=utcnow_iso(),
+                success=False,
+                outcome_uncertain=False,
+                error="OPENCLAW_MOCK_MODE_NOT_SENT",
             )
         if not self.base_url:
             return OpenClawSendResponse(success=False, error="OPENCLAW_BASE_URL not configured")
@@ -56,15 +58,18 @@ class OpenClawClient:
 
     def check_account_status(self, account_connection_id: str) -> dict:
         if self.mock_mode:
-            return {"status": "connected", "account_connection_id": account_connection_id}
+            return {"status": "mock", "account_connection_id": account_connection_id,
+                    "error": "OPENCLAW_MOCK_MODE_NOT_CONNECTED"}
         if not self.base_url:
             return {"status": "error", "error": "OPENCLAW_BASE_URL not configured"}
         try:
             resp = httpx.get(f"{self.base_url}/accounts/{account_connection_id}", headers=self._headers(), timeout=self.timeout)
             resp.raise_for_status()
             return resp.json()
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        except Exception:
+            # Exceptions can include gateway URLs, response bodies or private
+            # connection context. Preserve only the stable consumer outcome.
+            return {"status": "error", "error": "OPENCLAW_ACCOUNT_STATUS_UNAVAILABLE"}
 
 _client: OpenClawClient | None = None
 

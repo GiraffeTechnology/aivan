@@ -458,13 +458,16 @@ def test_supplier_reply_propagates_project_tenant_to_both_gltg_calls(
     captured = {}
     real_estimate = rfq_execution.calculate_leadtime_for_requirement
     real_simulate = rfq_execution.GLTGClient.simulate
+    captured_replies = {}
 
     def estimate(*args, **kwargs):
         captured["estimate_tenant"] = kwargs.get("tenant_id")
+        captured_replies["estimate"] = kwargs.get("supplier_reply")
         return real_estimate(*args, **kwargs)
 
     def simulate(self, *args, **kwargs):
         captured["simulate_tenant"] = kwargs.get("tenant_id")
+        captured_replies["simulate"] = kwargs.get("supplier_reply")
         return real_simulate(self, *args, **kwargs)
 
     monkeypatch.setattr(rfq_execution, "calculate_leadtime_for_requirement", estimate)
@@ -490,6 +493,9 @@ def test_supplier_reply_propagates_project_tenant_to_both_gltg_calls(
         "estimate_tenant": expected_tenant,
         "simulate_tenant": expected_tenant,
     }
+    assert captured_replies["simulate"] is not None
+    assert captured_replies["simulate"] is captured_replies["estimate"]
+    assert captured_replies["simulate"].supplier_id == "supplier_001"
 
 
 def test_gpm_unavailable_is_visible_and_creates_no_customer_approval_draft(
