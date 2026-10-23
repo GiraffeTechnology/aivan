@@ -63,6 +63,13 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
         if result.get("confidence", 0) > 0.4:
             safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id", "material_declarations")}
+            if unit_price is not None:
+                # Literal quotation evidence takes precedence over extraction,
+                # including zero and fractional prices; this is not repricing.
+                safe_data["unit_price"] = unit_price
+                safe_data["missing_info"] = [
+                    item for item in (safe_data.get("missing_info") or []) if item != "unit_price"
+                ]
             if lead_values:
                 # Confidence cannot change a supplier's literal declaration or
                 # choose between explicit alternatives. This is not GLTG output.
