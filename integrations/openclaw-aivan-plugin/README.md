@@ -21,7 +21,10 @@ This plugin is a **thin HTTP bridge** between OpenClaw and your local AIVAN serv
 - Exposes helper commands to check AIVAN health and open the local dashboard
 - Lets OpenClaw operators view, approve, or reject pending outbound drafts
 
-The plugin contains **no business logic**. All sourcing, risk-screening, lead-time calculation, and option generation happens inside AIVAN.
+The plugin contains **no business logic**. Aivan owns the workflow and calls
+GLTG for lead-time evaluation and GPM for quotation/decision processing through
+their APIs. The bridge does not calculate lead times, duplicate either model,
+or replace the authoritative private-domain DB.
 
 ---
 
@@ -163,8 +166,9 @@ The workflow:
    fallback skills, as required by `workflow.json`.
 3. AIVAN processes the event and creates a pending draft.
 4. `aivan.getPendingDrafts` returns the draft to the operator.
-5. The operator reviews the message in the AIVAN dashboard or via
-   `aivan.approveDraft`.
+5. The operator reviews the message in the AIVAN dashboard. When approving a
+   localized preview through `aivan.approveDraft`, pass that exact reviewed
+   `preview_id`; the approval tool itself is not a preview or a human decision.
 6. Execute only the authorized action supported by the selected channel policy. In the first MyAivan web iteration all IM channels use manual copy/send/confirmation; configured email uses explicit confirmation, with an honest copy fallback when unavailable.
 
 OpenClaw has no generic numeric priority field for skills. The explicit
@@ -178,6 +182,34 @@ another runtime. The workflow boundary metadata is not an SDK handoff. Neither
 mechanism authorizes outbound delivery.
 
 The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the action to the AIVAN API, which enforces the policy server-side.
+
+### Reviewed preview transport
+
+The existing Core preview endpoint is `POST /api/drafts/{draft_id}/preview`.
+An authorized operator can request a target language, inspect the returned
+message, recipient and channel, and retain its `preview_id`. The optional
+approval tool forwards only `draft_id` and that preview reference; it never
+creates or refreshes a preview automatically. Core rechecks the draft, tenant,
+actor, rendered content and approval state. A changed or rejected draft must
+be reviewed again; a conflict is not retried automatically.
+
+```json
+{
+  "draft_id": "EXISTING_REVIEWED_DRAFT_ID",
+  "preview_id": "render_0123456789abcdef0123456789abcdef"
+}
+```
+
+This is the parameter shape for an explicit `aivan.approveDraft` action, not
+a usable preview credential. Obtain the real reference from the selected Core;
+do not invent one or supply message text as approval evidence. The exported
+JavaScript helper accepts `approveDraft(draftId, previewId)`.
+
+Omitting `preview_id` preserves Core's existing English compatibility path.
+It does not authorize approval of an existing localized preview: Core rejects
+that request until the reviewed reference is supplied. Approval success is
+not a send receipt. IM delivery remains manual copy/send/confirmation and
+email remains subject to the configured, human-authorized transport.
 
 ---
 

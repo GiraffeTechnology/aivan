@@ -82,10 +82,11 @@ export declare function getPendingDrafts(projectId?: string): Promise<{
 }>;
 /**
  * aivan.approveDraft — Approve a pending draft for sending.
- * AIVAN will then send the message via OpenClaw. This plugin does NOT
- * send the message itself.
+ * Forward the operator's reviewed preview when supplied. Core retains the
+ * existing English compatibility path and enforces localized preview binding.
+ * Approval does not prove delivery; this plugin never sends the message itself.
  */
-export declare function approveDraft(draftId: string): Promise<{
+export declare function approveDraft(draftId: string, previewId?: string): Promise<{
     approved: boolean;
     draft_id: string;
     error?: string;
