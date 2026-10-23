@@ -108,18 +108,19 @@ def generate_buyer_options(
     def make_option(reply: SupplierReply, lt: LeadTimeEstimate | None, option_type: str, option_label: str, reasoning: str) -> BuyerOption:
         sup_display = "Supplier (confidential)" if hide_identity else (reply.supplier_id or reply.candidate_id or "Unknown")
 
+        quantity = requirement.quantity
         quote_data = calculate_buyer_quote(
             unit_price=reply.unit_price,
-            quantity=requirement.quantity or 1000,
+            quantity=quantity,
             moq=reply.moq or 0,
             margin_rate=margin_rate,
             currency=reply.currency,
-        )
+        ) if quantity is not None and quantity > 0 else None
         quote = QuoteCalculation(
             supplier_id=reply.supplier_id,
             candidate_id=reply.candidate_id,
             unit_price=quote_data["unit_price"] if not hide_price else 0.0,
-            quantity=requirement.quantity or 1000,
+            quantity=quantity,
             moq=reply.moq or 0,
             margin_rate=margin_rate,
             currency=reply.currency,
@@ -130,9 +131,13 @@ def generate_buyer_options(
             effective_margin_rate=quote_data["effective_margin_rate"],
             calculation_trace=quote_data["calculation_trace"] if not hide_price else ["Supplier cost confidential"],
             warnings=quote_data["warnings"],
-        )
+        ) if quote_data is not None else None
 
         warnings = []
+        if quote is None:
+            warnings.append(
+                "Order quantity is not confirmed; no buyer quote was calculated."
+            )
         if not price_basis_comparable:
             warnings.append(
                 "Quote currencies or unit bases are not directly comparable; "
