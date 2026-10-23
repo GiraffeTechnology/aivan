@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import os
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -25,7 +26,7 @@ def generate_buyer_options(
     current_by_supplier: dict[str, SupplierReply] = {}
     anonymous_replies: list[SupplierReply] = []
     for reply in supplier_replies:
-        if reply.unit_price is None:
+        if reply.unit_price is None or not math.isfinite(reply.unit_price):
             continue
         business_identity = (reply.supplier_id or reply.candidate_id).strip()
         if business_identity:
