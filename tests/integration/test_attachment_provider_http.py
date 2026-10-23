@@ -123,6 +123,11 @@ def test_aivan_attachment_routes_selected_provider_http_and_restart(workbench, t
         assert uploaded.status_code == 200, uploaded.text
         saved = uploaded.json()
         assert saved["readback_verified"] is True
+        # The language service may normalize even already-English input. The
+        # persisted/downloaded bytes are the returned canonical text, not raw.
+        canonical_text = saved["canonical_text"]
+        assert isinstance(canonical_text, str) and canonical_text.strip()
+        canonical_bytes = canonical_text.encode("utf-8")
         replay = client.post(path, json=body, headers=trusted)
         assert replay.status_code == 200
         assert replay.json()["attachment_id"] == saved["attachment_id"]
@@ -158,14 +163,14 @@ def test_aivan_attachment_routes_selected_provider_http_and_restart(workbench, t
         assert restored.status_code == 200
         assert {item["attachment_id"] for item in restored.json()["items"]} == {saved["attachment_id"], image_saved["attachment_id"]}
         download = client.get(saved["download_path"])
-        assert download.status_code == 200 and download.content == raw
+        assert download.status_code == 200 and download.content == canonical_bytes
         assert client.get(image_saved["download_path"]).content == image
         backup = client.get(f"/api/workbench/cases/{case.project_id}/export")
         assert backup.status_code == 200
         assert saved["file_name"] in backup.text and image_saved["file_name"] in backup.text
         other = {"X-Service-Tenant-ID": "other_tenant", "X-Service-Auth": other_secret}
         provider_content = f"/api/data/attachments/{saved['attachment_id']}/content"
-        assert httpx.get(base + provider_content, headers=headers, timeout=5).content == raw
+        assert httpx.get(base + provider_content, headers=headers, timeout=5).content == canonical_bytes
         assert httpx.get(base + provider_content, headers=other, timeout=5).status_code == 404
         assert httpx.get(base + provider_content, timeout=5).status_code == 401
         assert httpx.get(base + provider_content, headers={"X-Service-Auth": secret}, timeout=5).status_code == 403
