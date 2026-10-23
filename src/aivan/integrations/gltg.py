@@ -47,6 +47,7 @@ class GLTGClient:
         supplier_id: str | None = None,
         tenant_id: str | None = None,
         source_trace_id: str | None = None,
+        supplier_reply=None,
     ) -> GLTGSimulation:
         data = self._estimate(
             product_type=requirement.product_type or requirement.category or "unspecified",
@@ -59,7 +60,7 @@ class GLTGClient:
             lead_time_confidence=strategy.lead_time_confidence,
             supplier_id=supplier_id,
             tenant_id=tenant_id,
-            evidence_context=requirement.extra,
+            evidence_context=self._reply_context(requirement.extra, supplier_reply, supplier_id),
             source_trace_id=source_trace_id,
         )
 
@@ -148,7 +149,7 @@ class GLTGClient:
             lead_time_confidence="P80",
             supplier_id=supplier_anchor,
             tenant_id=tenant_id,
-            evidence_context=requirement.extra,
+            evidence_context=self._reply_context(requirement.extra, supplier_reply, supplier_anchor),
             supplier_stated_lead_time_days=declared,
             source_trace_id=source_trace_id,
         )
@@ -234,6 +235,25 @@ class GLTGClient:
             explanation_json=data.get("explanation_json") or {},
             warnings=data.get("warnings") or [],
         )
+
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _reply_context(context, reply, supplier_id):
+        # Load only when used: agents.__init__ imports the salesperson facade,
+        # which itself imports this module during application startup.
+        from aivan.agents.supplier_material_reply import (
+            SupplierMaterialContextError,
+            material_context,
+        )
+
+        if reply is not None and (
+            not supplier_id or getattr(reply, "supplier_id", None) != supplier_id
+        ):
+            raise GLTGUnavailableError("GLTG_SUPPLIER_MATERIAL_IDENTITY_MISMATCH")
+        try:
+            return material_context(context, reply)
+        except SupplierMaterialContextError as exc:
+            raise GLTGUnavailableError(str(exc)) from None
 
     # ------------------------------------------------------------------ #
     def _estimate(

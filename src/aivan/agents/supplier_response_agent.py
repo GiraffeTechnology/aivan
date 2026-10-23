@@ -1,5 +1,6 @@
 from __future__ import annotations
 from aivan.schemas.response import SupplierReply
+from aivan.agents.supplier_material_reply import parse_material_declarations
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import SUPPLIER_RESPONSE_PARSING_SYSTEM
 from aivan.utils.time_utils import utcnow_iso
@@ -22,7 +23,7 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     try:
         result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
         if result.get("confidence", 0) > 0.4:
-            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id")}
+            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id", "material_declarations")}
             # An omitted currency is missing evidence, not an implicit USD quote.
             safe_data.setdefault("currency", "")
             if not safe_data["currency"]:
@@ -37,6 +38,7 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
                 raw_text=raw_text,
                 channel=channel,
                 received_at=utcnow_iso(),
+                material_declarations=parse_material_declarations(raw_text),
                 **safe_data,
             )
     except Exception:
@@ -90,6 +92,7 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         lead_time_days=lead_time,
         missing_info=[] if currency else ["currency"],
         confidence=0.4,
+        material_declarations=parse_material_declarations(raw_text),
         received_at=utcnow_iso(),
     )
 
