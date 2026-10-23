@@ -158,10 +158,13 @@ def test_generated_fallback_quantity_does_not_become_customer_offer(monkeypatch)
         raw_text="Synthetic quote without a buyer quantity", unit_price=10.0, currency="USD",
     )
     options = generate_buyer_options(requirement, [reply], [_estimate()], requirement.project_id)
-    # The presentation fix does not change legacy pricing math or its inputs.
-    assert options[0].quote.quantity == 1000
+    # Current generation must not fabricate a quantity; legacy stored fallback
+    # records remain covered by the separate missing/mismatched-quantity test.
+    assert len(options) == 1
+    assert options[0].quote is None
     body = format_customer_quote_draft(options, requirement)
     assert "1000" not in body and "USD" not in body
+    assert "Total amount: Not confirmed." in body
     assert "Please confirm the order quantity" in body
 
 
