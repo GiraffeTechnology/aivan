@@ -22,7 +22,7 @@ const context = vm.createContext({
   $$: selector => selector === '.view' ? views : [],
   history: { replaceState(_state, _title, value) { fragment = value; } },
   window: { scrollTo() {} },
-  loadCases() {}, loadRelay() {}, loadHealth() {},
+  invalidateCaseView() {}, loadCases() {}, loadRelay() {}, loadHealth() {},
 });
 vm.runInContext(app.slice(app.indexOf('function setView('), app.indexOf('function populateRoles(')), context);
 context.setView('welcome');
@@ -75,6 +75,22 @@ function setup() {
   state.bootstrap={actor:{capabilities:[]}};
   return {context,state,node,requests,mounts};
 }
+
+test('login and view changes clear every local selector without iterating a single DOM node', () => {
+  const x = setup();
+  const inputs = [{value:'old-a'}, {value:'old-b'}];
+  const statuses = [{textContent:'old-a'}, {textContent:'old-b'}];
+  x.context.$ = selector => selector === '[data-text-input]' ? inputs
+    : selector === '[data-local-text-status]' ? statuses : [];
+  x.context.showLogin();
+  assert.ok(inputs.every(input => input.value === ''));
+  assert.ok(statuses.every(status => status.textContent === ''));
+  inputs.forEach(input => { input.value = 'selected'; });
+  statuses.forEach(status => { status.textContent = 'loaded'; });
+  x.context.setView('new-inquiry');
+  assert.ok(inputs.every(input => input.value === ''));
+  assert.ok(statuses.every(status => status.textContent === ''));
+});
 
 // W13 exercises the actual web functions with controlled API outcomes, not live DB acceptance.
 function revisionSetup() {
