@@ -1,8 +1,35 @@
 from __future__ import annotations
+import re
 from aivan.schemas.response import SupplierReply
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import SUPPLIER_RESPONSE_PARSING_SYSTEM
 from aivan.utils.time_utils import utcnow_iso
+
+def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[str]]:
+    """Read literal unit-price terms without borrowing ancillary cost currencies."""
+    clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
+    currency_codes = (
+        "USD|EUR|GBP|CNY|JPY|HKD|CAD|AUD|CHF|NZD|SGD|KRW|INR|BRL|MXN|ZAR|"
+        "SEK|NOK|DKK|PLN|THB|TWD|VND|IDR|AED|SAR|TRY|RUB"
+    )
+    amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
+    price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
+    price_clauses = []
+    for clause in clauses:
+        quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
+        if quoted_amount and not re.search(
+            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
+            clause[:quoted_amount.start()], re.IGNORECASE,
+        ):
+            price_clauses.append(clause)
+    named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
+    price_clause = next(iter(named_prices or price_clauses), "")
+    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
+    unit_price = float(price_match.group(1)) if price_match else None
+    currencies = {
+        code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
+    }
+    return clauses, unit_price, currencies
 
 def parse_supplier_reply(
     raw_text: str,
@@ -12,7 +39,7 @@ def parse_supplier_reply(
     channel: str = "",
 ) -> SupplierReply:
     """Parse a supplier reply message using LLM with deterministic fallback."""
-    import re
+    clauses, unit_price, explicit_currencies = _quote_price_evidence(raw_text)
 
     user_prompt = f"""Supplier message:
 {raw_text}
@@ -25,6 +52,12 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
             safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id")}
             # An omitted currency is missing evidence, not an implicit USD quote.
             safe_data.setdefault("currency", "")
+            if explicit_currencies:
+                # A model cannot override a literal quote currency or resolve
+                # explicit alternatives without the supplier's clarification.
+                safe_data["currency"] = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
+                if safe_data["currency"] and isinstance(safe_data.get("missing_info"), list):
+                    safe_data["missing_info"] = [item for item in safe_data["missing_info"] if item != "currency"]
             if not safe_data["currency"]:
                 missing = list(safe_data.get("missing_info") or [])
                 if "currency" not in missing:
@@ -45,28 +78,6 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     text_lower = raw_text.lower()
     # Bind fallback facts to their business clause, not unrelated freight,
     # payment or offer-validity facts elsewhere in the same message.
-    clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
-    currency_codes = (
-        "USD|EUR|GBP|CNY|JPY|HKD|CAD|AUD|CHF|NZD|SGD|KRW|INR|BRL|MXN|ZAR|"
-        "SEK|NOK|DKK|PLN|THB|TWD|VND|IDR|AED|SAR|TRY|RUB"
-    )
-    amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
-    price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
-    price_clauses = []
-    for clause in clauses:
-        quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
-        if quoted_amount and not re.search(
-            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
-            clause[:quoted_amount.start()], re.IGNORECASE,
-        ):
-            price_clauses.append(clause)
-    named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
-    price_clause = next(iter(named_prices or price_clauses), "")
-    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
-    unit_price = float(price_match.group(1)) if price_match else None
-    explicit_currencies = {
-        code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
-    }
     currency = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
 
     lead_clauses = [clause for clause in clauses if re.search(
