@@ -174,6 +174,32 @@ def test_workbench_paginates_and_projects_cases_by_server_authorized_role(workbe
     assert switched["role"] == "buyer"
 
 
+def test_execution_association_checks_case_acl_before_provider(workbench, monkeypatch):
+    # SQLite local ACL fixture only, not MySQL/provider acceptance.
+    from aivan.api import execution_association_routes
+    client, db = workbench
+    own = _seed_case(db, "operator-1", "association-own")
+    other = _seed_case(db, "buyer-2", "association-other")
+    tenant_other = _seed_case(db, "operator-1", "association-other-tenant")
+    tenant_other.tenant_id = "other-tenant"
+    db.commit()
+    def forbidden_provider(*args, **kwargs):
+        pytest.fail("Unauthorized or unconfirmed case must not construct a provider")
+    monkeypatch.setattr(execution_association_routes, "GiraffeDBOrderConfirmationClient", forbidden_provider)
+    path = lambda case: f"/api/workbench/cases/{case.project_id}/execution-association"
+    assert client.get(path(own)).status_code == 401
+    login = _login(client)
+    response = client.post('/api/session/role', headers={'X-AIVAN-CSRF':login['csrf_token']}, json={'role':'buyer'})
+    assert response.status_code == 200
+    assert client.get(path(other)).status_code == 404
+    assert client.get(path(tenant_other)).status_code == 404
+    authorized = client.get(path(own))
+    assert authorized.status_code == 200
+    assert authorized.json()['execution_reads_available'] is False
+    assert authorized.json()['readback_verified'] is False
+    assert authorized.headers['cache-control'] == 'no-store'
+
+
 def test_admin_export_includes_frozen_candidate_and_digest_only_messages(workbench):
     client, db = workbench
     project = _seed_case(db, "operator-1", "export-thread")
