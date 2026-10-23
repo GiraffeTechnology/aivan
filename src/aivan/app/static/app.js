@@ -98,8 +98,8 @@ async function api(path, options = {}) {
 }
 
 function showLogin(message = '') {
-  for (const input of $('[data-text-input]')) input.value = '';
-  for (const status of $('[data-local-text-status]')) status.textContent = '';
+  for (const input of $$('[data-text-input]')) input.value = '';
+  for (const status of $$('[data-local-text-status]')) status.textContent = '';
   invalidateCaseView();
   state.executionHost?.invalidate('signed-out');
   $('#login-view').hidden = false;
@@ -117,8 +117,8 @@ function showApp() {
 function setView(name) {
   if (name !== 'case-detail') invalidateCaseView();
   window.myAivanAttachments?.dispose();
-  for (const input of $('[data-text-input]')) input.value = '';
-  for (const status of $('[data-local-text-status]')) status.textContent = '';
+  for (const input of $$('[data-text-input]')) input.value = '';
+  for (const status of $$('[data-local-text-status]')) status.textContent = '';
   $$('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${name}`));
   $$('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === name));
   history.replaceState(null, '', `#${name}`);
