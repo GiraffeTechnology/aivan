@@ -5,7 +5,7 @@ Scope: `GiraffeTechnology/aivan` only. Cross-repo findings are documented, not m
 ## Environment constraint
 
 This investigation was done at the code level. The production server
-`113.249.119.30` (STEP 1 live traceback, STEP 6 live WeChat round-trip) was not
+`203.0.113.10` (STEP 1 live traceback, STEP 6 live WeChat round-trip) was not
 reachable from the analysis environment, so the live traceback and the live
 WeChat trigger were not captured. The root cause was instead established from the
 invocation code path and the OpenClaw bridge contract, and the fix is verified by
