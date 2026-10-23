@@ -1,9 +1,14 @@
 """A missing order quantity is not permission to fabricate a billable quantity."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from aivan.agents import buyer_option_agent as options_agent
+from aivan.execution.gpm_guidance import create_stage1_gpm_guidance
+from aivan.integrations.gpm_guidance_client import GPMGuidanceClient, GPMGuidanceUnavailableError
+from aivan.openclaw.contracts import OpenClawEvent
 from aivan.pricing.customer_quote import format_customer_quote_draft
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -47,6 +52,21 @@ def test_unconfirmed_quantity_does_not_fabricate_quote_or_call_calculator(
     assert "Total amount: Not confirmed." in text
     assert "Please confirm the order quantity" in text
     assert "1000" not in text
+
+    def must_not_call(*_args, **_kwargs):
+        pytest.fail("An uncalculated quote must not reach the GPM provider")
+
+    monkeypatch.setattr(GPMGuidanceClient, "create_guidance", must_not_call)
+    with pytest.raises(GPMGuidanceUnavailableError, match="GPM_SOURCE_QUOTE_MISSING"):
+        create_stage1_gpm_guidance(
+            project=SimpleNamespace(tenant_id="tenant-a", project_id="quantity-case"),
+            event=OpenClawEvent(tenant_id="tenant-a", conversation_id="quantity-case",
+                message_id="quantity-message", authenticated_actor_id="sales-1",
+                authenticated_actor_role="sales"),
+            requirement=requirement, selected_option=restored,
+            replies=[supplier_reply(moq=500)],
+            gltg_result=SimpleNamespace(gltg_run_id="synthetic-run", source_api_version="v2"),
+        )
 
 
 @pytest.mark.parametrize("quantity", [1, 1000, 1250])
