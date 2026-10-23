@@ -2,6 +2,7 @@ from __future__ import annotations
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.sourcing.supplier_models import SupplierProfile
 from aivan.sourcing.marketplaces.marketplace_models import MarketplaceSupplierCandidate
+from aivan.agents.supplier_material_questions import with_material_confirmation_questions
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import SUPPLIER_INQUIRY_SYSTEM
 
@@ -38,12 +39,12 @@ Draft a professional supplier inquiry message."""
     try:
         result = llm_complete_json("supplier_inquiry_drafting", SUPPLIER_INQUIRY_SYSTEM, user_prompt)
         message_text = result.get("message_text", "")
-        if message_text:
-            return message_text
+        if isinstance(message_text, str) and message_text.strip():
+            return with_material_confirmation_questions(message_text)
     except Exception:
         pass
 
-    return f"""Dear {sup_name or 'Supplier'},
+    return with_material_confirmation_questions(f"""Dear {sup_name or 'Supplier'},
 
 We are looking to source the following:
 
@@ -69,4 +70,4 @@ Please confirm:
 Thank you for your attention. We look forward to your quote.
 
 Best regards,
-AIVAN Trade Salesperson"""
+AIVAN Trade Salesperson""")

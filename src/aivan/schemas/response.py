@@ -22,4 +22,5 @@ class SupplierReply(BaseModel):
     missing_info: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     raw_payload: dict = Field(default_factory=dict)
+    material_declarations: dict = Field(default_factory=dict)
     received_at: str = ""
