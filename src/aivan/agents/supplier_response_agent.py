@@ -17,7 +17,7 @@ def _declared_lead_time_values(clauses: list[str]) -> set[float]:
     return {float(value) for clause in lead_clauses for value in re.findall(
         r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
 
-def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[str]]:
+def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[str], bool]:
     """Read literal unit-price terms without borrowing ancillary cost currencies."""
     clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
     currency_codes = (
@@ -37,11 +37,23 @@ def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[s
     named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
     price_clause = next(iter(named_prices or price_clauses), "")
     price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
-    unit_price = float(price_match.group(1)) if price_match else None
+    prices = {float(match.group(1)) for match in re.finditer(price_pattern, price_clause, re.IGNORECASE)}
+    if price_match:
+        # Only a range adjacent to the quoted amount is price evidence; a
+        # subsequent order-quantity range must not become a second price.
+        price_range = re.match(
+            rf'{amount}\s*(?:\b(?:{currency_codes})\b\s*)?'
+            rf'(?:or\b|to\b|[-–—])\s*(?:\b(?:{currency_codes})\b\s*)?{amount}',
+            price_clause[price_match.start(1):], re.IGNORECASE,
+        )
+        if price_range:
+            prices.update(float(value) for value in price_range.groups())
+    ambiguous_price = len(prices) > 1
+    unit_price = next(iter(prices)) if len(prices) == 1 else None
     currencies = {
         code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
     }
-    return clauses, unit_price, currencies
+    return clauses, unit_price, currencies, ambiguous_price
 
 def parse_supplier_reply(
     raw_text: str,
@@ -51,7 +63,7 @@ def parse_supplier_reply(
     channel: str = "",
 ) -> SupplierReply:
     """Parse a supplier reply message using LLM with deterministic fallback."""
-    clauses, unit_price, explicit_currencies = _quote_price_evidence(raw_text)
+    clauses, unit_price, explicit_currencies, ambiguous_price = _quote_price_evidence(raw_text)
     lead_values = _declared_lead_time_values(clauses)
 
     user_prompt = f"""Supplier message:
@@ -63,13 +75,15 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
         if result.get("confidence", 0) > 0.4:
             safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id", "material_declarations")}
-            if unit_price is not None:
+            if unit_price is not None or ambiguous_price:
                 # Literal quotation evidence takes precedence over extraction,
                 # including zero and fractional prices; this is not repricing.
                 safe_data["unit_price"] = unit_price
                 safe_data["missing_info"] = [
                     item for item in (safe_data.get("missing_info") or []) if item != "unit_price"
                 ]
+                if ambiguous_price:
+                    safe_data["missing_info"].append("unit_price")
             if lead_values:
                 # Confidence cannot change a supplier's literal declaration or
                 # choose between explicit alternatives. This is not GLTG output.
@@ -126,7 +140,7 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         currency=currency,
         moq=moq,
         lead_time_days=lead_time,
-        missing_info=[] if currency else ["currency"],
+        missing_info=([] if currency else ["currency"]) + (["unit_price"] if ambiguous_price else []),
         confidence=0.4,
         material_declarations=parse_material_declarations(raw_text),
         received_at=utcnow_iso(),
