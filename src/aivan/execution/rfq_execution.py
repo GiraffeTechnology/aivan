@@ -883,7 +883,9 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         if buyer_options
         else []
     )
-    if drafts_created and project.case_state == CaseState.SUPPLIER_REPLIED.value:
+    if drafts_created and project.case_state in {
+        CaseState.SUPPLIER_REPLIED.value, CaseState.APPROVED.value,
+    }:
         CaseDomainRepository(db).transition_case(
             project=project,
             after=CaseState.AWAITING_APPROVAL,

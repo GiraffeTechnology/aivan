@@ -6,9 +6,12 @@ real-service, MySQL, delivery or public-UI acceptance evidence.
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import event, update
 
 from aivan.api import workbench_routes
 from aivan.db.repositories.project_repo import ProjectRepository
+from aivan.db.repositories.draft_repo import DraftRepository
+from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.openclaw.client import OpenClawClient
 from tests.test_rfq_execution_iteration import (
     _customer_email_event,
@@ -103,3 +106,47 @@ def test_old_approved_manual_draft_is_not_actionable_after_revision(api_client, 
     assert result.json()["detail"]["error"] == "INVALID_DRAFT_STATE"
     current = api_client.get(f"/api/drafts/{revised['drafts_created'][0]}").json()
     assert current["status"] == "pending_approval"
+
+
+@pytest.mark.parametrize("status", ["pending_approval", "approved", "approved_pending_send", "send_failed"])
+def test_superseding_revokes_only_unsent_old_quote_authorizations(db_session, status):
+    repo = DraftRepository(db_session)
+    draft = repo.create("quote-revision-case", {"tenant_id": "tenant-a", "status": status,
+        "message_text": "Old quote", "notes": "draft_type=customer_quote_email"})
+    inquiry = repo.create("quote-revision-case", {"tenant_id": "tenant-a", "status": status,
+        "message_text": "Supplier inquiry", "notes": "draft_type=supplier_inquiry_email"})
+    assert repo.supersede_customer_quote_drafts("quote-revision-case") == [draft.draft_id]
+    assert draft.status == "superseded"
+    assert inquiry.status == status
+
+
+@pytest.mark.parametrize("status", ["sent", "relayed", "delivery_unconfirmed", "rejected", "superseded"])
+def test_quote_revision_preserves_delivered_uncertain_and_rejected_history(db_session, status):
+    repo = DraftRepository(db_session)
+    draft = repo.create("quote-revision-case", {"tenant_id": "tenant-a", "status": status,
+        "message_text": "Historical quote", "notes": "draft_type=customer_quote_email"})
+    assert repo.supersede_customer_quote_drafts("quote-revision-case") == []
+    assert draft.status == status
+
+
+def test_delivery_claim_between_snapshot_and_supersede_is_not_overwritten(db_session):
+    repo = DraftRepository(db_session)
+    draft = repo.create("quote-revision-case", {"tenant_id": "tenant-a", "status": "approved",
+        "message_text": "Old quote", "notes": "draft_type=customer_quote_email"})
+    db_session.commit()
+    interleaved = []
+
+    def claim_before_supersede(connection, cursor, statement, parameters, context, many):
+        if statement.lstrip().upper().startswith("UPDATE ") and not interleaved:
+            interleaved.append(True)
+            connection.execute(update(InquiryDraftRecord).where(
+                InquiryDraftRecord.draft_id == draft.draft_id
+            ).values(status="delivery_unconfirmed"))
+
+    event.listen(db_session.bind, "before_cursor_execute", claim_before_supersede)
+    try:
+        assert repo.supersede_customer_quote_drafts("quote-revision-case") == []
+        assert interleaved == [True]
+        assert draft.status == "delivery_unconfirmed"
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", claim_before_supersede)
