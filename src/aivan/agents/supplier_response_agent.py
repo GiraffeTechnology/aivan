@@ -6,6 +6,28 @@ from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import SUPPLIER_RESPONSE_PARSING_SYSTEM
 from aivan.utils.time_utils import utcnow_iso
 
+def _declared_moq(clauses: list[str]) -> tuple[bool, int | None]:
+    """Bind explicit MOQ terms without truncating fractions or choosing ranges."""
+    values: set[int] = set()
+    seen = unresolved = False
+    integer = r'(?:\d{1,3}(?:,\d{3})+|\d+)(?=\s|$|[,;.)](?!\d)|(?:pcs?|pieces?|units?)\b)'
+    for clause in clauses:
+        for label in re.finditer(r'\bmoq(?![A-Za-z_])\s*[:=]?\s*', clause, re.IGNORECASE):
+            seen = True
+            tail = clause[label.end():]
+            match = re.match(integer, tail, re.IGNORECASE)
+            if match is None or re.match(
+                r'\s*(?:(?:pcs?|pieces?|units?)\b\s*)?(?:or\b|to\b|[-–—/])',
+                tail[match.end():], re.IGNORECASE,
+            ):
+                unresolved = True
+                continue
+            try:
+                values.add(int(match.group().replace(',', '')))
+            except ValueError:
+                unresolved = True
+    return seen, next(iter(values)) if not unresolved and len(values) == 1 else None
+
 def _declared_lead_time_values(clauses: list[str]) -> set[float]:
     """Read the existing literal day clauses, excluding unrelated durations."""
     # These explicitly labelled material fields have their own source-backed
@@ -65,6 +87,7 @@ def parse_supplier_reply(
     """Parse a supplier reply message using LLM with deterministic fallback."""
     clauses, unit_price, explicit_currencies, ambiguous_price = _quote_price_evidence(raw_text)
     lead_values = _declared_lead_time_values(clauses)
+    moq_declared, moq = _declared_moq(clauses)
 
     user_prompt = f"""Supplier message:
 {raw_text}
@@ -75,6 +98,10 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
         if result.get("confidence", 0) > 0.4:
             safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id", "material_declarations")}
+            if moq_declared:
+                safe_data["moq"] = moq
+                missing = [item for item in (safe_data.get("missing_info") or []) if item != "moq"]
+                safe_data["missing_info"] = missing + (["moq"] if moq is None else [])
             if unit_price is not None or ambiguous_price:
                 # Literal quotation evidence takes precedence over extraction,
                 # including zero and fractional prices; this is not repricing.
@@ -120,15 +147,11 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     except Exception:
         pass
 
-    text_lower = raw_text.lower()
     # Bind fallback facts to their business clause, not unrelated freight,
     # payment or offer-validity facts elsewhere in the same message.
     currency = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
 
     lead_time = next(iter(lead_values)) if len(lead_values) == 1 else None
-
-    moq_match = re.search(r'moq[:\s]*(\d[\d,]*)', text_lower)
-    moq = int(moq_match.group(1).replace(",", "")) if moq_match else None
 
     return SupplierReply(
         project_id=project_id,
@@ -140,7 +163,8 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         currency=currency,
         moq=moq,
         lead_time_days=lead_time,
-        missing_info=([] if currency else ["currency"]) + (["unit_price"] if ambiguous_price else []),
+        missing_info=([] if currency else ["currency"]) + (["unit_price"] if ambiguous_price else [])
+                     + (["moq"] if moq_declared and moq is None else []),
         confidence=0.4,
         material_declarations=parse_material_declarations(raw_text),
         received_at=utcnow_iso(),
