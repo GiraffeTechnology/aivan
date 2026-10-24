@@ -21,7 +21,7 @@ This plugin is a **thin HTTP bridge** between OpenClaw and your local AIVAN serv
 - Exposes helper commands to check AIVAN health and open the local dashboard
 - Lets OpenClaw operators view, approve, or reject pending outbound drafts
 
-The plugin contains **no business logic**. All sourcing, risk-screening, lead-time calculation, and option generation happens inside AIVAN.
+The plugin contains **no business logic**. Aivan owns the trade workflow and consumes configured GLTG/GPM APIs for their lead-time and pricing results. The bridge neither embeds those calculation engines nor replaces the private-domain DB.
 
 ---
 
@@ -105,6 +105,11 @@ clawhub package link .
 rejection actions are never automatically retried. Failures are returned as
 user-visible `AIVAN_*` error codes with a `retryable` flag.
 
+Core requests do not follow HTTP redirects. Configure `AIVAN_BASE_URL` with the
+actual Core API destination rather than a redirecting landing page. A 3xx
+response is an error: the bridge does not forward credentials, tenant/actor
+headers or an approval request to the redirect destination.
+
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
 
 ### Service and participant identity
@@ -142,7 +147,7 @@ OPENCLAW_MOCK_MODE=true
 In mock mode:
 - All LLM calls return deterministic mock responses
 - OpenClaw events are simulated without a real IM/email connection
-- No external API calls are made
+- These switches simulate the model/channel boundary; they do not disable configured DB, GLTG or language-service HTTP calls
 - Test results must be recorded for the exact candidate; mock success does not establish live channel delivery
 
 ---
@@ -178,6 +183,12 @@ another runtime. The workflow boundary metadata is not an SDK handoff. Neither
 mechanism authorizes outbound delivery.
 
 The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the action to the AIVAN API, which enforces the policy server-side.
+
+`aivan.approveDraft` returns Core's actual `status`, `approved` and `sent`
+outcomes. Pending, revoked or unknown approval is not success. A real approval
+may coexist with failed or unconfirmed delivery, with an explanation for the
+operator; it does not trigger an automatic retry. Manual IM relay is not a
+provider delivery receipt, and approval alone never means a message was sent.
 
 ---
 
