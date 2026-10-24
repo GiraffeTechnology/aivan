@@ -45,7 +45,8 @@ def test_graph_write_rejects_wrong_tenant_before_dependent_operations(
     def post(client, url, *args, **kwargs):
         response = original_post(client, url, *args, **kwargs)
         if url.endswith(path):
-            return httpx.Response(201, json={**response.json(), "tenant_id": "other-tenant"})
+            return httpx.Response(201, request=response.request,
+                json={**response.json(), "tenant_id": "other-tenant"})
         return response
 
     monkeypatch.setattr(httpx.Client, "post", post)
