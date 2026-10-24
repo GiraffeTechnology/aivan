@@ -12,11 +12,21 @@ def _declared_moq(clauses: list[str]) -> tuple[bool, int | None]:
     seen = unresolved = False
     integer = r'(?:\d{1,3}(?:,\d{3})+|\d+)(?=\s|$|[,;.)](?!\d)|(?:pcs?|pieces?|units?)\b)'
     for clause in clauses:
-        for label in re.finditer(r'\bmoq(?![A-Za-z_])\s*[:=]?\s*', clause, re.IGNORECASE):
-            seen = True
+        for label in re.finditer(r'\bmoq(?![A-Za-z_])\s*(?::|=|is\b|of\b)?\s*', clause, re.IGNORECASE):
             tail = clause[label.end():]
             match = re.match(integer, tail, re.IGNORECASE)
-            if match is None or re.match(
+            if match is None:
+                # Preserve the existing semantic extraction path for written-out
+                # quantities; unsupported numeric tokens and explicit unknowns
+                # must not become a guessed or truncated integer.
+                if not tail.strip() or re.match(
+                    r'(?:[+\-]?\d|[.,]\d|not\b|unconfirmed\b|unknown\b|tbd\b|pending\b)',
+                    tail, re.IGNORECASE,
+                ):
+                    seen = unresolved = True
+                continue
+            seen = True
+            if re.match(
                 r'\s*(?:(?:pcs?|pieces?|units?)\b\s*)?(?:or\b|to\b|[-–—/])',
                 tail[match.end():], re.IGNORECASE,
             ):

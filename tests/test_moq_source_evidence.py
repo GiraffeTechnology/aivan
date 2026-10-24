@@ -49,6 +49,7 @@ def test_supplier_total_uses_actual_literal_moq_not_model_inflation(monkeypatch)
 
 @pytest.mark.parametrize("text,expected", [
     ("MOQ: 100 pcs", 100), ("MOQ=100pcs", 100), ("MOQ100 pieces", 100),
+    ("MOQ is 100 pieces", 100), ("MOQ of 100 units", 100),
     ("MOQ 1,000 units", 1000), ("MOQ 100; MOQ 100", 100),
     ("MOQ 100; MOQ 200", None), ("MOQ 100 or 200; MOQ 100", None),
     ("MOQ not confirmed", None),
@@ -62,8 +63,9 @@ def test_moq_literal_controls_without_model(text, expected, monkeypatch):
     assert ("moq" in reply.missing_info) == (expected is None)
 
 
-def test_semantic_minimum_without_literal_moq_keeps_existing_model_path(monkeypatch):
+@pytest.mark.parametrize("text", ["The minimum order is one hundred pieces.", "MOQ one hundred pieces."])
+def test_semantic_minimum_without_literal_moq_keeps_existing_model_path(monkeypatch, text):
     monkeypatch.setattr(parser, "llm_complete_json", lambda *_: {
         "moq": 100, "currency": "USD", "confidence": 0.95})
-    reply = parser.parse_supplier_reply("The minimum order is one hundred pieces.", project_id="case-unit")
+    reply = parser.parse_supplier_reply(text, project_id="case-unit")
     assert reply.moq == 100
