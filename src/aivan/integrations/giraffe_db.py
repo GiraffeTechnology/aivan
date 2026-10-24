@@ -410,6 +410,10 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_INVALID_RESPONSE:{step}") from exc
         if not isinstance(result, dict):
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_INVALID_RESPONSE:{step}")
+        # Legacy provider profiles may omit tenant echo. An explicit echo must
+        # agree with the authenticated caller before its IDs drive more writes.
+        if "tenant_id" in result and result["tenant_id"] != tenant_id:
+            raise RuntimeError(f"GIRAFFE_DB_GRAPH_RESPONSE_TENANT_MISMATCH:{step}")
         return result
 
     def readback(client: httpx.Client, procurement_case_id: str) -> dict:
@@ -599,6 +603,16 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         )
         if not matching_lineage:
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_READBACK_LINEAGE_MISMATCH:{section}")
+        # Do not let matching IDs/lineage mask contradictory tenant evidence.
+        # Unrelated historical rows are not proof for this operation's IDs.
+        if any(
+            isinstance(record, dict)
+            and record.get(identity_field) == expected_identity
+            and "tenant_id" in record
+            and record["tenant_id"] != tenant_id
+            for record in records
+        ):
+            raise RuntimeError(f"GIRAFFE_DB_GRAPH_READBACK_TENANT_MISMATCH:{section}")
 
     return {
         "tenant_id": tenant_id,
