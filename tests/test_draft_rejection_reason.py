@@ -96,7 +96,9 @@ def test_rejection_identity_and_state_fail_before_language_or_mutation(relay_api
     db.commit()
     response = client.post(f"/api/drafts/{draft.draft_id}/reject", headers=headers, json={"reason": "Revise price."})
     assert response.status_code == {"tenant": 404, "auditor": 403, "superseded": 409}[boundary]
-    assert not language["calls"] and db.query(ApprovalRecord).count() == 0
+    assert not language["calls"]
+    assert db.query(ApprovalRecord).filter_by(status="rejected").count() == 0
+    assert {row.status for row in db.query(ApprovalRecord)} <= {"authorization_rejected"}
     assert draft.status == ("superseded" if boundary == "superseded" else "pending_approval")
 
 
