@@ -258,3 +258,29 @@ test('W13 rejected draft has no approve or reject action after refresh',()=>{
   const x=revisionSetup();const row=x.context.draftRow({draft_id:'old-draft',case_id:'same-case',status:'rejected'});
   assert.equal(row.includes('data-action="approve"'),false);assert.equal(row.includes('data-action="reject"'),false);
 });
+
+test('order confirmation preserves current reload but ignores stale navigation and session outcomes', async () => {
+  for (const mode of ['current', 'navigation', 'logout', 'stale-error']) {
+    const response = deferred(), opened = [], notices = [];
+    const state = {session: {}, caseRequestGeneration: 1, selectedCase: {case: {case_id: 'old'}}};
+    const calls = [];
+    const ctx = vm.createContext({state, window: {confirm: () => true},
+      $: () => ({innerHTML: ''}), t: x => x, encodeURIComponent,
+      api: (path, options) => {calls.push({path, options}); return response.promise;},
+      openCase: async id => opened.push(id), toast: (...args) => notices.push(args)});
+    vm.runInContext(fn('invalidateCaseView') + '\n' + fn('confirmOrder'), ctx);
+    const pending = ctx.confirmOrder('old', 'selected-option');
+    assert.equal(calls.length, 1);
+    assert.equal(JSON.parse(calls[0].options.body).selected_option_id, 'selected-option');
+    if (mode !== 'current') {
+      ctx.invalidateCaseView();
+      state.selectedCase = {case: {case_id: 'new'}};
+      if (mode === 'logout') state.session = null;
+    }
+    if (mode === 'stale-error') response.reject(new Error('synthetic failure'));
+    else response.resolve({recovered: false});
+    await pending;
+    assert.deepEqual(opened, mode === 'current' ? ['old'] : []);
+    assert.equal(notices.length, mode === 'current' ? 1 : 0);
+  }
+});
