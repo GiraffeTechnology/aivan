@@ -26,6 +26,10 @@ def test_reply_message_matches_actual_customer_draft_state(
     created = api_client.post("/api/rfq/create-from-event", json=inquiry)
     assert created.status_code == 200, created.text
     case_id = created.json()["project_id"]
+    before_event_ids = {
+        event["event_id"] for event in
+        api_client.get(f"/api/projects/{case_id}/events").json()["events"]
+    }
 
     def unavailable(*_args):
         raise RuntimeError("controlled extraction model unavailable")
@@ -62,7 +66,8 @@ def test_reply_message_matches_actual_customer_draft_state(
             assert "email" not in payload["message"].lower()
             events = api_client.get(f"/api/projects/{case_id}/events").json()["events"]
             quote_events = [event for event in events
-                            if event["event_type"] == "PENDING_EMAIL_DRAFT_CREATED"]
+                            if event["event_type"] == "PENDING_EMAIL_DRAFT_CREATED"
+                            and event["event_id"] not in before_event_ids]
             assert len(quote_events) == 1
             assert "email" not in quote_events[0]["summary"].lower()
     else:
