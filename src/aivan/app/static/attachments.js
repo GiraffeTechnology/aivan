@@ -7,6 +7,20 @@ window.myAivanAttachments = (() => {
   const base = caseId => `/api/workbench/cases/${encodeURIComponent(caseId)}/attachments`;
   const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
 
+  // Reading a local file is not an upload or a persisted business event.
+  async function readInputText(file, maxCharacters) {
+    if (!file || !/\.txt$/i.test(file.name) || !['', 'text/plain'].includes(file.type)
+      || file.size < 1 || file.size > 64 * 1024) throw Error('INVALID_TEXT_FILE');
+    const bytes = await file.arrayBuffer();
+    if (bytes.byteLength !== file.size) throw Error('INVALID_TEXT_FILE');
+    let text;
+    try { text = new TextDecoder('utf-8', {fatal:true}).decode(bytes); }
+    catch { throw Error('INVALID_UTF8'); }
+    if (!text.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) throw Error('INVALID_TEXT_FILE');
+    if (text.length > maxCharacters) throw Error('TEXT_TOO_LONG');
+    return text;
+  }
+
   function contentPath(caseId, item) {
     if (typeof item.attachment_id !== 'string' || !item.attachment_id) throw Error('INVALID_ATTACHMENT');
     const expected = `${base(caseId)}/${encodeURIComponent(item.attachment_id)}/content`;
@@ -119,5 +133,5 @@ window.myAivanAttachments = (() => {
     });
     refresh().catch(() => { if (alive) status.textContent = 'Saved attachments could not be loaded. No empty-history claim is made.'; });
   }
-  return {mount, dispose:() => dispose(), fileBody, contentPath};
+  return {mount, dispose:() => dispose(), fileBody, contentPath, readInputText};
 })();
