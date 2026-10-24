@@ -180,11 +180,37 @@ def approved_render(db: Session, draft: InquiryDraftRecord) -> RenderedDraft:
 
 
 def invalidate_approval(db: Session, draft: InquiryDraftRecord, code: str) -> None:
+    from aivan.api.serializers import draft_type_from_notes
+    from aivan.db.repositories.domain_repo import CaseDomainRepository
+    from aivan.db.repositories.project_repo import ProjectRepository
+    from aivan.domain.roles import normalize_actor_identity
+
     old_approval = draft.approval_id
-    draft.status = "pending_approval"
-    draft.approved_by = ""
-    draft.approved_at = None
-    draft.approval_id = ""
+    observed_status = draft.status
+    if observed_status not in {"pending_approval", "approved", "approved_pending_send", "send_failed"}:
+        return
+    project = ProjectRepository(db).get_for_update(draft.project_id, tenant_id=draft.tenant_id)
+    changed = db.query(InquiryDraftRecord).filter(
+        InquiryDraftRecord.draft_id == draft.draft_id,
+        InquiryDraftRecord.tenant_id == draft.tenant_id,
+        InquiryDraftRecord.status == observed_status,
+        InquiryDraftRecord.approval_id == old_approval,
+    ).update({"status": "pending_approval", "approved_by": "", "approved_at": None,
+              "approval_id": ""}, synchronize_session=False)
+    db.refresh(draft)
+    if changed != 1:
+        return
+    identity = normalize_actor_identity(
+        actor_id="aivan-draft-review", business_role="admin", execution_mode="auto",
+        authorization_basis="commercial_preview_invalidated",
+    )
+    trace_id = draft.source_trace_id or (project.source_trace_id if project else "")
+    if (project is not None and project.status != "order_confirmed"
+            and project.case_state == "approved"
+            and draft_type_from_notes(draft) == "customer_quote_email"):
+        CaseDomainRepository(db).transition_case(
+            project=project, after="awaiting_approval", identity=identity, source_trace_id=trace_id,
+        )
     _audit(db, draft, "DRAFT_APPROVAL_INVALIDATED", {
         "previous_approval_id": old_approval, "reason": code,
-    })
+    }, identity=identity, trace_id=trace_id)

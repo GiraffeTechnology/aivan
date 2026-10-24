@@ -198,6 +198,7 @@ TRANSITIONS: dict[tuple[CaseState, CaseState], Capability] = {
     (CaseState.SUPPLIER_REPLIED, CaseState.AWAITING_APPROVAL): Capability.UPDATE_STRATEGY,
     (CaseState.AWAITING_APPROVAL, CaseState.SUPPLIER_REPLIED): Capability.APPROVE_OUTBOUND,
     (CaseState.AWAITING_APPROVAL, CaseState.APPROVED): Capability.APPROVE_OUTBOUND,
+    (CaseState.APPROVED, CaseState.AWAITING_APPROVAL): Capability.UPDATE_STRATEGY,
     (CaseState.APPROVED, CaseState.QC): Capability.UPDATE_QC,
     (CaseState.QC, CaseState.LOGISTICS): Capability.UPDATE_LOGISTICS,
     (CaseState.LOGISTICS, CaseState.COMPLETED): Capability.COMMIT_LEAD_TIME,

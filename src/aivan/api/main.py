@@ -553,16 +553,8 @@ def _do_approve_draft(
             "delivery_mode": channel_capability.delivery_mode.value,
         },
     )
-    project = ProjectRepository(db).get(
-        draft.project_id, tenant_id=draft.tenant_id
-    )
-    if project is not None and project.case_state == "awaiting_approval":
-        CaseDomainRepository(db).transition_case(
-            project=project,
-            after="approved",
-            identity=identity,
-            source_trace_id=context.trace_id,
-        )
+    from aivan.api.draft_state import advance_case_after_quote_approval
+    advance_case_after_quote_approval(db=db, draft=draft, identity=identity, source_trace_id=context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
         CaseDomainRepository(db).record_audit(
             tenant_id=draft.tenant_id,

@@ -62,7 +62,8 @@ class InboundEventRepository:
             .first()
         )
 
-    def claim(self, idempotency_key: str, *, tenant_id: str) -> tuple[ProcessedInboundEvent, bool]:
+    def claim(self, idempotency_key: str, *, tenant_id: str,
+              source_request_fingerprint: str | None = None) -> tuple[ProcessedInboundEvent, bool]:
         """Insert and commit a unique claim, even after a stale absent SELECT.
 
         The database constraint, not a process-local lock or caller's prior
@@ -72,7 +73,9 @@ class InboundEventRepository:
         claim = ProcessedInboundEvent(
             id=f"pie_{new_id()}", tenant_id=tenant_id,
             idempotency_key=idempotency_key, project_id="",
-            event_type=self.PROCESSING, result_json={},
+            event_type=self.PROCESSING,
+            result_json=({"_saved_attachment_request_sha256": source_request_fingerprint}
+                         if source_request_fingerprint else {}),
         )
         self.db.add(claim)
         try:
