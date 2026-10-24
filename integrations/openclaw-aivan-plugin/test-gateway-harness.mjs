@@ -18,6 +18,10 @@ let lastIdempotencyKey = null;
 let lastHeaders = null;
 let previousIdempotencyKey = null;
 let approvalPayload = {status: "approved"};
+let requirePreviewProof = false;
+let lastApprovalBody = null;
+let approvalRequestCount = 0;
+const reviewedPreviewId = "render_" + "a".repeat(32);
 let redirectStatus = 0;
 let redirectSourceCount = 0;
 const redirectedRequests = [];
@@ -58,7 +62,16 @@ const server = createServer((request, response) => {
     if (request.url?.startsWith("/api/drafts?") || request.url === "/api/drafts") {
       return json(200, { drafts: [{ draft_id: "draft-1", project_id: "project-1", channel: "weixin", target_role: "supplier", message_text: "Please quote", created_at: "2026-08-03T00:00:00Z" }] });
     }
-    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") return json(200, approvalPayload);
+    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") {
+      approvalRequestCount += 1;
+      lastApprovalBody = JSON.parse(body || "{}");
+      if (requirePreviewProof && lastApprovalBody.preview_id !== reviewedPreviewId) {
+        return json(lastApprovalBody.preview_id ? 404 : 409, {
+          detail: {error: lastApprovalBody.preview_id ? "DRAFT_PREVIEW_NOT_FOUND" : "DRAFT_LOCALIZED_PREVIEW_REQUIRED"},
+        });
+      }
+      return json(200, approvalPayload);
+    }
     if (request.url === "/api/drafts/draft-1/reject" && request.method === "POST") return json(200, { status: "rejected" });
     return json(404, { detail: "not found" });
   });
@@ -157,6 +170,26 @@ for (const payload of [
 }
 approvalPayload = {status: "approved"};
 assert("rejectDraft tool callable", (await invokeTool("aivan.rejectDraft", { draft_id: "draft-1", reason: "operator decision" })).details.rejected === true);
+
+assert("approval tool exposes the reviewed preview reference", tools.get("aivan.approveDraft").parameters.properties.preview_id?.type === "string");
+requirePreviewProof = true;
+approvalPayload = {status: "approved_pending_send", sent: false};
+try {
+  approvalRequestCount = 0;
+  const missing = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert("missing localized review proof is rejected without retry", missing.approved === false && approvalRequestCount === 1);
+  approvalRequestCount = 0;
+  const invalid = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1", preview_id: "render_" + "b".repeat(32)})).details;
+  assert("unknown review proof remains rejected by Core", invalid.approved === false && approvalRequestCount === 1);
+  assert("unknown review proof is not silently replaced", lastApprovalBody.preview_id === "render_" + "b".repeat(32));
+  approvalRequestCount = 0;
+  const reviewed = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1", preview_id: reviewedPreviewId})).details;
+  assert("reviewed localized proof reaches the existing approval endpoint", reviewed.approved === true && lastApprovalBody.preview_id === reviewedPreviewId);
+  assert("review proof transport neither retries nor claims delivery", approvalRequestCount === 1 && reviewed.status === "approved_pending_send" && reviewed.sent === false);
+} finally {
+  requirePreviewProof = false;
+  approvalPayload = {status: "approved"};
+}
 
 // Credential-bearing Core requests must never follow an HTTP redirect to a
 // different origin or replay a human-authorized action at its destination.
