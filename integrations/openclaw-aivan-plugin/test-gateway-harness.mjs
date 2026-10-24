@@ -18,7 +18,19 @@ let lastIdempotencyKey = null;
 let lastHeaders = null;
 let previousIdempotencyKey = null;
 let approvalPayload = {status: "approved"};
+let redirectStatus = 0;
+let redirectSourceCount = 0;
+const redirectedRequests = [];
 const reply = "RFQ accepted for supplier sourcing.";
+
+const redirectDestination = createServer((request, response) => {
+  redirectedRequests.push({ method: request.method, headers: request.headers });
+  request.resume();
+  response.writeHead(200, { "Content-Type": "application/json" });
+  response.end(JSON.stringify({status: "approved", output: "Unexpected destination"}));
+});
+await new Promise((resolve) => redirectDestination.listen(0, "127.0.0.1", resolve));
+const redirectUrl = `http://127.0.0.1:${redirectDestination.address().port}/unexpected`;
 
 const server = createServer((request, response) => {
   let body = "";
@@ -28,6 +40,11 @@ const server = createServer((request, response) => {
       response.writeHead(status, { "Content-Type": "application/json" });
       response.end(JSON.stringify(data));
     };
+    if (redirectStatus && (request.url === "/invoke" || request.url === "/api/drafts/draft-1/approve")) {
+      redirectSourceCount += 1;
+      response.writeHead(redirectStatus, {Location: redirectUrl});
+      return response.end();
+    }
     if (request.url === "/api/health") return json(200, { status: "ok", version: "0.3.0" });
     if (request.url === "/invoke" && request.method === "POST") {
       invokeCount += 1;
@@ -141,6 +158,37 @@ for (const payload of [
 approvalPayload = {status: "approved"};
 assert("rejectDraft tool callable", (await invokeTool("aivan.rejectDraft", { draft_id: "draft-1", reason: "operator decision" })).details.rejected === true);
 
+// Credential-bearing Core requests must never follow an HTTP redirect to a
+// different origin or replay a human-authorized action at its destination.
+const priorApiKey = process.env.AIVAN_API_KEY;
+const priorTenant = process.env.AIVAN_TENANT_ID;
+process.env.AIVAN_API_KEY = "synthetic-redirect-test-key";
+process.env.AIVAN_TENANT_ID = "synthetic-redirect-test-tenant";
+try {
+  for (const status of [301, 302, 303, 307, 308]) {
+    redirectStatus = status;
+    redirectSourceCount = 0;
+    const result = (await invokeTool("aivan.forwardEvent", {
+      channel: "weixin", conversation_id: "redirect-check", sender_id: "buyer-redirect",
+      message_text: "RFQ", message_id: `redirect-${status}`,
+    })).details;
+    assert(`HTTP ${status} is not accepted as a Core result`, result.accepted === false);
+    assert(`HTTP ${status} does not retry the redirected request`, redirectSourceCount === 1);
+    assert(`HTTP ${status} sends no identity or body to the destination`, redirectedRequests.length === 0);
+  }
+  redirectStatus = 307;
+  redirectSourceCount = 0;
+  const result = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert("redirected approval is not reported as approved or sent", result.approved === false && result.sent === false);
+  assert("redirected approval is attempted once without destination action", redirectSourceCount === 1 && redirectedRequests.length === 0);
+} finally {
+  redirectStatus = 0;
+  if (priorApiKey === undefined) delete process.env.AIVAN_API_KEY;
+  else process.env.AIVAN_API_KEY = priorApiKey;
+  if (priorTenant === undefined) delete process.env.AIVAN_TENANT_ID;
+  else process.env.AIVAN_TENANT_ID = priorTenant;
+}
+
 mode = "error";
 invokeCount = 0;
 const mapped = (await invokeTool("aivan.forwardEvent", { channel: "weixin", conversation_id: "conversation-2", sender_id: "buyer-2", message_text: "RFQ", message_id: "message-2" })).details;
@@ -179,6 +227,7 @@ try {
 }
 
 await new Promise((resolve) => server.close(resolve));
+await new Promise((resolve) => redirectDestination.close(resolve));
 console.log(`GATEWAY STAGE3 TEST: ${failed === 0 ? "PASS" : "FAIL"} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);
 
