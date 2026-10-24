@@ -251,6 +251,7 @@ async function safeFetch(
     try {
       const res = await fetch(url, {
         ...options,
+        redirect: "manual",
         signal: controller.signal,
         headers: { ...buildHeaders(policy), ...(options?.headers ?? {}) },
       });
@@ -475,29 +476,49 @@ type DraftItem = {
 
 /**
  * aivan.approveDraft — Approve a pending draft for sending.
- * AIVAN will then send the message via OpenClaw. This plugin does NOT
- * send the message itself.
+ * Core reports the actual approval and delivery state; IM remains manual.
+ * This plugin does not send the message itself.
  */
-export async function approveDraft(draftId: string): Promise<{
+export async function approveDraft(draftId: string, previewId?: string): Promise<{
   approved: boolean;
   draft_id: string;
+  status: string;
+  sent: boolean;
   error?: string;
 }> {
   const result = await safeFetch(
     `/api/drafts/${encodeURIComponent(draftId)}/approve`,
     {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ preview_id: previewId }),
     }
   );
   if (!result.ok) {
     return {
       approved: false,
       draft_id: draftId,
+      status: "unknown",
+      sent: false,
       error: result.error?.message ?? "Approval failed",
     };
   }
-  return { approved: true, draft_id: draftId };
+  const data = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+    ? result.data as Record<string, unknown> : {};
+  const knownStatuses = new Set([
+    "pending_approval", "approved", "approved_pending_send", "sent", "relayed",
+    "send_failed", "delivery_unconfirmed", "rejected", "superseded", "error",
+  ]);
+  const status = typeof data.status === "string" && knownStatuses.has(data.status)
+    ? data.status : "unknown";
+  const approved = ["approved", "approved_pending_send", "sent", "relayed",
+    "send_failed", "delivery_unconfirmed"].includes(status);
+  const error = typeof data.error === "string" && data.error.trim()
+    ? data.error : approved ? undefined : "Approval was not confirmed by AIVAN.";
+  return {
+    approved, draft_id: draftId, status,
+    sent: approved && status === "sent" && (data.sent === true || data.sent === undefined),
+    ...(error ? { error } : {}),
+  };
 }
 
 /**
@@ -556,7 +577,7 @@ function registerAivanTools(api: any): number {
     }, undefined],
     [{ name: "aivan.openDashboard", description: "Return the local AIVAN dashboard URL without opening a browser.", parameters: Type.Object({}, { additionalProperties: false }), async execute() { return toolResult(openDashboard()); } }, undefined],
     [{ name: "aivan.getPendingDrafts", description: "List outbound AIVAN drafts still awaiting human approval.", parameters: Type.Object({ project_id: Type.Optional(Type.String()) }, { additionalProperties: false }), async execute(_id: string, params: { project_id?: string }) { return toolResult(await getPendingDrafts(params.project_id)); } }, undefined],
-    [{ name: "aivan.approveDraft", description: "Submit an explicit human approval decision to AIVAN Core; the plugin cannot send directly or bypass authorization.", parameters: Type.Object({ draft_id: Type.String() }, { additionalProperties: false }), async execute(_id: string, params: { draft_id: string }) { return toolResult(await approveDraft(params.draft_id)); } }, { optional: true }],
+    [{ name: "aivan.approveDraft", description: "Submit an explicit human approval decision to AIVAN Core, carrying an existing reviewed preview reference when required; the plugin cannot create review proof or bypass authorization.", parameters: Type.Object({ draft_id: Type.String(), preview_id: Type.Optional(Type.String({ pattern: "^render_[a-f0-9]{32}$" })) }, { additionalProperties: false }), async execute(_id: string, params: { draft_id: string; preview_id?: string }) { return toolResult(await approveDraft(params.draft_id, params.preview_id)); } }, { optional: true }],
     [{ name: "aivan.rejectDraft", description: "Reject a pending AIVAN draft with an optional operator reason.", parameters: Type.Object({ draft_id: Type.String(), reason: Type.Optional(Type.String()) }, { additionalProperties: false }), async execute(_id: string, params: { draft_id: string; reason?: string }) { return toolResult(await rejectDraft(params.draft_id, params.reason)); } }, { optional: true }],
   ];
   for (const [descriptor, options] of registrations) {
