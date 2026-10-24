@@ -1,8 +1,15 @@
 """Actual RFQ/approval APIs with explicit SQLite and synthetic dependencies."""
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import event, update
+
 from aivan.api import workbench_routes
+from aivan.db.models.domain import AuditLogRecord
+from aivan.db.models.inquiry import InquiryDraftRecord
+from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.project_repo import ProjectRepository
+from aivan.execution.draft_preview import invalidate_approval
 from aivan.openclaw.client import OpenClawClient
 from aivan.openclaw.contracts import OpenClawSendResponse
 from tests.test_revised_quote_approval import _revised_quote
@@ -102,3 +109,67 @@ def test_supplier_inquiry_approval_does_not_approve_customer_quote(api_client, m
     assert len(sends) == 1
     assert api_client.get(f"/api/drafts/{revised['drafts_created'][0]}").json()["status"] == "pending_approval"
     assert api_client.get(f"/api/projects/{case_id}").json()["case_state"] == "awaiting_approval"
+
+
+def _invalidation_fixture(db, *, draft_type="customer_quote_email", status="approved"):
+    project = ProjectRepository(db).create("approval-unit", "buyer-unit", tenant_id="tenant-a")
+    project.case_state = "approved"
+    draft = DraftRepository(db).create(project.project_id, {"tenant_id": "tenant-a",
+        "message_text": "Please review the quotation.", "status": status,
+        "approval_id": "observed-approval", "approved_by": "approver-unit",
+        "notes": "draft_type=" + draft_type})
+    db.commit()
+    return project, draft
+
+
+@pytest.mark.parametrize("status", ["sent", "relayed", "delivery_unconfirmed", "rejected", "superseded"])
+def test_invalidating_review_cannot_resurrect_terminal_or_unknown_delivery(db_session, status):
+    project, draft = _invalidation_fixture(db_session, status=status)
+    invalidate_approval(db_session, draft, "CONTROLLED_PREVIEW_CHANGE")
+    assert draft.status == status
+    assert draft.approval_id == "observed-approval"
+    assert project.case_state == "approved"
+    assert db_session.query(AuditLogRecord).filter_by(event_type="DRAFT_APPROVAL_INVALIDATED").count() == 0
+
+
+def test_invalidating_supplier_review_does_not_revoke_customer_case_approval(db_session):
+    project, draft = _invalidation_fixture(db_session, draft_type="supplier_inquiry_email")
+    invalidate_approval(db_session, draft, "CONTROLLED_PREVIEW_CHANGE")
+    assert draft.status == "pending_approval"
+    assert project.case_state == "approved"
+
+
+def test_invalidating_review_does_not_rewrite_already_committed_order(db_session):
+    project, draft = _invalidation_fixture(db_session)
+    project.status = "order_confirmed"
+    project.requirement_json = {"order_confirmation": {"status": "confirmed", "purchase_order_id": "unit-order"}}
+    db_session.commit()
+    invalidate_approval(db_session, draft, "CONTROLLED_PREVIEW_CHANGE")
+    assert draft.status == "pending_approval"
+    assert project.status == "order_confirmed"
+    assert project.case_state == "approved"
+    assert project.requirement_json["order_confirmation"]["purchase_order_id"] == "unit-order"
+
+
+@pytest.mark.parametrize("interleave", ["new-approval", "delivery-claim"])
+def test_stale_invalidation_cannot_overwrite_new_approval_or_delivery_claim(db_session, interleave):
+    project, draft = _invalidation_fixture(db_session)
+    applied = []
+
+    def before_invalidation(connection, cursor, statement, parameters, context, many):
+        if (statement.lstrip().upper().startswith("UPDATE INQUIRY_DRAFTS") and not applied):
+            applied.append(True)
+            values = {"approval_id": "newer-approval"} if interleave == "new-approval" else {"status": "delivery_unconfirmed"}
+            connection.execute(update(InquiryDraftRecord).where(
+                InquiryDraftRecord.draft_id == draft.draft_id).values(**values))
+
+    event.listen(db_session.bind, "before_cursor_execute", before_invalidation)
+    try:
+        invalidate_approval(db_session, draft, "CONTROLLED_PREVIEW_CHANGE")
+        assert applied == [True]
+        assert draft.status == ("approved" if interleave == "new-approval" else "delivery_unconfirmed")
+        assert draft.approval_id == ("newer-approval" if interleave == "new-approval" else "observed-approval")
+        assert project.case_state == "approved"
+        assert db_session.query(AuditLogRecord).filter_by(event_type="DRAFT_APPROVAL_INVALIDATED").count() == 0
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", before_invalidation)
