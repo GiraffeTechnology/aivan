@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import os
 from aivan.schemas.requirement import BuyerRequirement
 from aivan.schemas.response import SupplierReply
@@ -25,7 +26,7 @@ def generate_buyer_options(
     current_by_supplier: dict[str, SupplierReply] = {}
     anonymous_replies: list[SupplierReply] = []
     for reply in supplier_replies:
-        if reply.unit_price is None:
+        if reply.unit_price is None or not math.isfinite(reply.unit_price):
             continue
         business_identity = (reply.supplier_id or reply.candidate_id).strip()
         if business_identity:
@@ -107,18 +108,19 @@ def generate_buyer_options(
     def make_option(reply: SupplierReply, lt: LeadTimeEstimate | None, option_type: str, option_label: str, reasoning: str) -> BuyerOption:
         sup_display = "Supplier (confidential)" if hide_identity else (reply.supplier_id or reply.candidate_id or "Unknown")
 
+        quantity = requirement.quantity
         quote_data = calculate_buyer_quote(
             unit_price=reply.unit_price,
-            quantity=requirement.quantity or 1000,
+            quantity=quantity,
             moq=reply.moq or 0,
             margin_rate=margin_rate,
             currency=reply.currency,
-        )
+        ) if quantity is not None and quantity > 0 else None
         quote = QuoteCalculation(
             supplier_id=reply.supplier_id,
             candidate_id=reply.candidate_id,
             unit_price=quote_data["unit_price"] if not hide_price else 0.0,
-            quantity=requirement.quantity or 1000,
+            quantity=quantity,
             moq=reply.moq or 0,
             margin_rate=margin_rate,
             currency=reply.currency,
@@ -129,9 +131,13 @@ def generate_buyer_options(
             effective_margin_rate=quote_data["effective_margin_rate"],
             calculation_trace=quote_data["calculation_trace"] if not hide_price else ["Supplier cost confidential"],
             warnings=quote_data["warnings"],
-        )
+        ) if quote_data is not None else None
 
         warnings = []
+        if quote is None:
+            warnings.append(
+                "Order quantity is not confirmed; no buyer quote was calculated."
+            )
         if not price_basis_comparable:
             warnings.append(
                 "Quote currencies or unit bases are not directly comparable; "
@@ -170,7 +176,7 @@ def generate_buyer_options(
         key=lambda x: (x[1].expected_days, x[0].supplier_id or x[0].candidate_id),
     )
     by_price = (
-        sorted(scored, key=lambda x: (x[0].unit_price or 999, -x[3]))
+        sorted(scored, key=lambda x: (x[0].unit_price, -x[3]))
         if price_basis_comparable
         else []
     )
@@ -193,13 +199,13 @@ def generate_buyer_options(
     if by_price:
         r, lt, _, _, _ = by_price[0]
         if reply_key(r) not in added:
-            reason = f"Lowest cost: {r.currency} {r.unit_price:.2f}/pc"
+            reason = f"Lowest cost: {r.currency} {r.unit_price}/pc"
             opt = make_option(r, lt, "lowest_cost", "Option B — Lowest Cost", reason)
             result_options.append(opt)
             added.add(reply_key(r))
         elif len(by_price) > 1:
             r, lt, _, _, _ = by_price[1]
-            reason = f"Next comparable quote: {r.currency} {r.unit_price:.2f}/pc"
+            reason = f"Next comparable quote: {r.currency} {r.unit_price}/pc"
             opt = make_option(r, lt, "lowest_cost", "Option B — Best Value", reason)
             result_options.append(opt)
             added.add(reply_key(r))
