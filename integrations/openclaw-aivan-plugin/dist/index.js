@@ -342,10 +342,10 @@ export async function getPendingDrafts(projectId) {
  * Core reports the actual approval and delivery state; IM remains manual.
  * This plugin does not send the message itself.
  */
-export async function approveDraft(draftId) {
+export async function approveDraft(draftId, previewId) {
     const result = await safeFetch(`/api/drafts/${encodeURIComponent(draftId)}/approve`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ preview_id: previewId }),
     });
     if (!result.ok) {
         return {
@@ -420,7 +420,7 @@ function registerAivanTools(api) {
             }, undefined],
         [{ name: "aivan.openDashboard", description: "Return the local AIVAN dashboard URL without opening a browser.", parameters: Type.Object({}, { additionalProperties: false }), async execute() { return toolResult(openDashboard()); } }, undefined],
         [{ name: "aivan.getPendingDrafts", description: "List outbound AIVAN drafts still awaiting human approval.", parameters: Type.Object({ project_id: Type.Optional(Type.String()) }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await getPendingDrafts(params.project_id)); } }, undefined],
-        [{ name: "aivan.approveDraft", description: "Submit an explicit human approval decision to AIVAN Core; the plugin cannot send directly or bypass authorization.", parameters: Type.Object({ draft_id: Type.String() }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await approveDraft(params.draft_id)); } }, { optional: true }],
+        [{ name: "aivan.approveDraft", description: "Submit an explicit human approval decision to AIVAN Core, carrying an existing reviewed preview reference when required; the plugin cannot create review proof or bypass authorization.", parameters: Type.Object({ draft_id: Type.String(), preview_id: Type.Optional(Type.String({ pattern: "^render_[a-f0-9]{32}$" })) }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await approveDraft(params.draft_id, params.preview_id)); } }, { optional: true }],
         [{ name: "aivan.rejectDraft", description: "Reject a pending AIVAN draft with an optional operator reason.", parameters: Type.Object({ draft_id: Type.String(), reason: Type.Optional(Type.String()) }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await rejectDraft(params.draft_id, params.reason)); } }, { optional: true }],
     ];
     for (const [descriptor, options] of registrations) {
