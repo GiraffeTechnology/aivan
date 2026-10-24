@@ -665,15 +665,19 @@ async function submitCaseRevision(event) {
 
 async function confirmOrder(caseId, optionId) {
   if (!window.confirm(t('确认将当前选定报价写入订单？此操作需要人工授权。'))) return;
+  const session = state.session;
+  const generation = state.caseRequestGeneration;
+  const isCurrent = () => session === state.session && generation === state.caseRequestGeneration;
   try {
     const payload = await api(`/api/workbench/cases/${encodeURIComponent(caseId)}/order-confirmation`, {
       method: 'POST',
       body: JSON.stringify({ selected_option_id: optionId }),
     });
+    if (!isCurrent()) return;
     toast(payload.recovered ? t('订单已恢复并通过数据库回读') : t('订单已确认并通过数据库回读'), 'success');
     await openCase(caseId);
   } catch (error) {
-    toast(`${t('订单确认失败：')}${error.message}`, 'error');
+    if (isCurrent()) toast(`${t('订单确认失败：')}${error.message}`, 'error');
   }
 }
 
