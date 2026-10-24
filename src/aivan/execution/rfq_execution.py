@@ -895,7 +895,11 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         project_id=project.project_id,
         event_type="supplier_reply",
         action="buyer_options_ready" if buyer_options else "supplier_reply_parsed",
-        message=f"Supplier reply parsed. {len(buyer_options)} buyer options generated. Customer email draft is pending approval.",
+        message=(
+            f"Supplier reply parsed. {len(buyer_options)} buyer options generated. "
+            + ("Customer quote draft is pending approval." if drafts_created
+               else "No customer quote draft was created.")
+        ),
         strategy=strategy,
         requirement=requirement_payload,
         giraffe_context=GiraffeContext(),
@@ -942,7 +946,7 @@ def _create_customer_quote_email_draft(
     ExecutionEventRepository(db).append(
         project.project_id,
         "PENDING_EMAIL_DRAFT_CREATED",
-        "Customer quote email draft created from supplier reply",
+        "Customer quote draft created from supplier reply",
         payload={"draft_id": draft.draft_id, "draft_type": "customer_quote_email"},
         actor="buyer_option_agent",
     )

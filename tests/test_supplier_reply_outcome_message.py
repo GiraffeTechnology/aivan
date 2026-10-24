@@ -60,6 +60,11 @@ def test_reply_message_matches_actual_customer_draft_state(
         assert "pending approval" in payload["message"].lower()
         if buyer_channel != "email":
             assert "email" not in payload["message"].lower()
+            events = api_client.get(f"/api/projects/{case_id}/events").json()["events"]
+            quote_events = [event for event in events
+                            if event["event_type"] == "PENDING_EMAIL_DRAFT_CREATED"]
+            assert len(quote_events) == 1
+            assert "email" not in quote_events[0]["summary"].lower()
     else:
         assert payload["action"] == "supplier_reply_parsed"
         assert payload["drafts_created"] == []
