@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from aivan.agents.supplier_material_questions import (
+    MATERIAL_CONFIRMATION_QUESTIONS,
+    with_material_confirmation_questions,
+)
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.execution.channel_policy import USER_CONTROL_CHANNELS, normalize_channel
 from aivan.llm.gateway import llm_complete_json
@@ -123,6 +127,7 @@ def draft_supplier_email(
         "requirement": requirement.model_dump(),
         "strategy": strategy.model_dump(),
         "gltg": gltg.model_dump(),
+        "required_supplier_confirmation_questions": list(MATERIAL_CONFIRMATION_QUESTIONS),
     }
     raw = {}
     if env_bool("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED"):
@@ -135,8 +140,8 @@ def draft_supplier_email(
             )
         except Exception:
             raw = {}
-    if raw.get("message_text"):
-        return raw["message_text"]
+    if isinstance(raw.get("message_text"), str) and raw["message_text"].strip():
+        return with_material_confirmation_questions(raw["message_text"])
     subject = (
         f"RFQ: {requirement.quantity or 'TBD'} "
         f"{requirement.product_type or requirement.category or 'Products'} "
@@ -175,7 +180,7 @@ def draft_supplier_email(
         "Best regards,",
         "AIVAN",
     ]
-    return "\n".join(lines)
+    return with_material_confirmation_questions("\n".join(lines))
 
 
 def _should_use_chinese_user_message(requirement: BuyerRequirement) -> bool:

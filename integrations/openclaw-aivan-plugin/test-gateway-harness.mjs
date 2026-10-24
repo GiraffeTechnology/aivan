@@ -17,6 +17,7 @@ let lastEvent = null;
 let lastIdempotencyKey = null;
 let lastHeaders = null;
 let previousIdempotencyKey = null;
+let approvalPayload = {status: "approved"};
 const reply = "RFQ accepted for supplier sourcing.";
 
 const server = createServer((request, response) => {
@@ -40,7 +41,7 @@ const server = createServer((request, response) => {
     if (request.url?.startsWith("/api/drafts?") || request.url === "/api/drafts") {
       return json(200, { drafts: [{ draft_id: "draft-1", project_id: "project-1", channel: "weixin", target_role: "supplier", message_text: "Please quote", created_at: "2026-08-03T00:00:00Z" }] });
     }
-    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") return json(200, { status: "approved" });
+    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") return json(200, approvalPayload);
     if (request.url === "/api/drafts/draft-1/reject" && request.method === "POST") return json(200, { status: "rejected" });
     return json(404, { detail: "not found" });
   });
@@ -113,6 +114,31 @@ assert("tool parameters cannot self-assert an internal sales role", lastHeaders[
 assert("openDashboard tool callable", (await invokeTool("aivan.openDashboard")).details.url.endsWith("/app"));
 assert("getPendingDrafts tool callable", (await invokeTool("aivan.getPendingDrafts", { project_id: "project-1" })).details.drafts.length === 1);
 assert("approveDraft tool callable", (await invokeTool("aivan.approveDraft", { draft_id: "draft-1" })).details.approved === true);
+for (const payload of [
+  {status: "pending_approval", sent: false, error: "DRAFT_APPROVAL_PREVIEW_CHANGED"},
+  {status: "pending_approval", sent: true},
+  {status: "error", error: "Approval is unavailable"},
+  {},
+]) {
+  approvalPayload = payload;
+  const result = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert(`HTTP 200 ${payload.status ?? "missing status"} is not approval`, result.approved === false);
+  assert(`HTTP 200 ${payload.status ?? "missing status"} is not delivery`, result.sent !== true);
+  assert(`HTTP 200 ${payload.status ?? "missing status"} explains unconfirmed approval`, typeof result.error === "string" && result.error.length > 0);
+}
+for (const payload of [
+  {status: "approved_pending_send", sent: false},
+  {status: "sent", sent: true},
+  {status: "send_failed", sent: false, error: "Outbound transport failed"},
+  {status: "delivery_unconfirmed", sent: false, error: "Outbound delivery is unconfirmed"},
+]) {
+  approvalPayload = payload;
+  const result = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert(`${payload.status} retains the actual approval decision`, result.approved === true);
+  assert(`${payload.status} preserves actual delivery state`, result.status === payload.status && result.sent === payload.sent);
+  if (payload.error) assert(`${payload.status} preserves the operator recovery reason`, result.error === payload.error);
+}
+approvalPayload = {status: "approved"};
 assert("rejectDraft tool callable", (await invokeTool("aivan.rejectDraft", { draft_id: "draft-1", reason: "operator decision" })).details.rejected === true);
 
 mode = "error";

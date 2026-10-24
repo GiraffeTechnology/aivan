@@ -138,21 +138,32 @@ class DraftRepository:
         return d
 
     def supersede_customer_quote_drafts(self, project_id: str) -> list[str]:
-        """Mark all pending_approval customer_quote_email drafts for the project as superseded.
+        """Supersede obsolete customer quotes that have not claimed delivery.
 
         Called before creating a new customer quote draft so that stale drafts cannot
         be approved or sent after a newer supplier reply regenerates buyer options.
         Returns the list of draft_ids that were superseded.
         """
+        # Old approval cannot authorize revised commercial terms. Preserve sent,
+        # relayed and uncertain/in-flight delivery history, never turn it retryable.
+        unsent_statuses = {"pending_approval", "approved", "approved_pending_send", "send_failed"}
         stale = self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.project_id == project_id,
-            InquiryDraftRecord.status == "pending_approval",
+            InquiryDraftRecord.status.in_(unsent_statuses),
             InquiryDraftRecord.notes.contains("draft_type=customer_quote_email"),
         ).all()
         superseded_ids = []
         for d in stale:
-            d.status = "superseded"
-            superseded_ids.append(d.draft_id)
+            # A delivery claim can race this snapshot. Compare-and-set prevents
+            # overwriting a committed delivery_unconfirmed or terminal outcome.
+            changed = self.db.query(InquiryDraftRecord).filter(
+                InquiryDraftRecord.draft_id == d.draft_id,
+                InquiryDraftRecord.tenant_id == d.tenant_id,
+                InquiryDraftRecord.status == d.status,
+            ).update({"status": "superseded"}, synchronize_session=False)
+            self.db.refresh(d)
+            if changed:
+                superseded_ids.append(d.draft_id)
         if superseded_ids:
             self.db.flush()
         return superseded_ids
