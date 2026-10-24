@@ -338,8 +338,8 @@ export async function getPendingDrafts(projectId) {
 }
 /**
  * aivan.approveDraft — Approve a pending draft for sending.
- * AIVAN will then send the message via OpenClaw. This plugin does NOT
- * send the message itself.
+ * Core reports the actual approval and delivery state; IM remains manual.
+ * This plugin does not send the message itself.
  */
 export async function approveDraft(draftId) {
     const result = await safeFetch(`/api/drafts/${encodeURIComponent(draftId)}/approve`, {
@@ -350,10 +350,28 @@ export async function approveDraft(draftId) {
         return {
             approved: false,
             draft_id: draftId,
+            status: "unknown",
+            sent: false,
             error: result.error?.message ?? "Approval failed",
         };
     }
-    return { approved: true, draft_id: draftId };
+    const data = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+        ? result.data : {};
+    const knownStatuses = new Set([
+        "pending_approval", "approved", "approved_pending_send", "sent", "relayed",
+        "send_failed", "delivery_unconfirmed", "rejected", "superseded", "error",
+    ]);
+    const status = typeof data.status === "string" && knownStatuses.has(data.status)
+        ? data.status : "unknown";
+    const approved = ["approved", "approved_pending_send", "sent", "relayed",
+        "send_failed", "delivery_unconfirmed"].includes(status);
+    const error = typeof data.error === "string" && data.error.trim()
+        ? data.error : approved ? undefined : "Approval was not confirmed by AIVAN.";
+    return {
+        approved, draft_id: draftId, status,
+        sent: approved && status === "sent" && (data.sent === true || data.sent === undefined),
+        ...(error ? { error } : {}),
+    };
 }
 /**
  * aivan.rejectDraft — Reject and discard a pending draft.
