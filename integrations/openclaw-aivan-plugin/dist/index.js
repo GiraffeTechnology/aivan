@@ -179,6 +179,7 @@ async function safeFetch(path, options, policy = {}) {
         try {
             const res = await fetch(url, {
                 ...options,
+                redirect: "manual",
                 signal: controller.signal,
                 headers: { ...buildHeaders(policy), ...(options?.headers ?? {}) },
             });
