@@ -1,50 +1,24 @@
 from __future__ import annotations
+import re
 from aivan.schemas.response import SupplierReply
+from aivan.agents.supplier_material_reply import parse_material_declarations
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import SUPPLIER_RESPONSE_PARSING_SYSTEM
 from aivan.utils.time_utils import utcnow_iso
 
-def parse_supplier_reply(
-    raw_text: str,
-    project_id: str,
-    supplier_id: str = "",
-    candidate_id: str = "",
-    channel: str = "",
-) -> SupplierReply:
-    """Parse a supplier reply message using LLM with deterministic fallback."""
-    import re
+def _declared_lead_time_values(clauses: list[str]) -> set[float]:
+    """Read the existing literal day clauses, excluding unrelated durations."""
+    # These explicitly labelled material fields have their own source-backed
+    # meaning; neither a substage nor a time delta is the total supplier lead time.
+    lead_clauses = [clause for clause in clauses if re.search(
+        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)
+        and not re.search(r'^\s*(?:raw\s+material\s+lead\s*time|substitute\s+material\s+lead\s*time\s+effect)\b',
+                          clause, re.IGNORECASE)]
+    return {float(value) for clause in lead_clauses for value in re.findall(
+        r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
 
-    user_prompt = f"""Supplier message:
-{raw_text}
-
-Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_time_days, material_availability, qc_commitment, logistics_note, incoterms, payment_terms, risks (list), missing_info (list), confidence."""
-
-    try:
-        result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
-        if result.get("confidence", 0) > 0.4:
-            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id")}
-            # An omitted currency is missing evidence, not an implicit USD quote.
-            safe_data.setdefault("currency", "")
-            if not safe_data["currency"]:
-                missing = list(safe_data.get("missing_info") or [])
-                if "currency" not in missing:
-                    missing.append("currency")
-                safe_data["missing_info"] = missing
-            return SupplierReply(
-                project_id=project_id,
-                supplier_id=supplier_id,
-                candidate_id=candidate_id,
-                raw_text=raw_text,
-                channel=channel,
-                received_at=utcnow_iso(),
-                **safe_data,
-            )
-    except Exception:
-        pass
-
-    text_lower = raw_text.lower()
-    # Bind fallback facts to their business clause, not unrelated freight,
-    # payment or offer-validity facts elsewhere in the same message.
+def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[str], bool]:
+    """Read literal unit-price terms without borrowing ancillary cost currencies."""
     clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
     currency_codes = (
         "USD|EUR|GBP|CNY|JPY|HKD|CAD|AUD|CHF|NZD|SGD|KRW|INR|BRL|MXN|ZAR|"
@@ -63,16 +37,94 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
     price_clause = next(iter(named_prices or price_clauses), "")
     price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
-    unit_price = float(price_match.group(1)) if price_match else None
-    explicit_currencies = {
+    prices = {float(match.group(1)) for match in re.finditer(price_pattern, price_clause, re.IGNORECASE)}
+    if price_match:
+        # Only a range adjacent to the quoted amount is price evidence; a
+        # subsequent order-quantity range must not become a second price.
+        price_range = re.match(
+            rf'{amount}\s*(?:\b(?:{currency_codes})\b\s*)?'
+            rf'(?:or\b|to\b|[-–—])\s*(?:\b(?:{currency_codes})\b\s*)?{amount}',
+            price_clause[price_match.start(1):], re.IGNORECASE,
+        )
+        if price_range:
+            prices.update(float(value) for value in price_range.groups())
+    ambiguous_price = len(prices) > 1
+    unit_price = next(iter(prices)) if len(prices) == 1 else None
+    currencies = {
         code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
     }
+    return clauses, unit_price, currencies, ambiguous_price
+
+def parse_supplier_reply(
+    raw_text: str,
+    project_id: str,
+    supplier_id: str = "",
+    candidate_id: str = "",
+    channel: str = "",
+) -> SupplierReply:
+    """Parse a supplier reply message using LLM with deterministic fallback."""
+    clauses, unit_price, explicit_currencies, ambiguous_price = _quote_price_evidence(raw_text)
+    lead_values = _declared_lead_time_values(clauses)
+
+    user_prompt = f"""Supplier message:
+{raw_text}
+
+Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_time_days, material_availability, qc_commitment, logistics_note, incoterms, payment_terms, risks (list), missing_info (list), confidence."""
+
+    try:
+        result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
+        if result.get("confidence", 0) > 0.4:
+            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id", "material_declarations")}
+            if unit_price is not None or ambiguous_price:
+                # Literal quotation evidence takes precedence over extraction,
+                # including zero and fractional prices; this is not repricing.
+                safe_data["unit_price"] = unit_price
+                safe_data["missing_info"] = [
+                    item for item in (safe_data.get("missing_info") or []) if item != "unit_price"
+                ]
+                if ambiguous_price:
+                    safe_data["missing_info"].append("unit_price")
+            if lead_values:
+                # Confidence cannot change a supplier's literal declaration or
+                # choose between explicit alternatives. This is not GLTG output.
+                safe_data["lead_time_days"] = next(iter(lead_values)) if len(lead_values) == 1 else None
+                missing = list(safe_data.get("missing_info") or [])
+                if safe_data["lead_time_days"] is not None:
+                    missing = [item for item in missing if item != "lead_time_days"]
+                elif "lead_time_days" not in missing:
+                    missing.append("lead_time_days")
+                safe_data["missing_info"] = missing
+            # An omitted currency is missing evidence, not an implicit USD quote.
+            safe_data.setdefault("currency", "")
+            if explicit_currencies:
+                # A model cannot override a literal quote currency or resolve
+                # explicit alternatives without the supplier's clarification.
+                safe_data["currency"] = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
+                if safe_data["currency"] and isinstance(safe_data.get("missing_info"), list):
+                    safe_data["missing_info"] = [item for item in safe_data["missing_info"] if item != "currency"]
+            if not safe_data["currency"]:
+                missing = list(safe_data.get("missing_info") or [])
+                if "currency" not in missing:
+                    missing.append("currency")
+                safe_data["missing_info"] = missing
+            return SupplierReply(
+                project_id=project_id,
+                supplier_id=supplier_id,
+                candidate_id=candidate_id,
+                raw_text=raw_text,
+                channel=channel,
+                received_at=utcnow_iso(),
+                material_declarations=parse_material_declarations(raw_text),
+                **safe_data,
+            )
+    except Exception:
+        pass
+
+    text_lower = raw_text.lower()
+    # Bind fallback facts to their business clause, not unrelated freight,
+    # payment or offer-validity facts elsewhere in the same message.
     currency = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
 
-    lead_clauses = [clause for clause in clauses if re.search(
-        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)]
-    lead_values = {float(value) for clause in lead_clauses for value in re.findall(
-        r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
     lead_time = next(iter(lead_values)) if len(lead_values) == 1 else None
 
     moq_match = re.search(r'moq[:\s]*(\d[\d,]*)', text_lower)
@@ -88,8 +140,9 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         currency=currency,
         moq=moq,
         lead_time_days=lead_time,
-        missing_info=[] if currency else ["currency"],
+        missing_info=([] if currency else ["currency"]) + (["unit_price"] if ambiguous_price else []),
         confidence=0.4,
+        material_declarations=parse_material_declarations(raw_text),
         received_at=utcnow_iso(),
     )
 
