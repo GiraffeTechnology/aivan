@@ -190,6 +190,14 @@ may coexist with failed or unconfirmed delivery, with an explanation for the
 operator; it does not trigger an automatic retry. Manual IM relay is not a
 provider delivery receipt, and approval alone never means a message was sent.
 
+When reviewing a localized draft through Core's existing preview interface,
+pass its reviewed `preview_id` alongside `draft_id` to `aivan.approveDraft`.
+Core still verifies the draft, tenant, source, recipient and rendered content.
+The bridge forwards this reference unchanged: it does not generate a preview,
+replace an unknown reference or retry after missing/stale proof. Omitting the
+field retains Core's existing English-approval compatibility behavior, not a
+bypass for a localized review.
+
 ---
 
 ## Data and language boundary
