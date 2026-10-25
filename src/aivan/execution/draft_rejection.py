@@ -21,12 +21,32 @@ class DraftRejectionOutcome:
     reopened_case_state: str | None = None
 
 
+def canonical_rejection_reason(reason: str | None, *, identity: ActorIdentity, tenant_id: str) -> str:
+    """Retain a supplied review reason without storing untranslated business text."""
+    from aivan.integrations.language_skill import LanguageNormalizationRequired, canonical_english_text
+    from aivan.integrations.language_skill_client import LanguageSkillClient
+
+    value = (reason or "").strip()
+    # Existing no-body callers and the bridge's fixed English control message
+    # do not acquire a translation dependency just to reject a draft.
+    if value in {"", "rejected by operator"}:
+        return value
+    result = LanguageSkillClient().normalize(
+        source_text=value, canonical_language="en", domain_hint="draft_review",
+        conversation_context={"tenant_id": tenant_id, "sender_role": identity.business_role.value},
+    )
+    if not result.ok or result.status_code != 200 or not isinstance(result.data, dict):
+        raise LanguageNormalizationRequired()
+    return canonical_english_text({"normalize": result.data})
+
+
 def reject_draft_atomically(
     *,
     db: Session,
     draft: InquiryDraftRecord,
     identity: ActorIdentity,
     source_trace_id: str,
+    canonical_reason: str = "",
 ) -> DraftRejectionOutcome:
     """Reject a draft and reopen a completed quote approval step when needed.
 
@@ -61,6 +81,7 @@ def reject_draft_atomically(
         identity=identity,
         source_trace_id=source_trace_id,
         status="rejected",
+        rejection_reason=canonical_reason,
         requested_by_actor_id=draft.created_by_actor_id,
         requested_by_actor_role=draft.created_by_actor_role,
     )
@@ -72,6 +93,7 @@ def reject_draft_atomically(
         source_trace_id=source_trace_id,
         before={"draft_id": draft.draft_id, "status": "pending_approval"},
         after={"draft_id": draft.draft_id, "status": "rejected"},
+        rejection_reason=canonical_reason,
     )
 
     if project is None or project.case_state != "awaiting_approval" or not is_customer_quote:

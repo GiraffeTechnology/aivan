@@ -27,6 +27,12 @@ class ApprovalRequest(BaseModel):
     approved_by: str | None = None  # Ignored legacy field; authenticated identity always wins.
 
 
+class RejectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str | None = Field(default=None, max_length=4000,
+                               description="Optional operator reason, normalized to English before persistence.")
+
+
 @router.post("/api/drafts/{draft_id}/preview")
 @router.post("/api/openclaw/drafts/{draft_id}/preview")
 def preview_draft(draft_id: str, body: PreviewRequest, request: Request,

@@ -40,6 +40,36 @@ def read_json(path: Path):
     return json.loads(path.read_text())
 
 
+def candidate_revision(manifest: dict) -> str:
+    """Use executed source identity while retaining the historical wheel origin."""
+    components = manifest.get("components") if isinstance(manifest, dict) else None
+    component = components.get("aivan") if isinstance(components, dict) else None
+    if not isinstance(component, dict):
+        raise ValueError("Invalid installed candidate manifest")
+    # Presence matters: an explicitly null current claim must not silently
+    # select the historical wheel or another current claim.
+    claims = [container[key] for container, key in (
+        (manifest, "deployment_candidate"), (component, "selected_source_candidate")
+    ) if key in container]
+    if not claims:
+        claims = [component]
+    revisions = []
+    trees = []
+    for claim in claims:
+        revision = claim.get("revision") if isinstance(claim, dict) else None
+        if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ValueError("Invalid installed candidate identity")
+        revisions.append(revision)
+        if "upstream_tree" in claim:
+            tree = claim["upstream_tree"]
+            if not isinstance(tree, str) or not re.fullmatch(r"[0-9a-f]{40}", tree):
+                raise ValueError("Invalid installed candidate tree")
+            trees.append(tree)
+    if len(set(revisions)) != 1 or len(set(trees)) > 1:
+        raise ValueError("Conflicting installed candidate identities")
+    return revisions[0]
+
+
 def write_json(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_name(path.name + ".new")
@@ -325,7 +355,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
     env["LD_LIBRARY_PATH"] = ":".join(str(directory) for directory in library_dirs)
     env.update({
         "AIVAN_ENV": "production",
-        "AIVAN_CANDIDATE_SHA": read_json(rel / "manifest.json")["components"]["aivan"]["revision"],
+        "AIVAN_CANDIDATE_SHA": candidate_revision(read_json(rel / "manifest.json")),
         "AIVAN_DB_URL": targets["aivan"]["url"],
         "MYAIVAN_DATABASE_MODE": config.get("database_mode", "external"),
         "MYAIVAN_DATABASE_SCHEMAS": json.dumps({name: value["schema"] for name, value in targets.items()}),

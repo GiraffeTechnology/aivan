@@ -7,7 +7,7 @@ from aivan.agents import supplier_response_agent as parser
 from aivan.execution.source_quote import source_quote_reference
 from aivan.schemas.response import SupplierReply
 from aivan.schemas.requirement import BuyerRequirement
-from aivan.integrations.gltg import GLTGClient
+from aivan.integrations.gltg import GLTGClient, GLTGUnavailableError
 
 
 @pytest.fixture
@@ -102,11 +102,30 @@ def test_fractional_supplier_declaration_survives_gltg_result_dto(monkeypatch):
     })
     result = GLTGClient().estimate_for_requirement(
         BuyerRequirement(project_id="case-fixture", quantity=100, delivery_days=12),
-        supplier_reply=SupplierReply(project_id="case-fixture", raw_text="8.5 days", lead_time_days=8.5),
+        supplier_reply=SupplierReply(project_id="case-fixture", supplier_id="supplier-fixture",
+                                     raw_text="8.5 days", lead_time_days=8.5),
+        supplier_id="supplier-fixture",
     )
     assert result.declared_lead_time_days == 8.5
     assert (result.p50_days, result.p80_days, result.p90_days) == (8.25, 9.75, 10.25)
     assert result.earliest_possible_days is None
+
+
+@pytest.mark.parametrize("reply_id,selected_id", [
+    ("", None), ("supplier-fixture", "other-supplier"),
+])
+def test_invalid_supplier_identity_stops_before_provider(monkeypatch, reply_id, selected_id):
+    def must_not_call(*_args, **_kwargs):
+        pytest.fail("Provider must not be called for an unbound supplier reply")
+
+    monkeypatch.setattr(GLTGClient, "_estimate", must_not_call)
+    with pytest.raises(GLTGUnavailableError, match="GLTG_SUPPLIER_MATERIAL_IDENTITY_MISMATCH"):
+        GLTGClient().estimate_for_requirement(
+            BuyerRequirement(project_id="case-fixture", quantity=100),
+            supplier_reply=SupplierReply(project_id="case-fixture", supplier_id=reply_id,
+                                         raw_text="Unit price: 12.50 GBP"),
+            supplier_id=selected_id,
+        )
 
 
 @pytest.mark.parametrize("currency", ["GBP", ""])
