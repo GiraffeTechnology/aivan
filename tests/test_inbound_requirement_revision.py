@@ -5,6 +5,7 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from aivan.api import workbench_routes
 from aivan.db.models.domain import AuditLogRecord
@@ -203,10 +204,32 @@ def test_material_revision_does_not_reopen_terminal_case(api_client, api_db, mon
     assert project.requirement_json == before
 
 
-@pytest.mark.parametrize("first_lane", ["revise", "reject"])
-def test_requirement_revision_and_rejection_transaction_orderings(records, monkeypatch, first_lane):
+def test_material_revision_receipt_replays_without_second_invalidation(api_client, api_db, monkeypatch):
+    case_id, _, _ = _approved_quote(api_client, monkeypatch)
+    first = _revise(api_client, monkeypatch, case_id)
+    assert first.status_code == 200, first.text
+    before = api_client.get(f"/api/projects/{case_id}").json()
+    drafts = api_client.get(f"/api/projects/{case_id}/drafts").json()
+    second = _revise(api_client, monkeypatch, case_id)
+    assert second.status_code == 200, second.text
+    assert second.json()["requirement"] == first.json()["requirement"]
+    assert api_client.get(f"/api/projects/{case_id}").json()["requirement"] == before["requirement"]
+    assert api_client.get(f"/api/projects/{case_id}/drafts").json() == drafts
+    assert api_db.query(AuditLogRecord).filter_by(
+        case_id=case_id, event_type="REQUIREMENT_APPROVAL_INVALIDATED").count() == 1
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+@pytest.mark.parametrize("first_lane", ["revise", "decision"])
+def test_requirement_revision_and_decision_transaction_orderings(records, monkeypatch, first_lane, decision):
     """Controlled SQLite interleavings, not MySQL or real-provider acceptance."""
     sessions, (pid, did) = records
+    with sessions() as db:
+        draft = db.get(InquiryDraftRecord, did)
+        draft.channel = "wechat"
+        draft.channel_account_id = "synthetic-account"
+        draft.conversation_id = "test-thread"
+        db.commit()
     monkeypatch.setattr(rfq_execution, "classify_event", lambda *a: EventClassification(
         event_type="customer_followup", project_id=pid, confidence=1, reason="synthetic revision"))
     monkeypatch.setattr(rfq_execution, "_get_or_create_project", lambda event, classification, db: db.get(Project, pid))
@@ -237,9 +260,18 @@ def test_requirement_revision_and_rejection_transaction_orderings(records, monke
             if lane != first_lane:
                 assert locked.wait(5)
             try:
-                if lane == "reject":
-                    reject(db, draft)
-                    db.commit()
+                if lane == "decision":
+                    if decision == "reject":
+                        reject(db, draft)
+                        db.commit()
+                    else:
+                        from aivan.api.main import _do_approve_draft
+                        result = _do_approve_draft(did, db, SimpleNamespace(
+                            tenant_id="race", trace_id="race-approval", idempotency_key="race-approval",
+                            actor_id="approver", role_context="approver", conversation_role="",
+                            execution_mode="approval", authorization_basis="unit-principal", production=False))
+                        assert result["status"] == "approved_pending_send"
+                        assert result["sent"] is False
                 else:
                     result = rfq_execution._create_rfq_from_event_inner(OpenClawEvent(
                         tenant_id="race", project_id=pid, channel="wechat", conversation_id="test-thread",
@@ -251,17 +283,22 @@ def test_requirement_revision_and_rejection_transaction_orderings(records, monke
             except DraftStateError:
                 db.rollback()
                 return "conflict"
+            except HTTPException as exc:
+                assert exc.status_code == 409
+                db.rollback()
+                return "conflict"
             finally:
                 if lane == first_lane:
                     done.set()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         a = pool.submit(run, first_lane)
-        b = pool.submit(run, "reject" if first_lane == "revise" else "revise")
+        b = pool.submit(run, "decision" if first_lane == "revise" else "revise")
         assert a.result(timeout=15) == "committed"
         assert b.result(timeout=15) == ("conflict" if first_lane == "revise" else "committed")
     with sessions() as db:
         assert db.get(Project, pid).case_state == "inquiry"
         assert db.get(Project, pid).requirement_json["quantity"] == 11
-        assert db.get(InquiryDraftRecord, did).status == ("superseded" if first_lane == "revise" else "rejected")
+        assert db.get(InquiryDraftRecord, did).status == (
+            "rejected" if first_lane == "decision" and decision == "reject" else "superseded")
         assert db.query(AuditLogRecord).filter_by(event_type="REQUIREMENT_APPROVAL_INVALIDATED").count() == 1
