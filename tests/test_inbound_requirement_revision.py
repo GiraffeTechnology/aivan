@@ -98,14 +98,15 @@ def test_material_revision_recovery_cannot_confirm_old_order(api_client, api_db,
         calls.append(kwargs)
         return SimpleNamespace(as_dict=lambda: {"status": "confirmed", "readback_verified": True,
             "procurement_case_id": "unit-case", "supplier_quote_id": "unit-quote",
-            "purchase_order_id": "unit-order"}, status="confirmed", purchase_order_id="unit-order")
+            "purchase_order_id": "unit-order"}, status="confirmed", purchase_order_id="unit-order",
+            readback_verified=True)
 
     monkeypatch.setattr(workbench_routes, "_order_confirmation_client",
                         lambda **_: SimpleNamespace(confirm_order=confirm_order))
     result = api_client.post(f"/api/workbench/cases/{case_id}/order-confirmation",
         headers={"Idempotency-Key": "stale-requirement-order"}, json={"selected_option_id": option_id})
-    assert result.status_code == 409, result.text
     assert calls == []
+    assert result.status_code == 409, result.text
 
 
 def test_material_revision_recovery_cannot_relay_old_quote(api_client, monkeypatch):
@@ -143,8 +144,8 @@ def test_successful_material_revision_requires_fresh_inquiry_review(api_client, 
         assert api_client.get(f"/api/drafts/{draft_id}").json()["status"] == "pending_approval"
 
 
-@pytest.mark.parametrize("changed", [False, True])
-def test_confirmed_projection_cannot_be_silently_rewritten(api_client, api_db, monkeypatch, changed):
+@pytest.mark.parametrize("failure", ["incomplete", "gltg"])
+def test_confirmed_projection_cannot_be_silently_rewritten(api_client, api_db, monkeypatch, failure):
     case_id, _, _ = _approved_quote(api_client, monkeypatch)
     project = ProjectRepository(api_db).get(case_id)
     # Explicit unit-only committed projection, not a live provider acceptance.
@@ -152,7 +153,7 @@ def test_confirmed_projection_cannot_be_silently_rewritten(api_client, api_db, m
         "order_confirmation": {"status": "confirmed", "purchase_order_id": "synthetic-existing-order"}}
     api_db.commit()
     before = deepcopy(project.requirement_json)
-    response = _revise(api_client, monkeypatch, case_id, failure="incomplete", changed=changed)
+    response = _revise(api_client, monkeypatch, case_id, failure=failure)
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["error"] == "CONFIRMED_ORDER_REQUIRES_AMENDMENT"
     api_db.refresh(project)
