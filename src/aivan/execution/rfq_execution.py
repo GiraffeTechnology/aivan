@@ -68,6 +68,7 @@ from aivan.execution.supplier_routing import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.execution.conversation_history import persist_canonical_message
 from aivan.execution.inbound_receipt import replay_inbound_receipt
+from aivan.execution.requirement_revision import lock_requirement_case, invalidate_material_revision
 from aivan.execution.saved_attachment_source import (
     RECEIPT_FIELD, authorize_saved_attachment, resolve_saved_attachment,
     source_request_fingerprint, validate_source_replay,
@@ -207,6 +208,7 @@ def _create_rfq_from_event_inner(
         return _record_non_rfq_event(event, classification, db)
 
     project = _get_or_create_project(event, classification, db)
+    project = lock_requirement_case(project, event, db)
     existing_requirement = _load_requirement(project.requirement_json)
     language_kwargs = {"canonicalization": canonicalization} if canonicalization else {}
     requirement = structure_customer_requirement_with_llm(
@@ -217,6 +219,7 @@ def _create_rfq_from_event_inner(
         source_channel=event.channel,
         **language_kwargs,
     )
+    invalidate_material_revision(project, existing_requirement, requirement, event, db)
 
     # ---- Execution readiness gate ------------------------------------- #
     # Nothing downstream (strategy, giraffe-db context, GLTG, graph
@@ -296,7 +299,7 @@ def _create_rfq_from_event_inner(
         )
     routing = _select_suppliers(giraffe, strategy)
 
-    project_payload = requirement.model_dump()
+    project_payload = {**(project.requirement_json or {}), **requirement.model_dump()}
     project_payload["strategy"] = strategy.model_dump()
     project_payload["giraffe_context_summary"] = {
         "known_suppliers": len(giraffe.suppliers),
@@ -440,7 +443,7 @@ def _advance_to_awaiting_supplier(project, event: OpenClawEvent, db: Session) ->
 
 def _persist_raw_requirement_only(project, requirement, gate, db) -> None:
     """Persist the raw requirement and gate state without executing anything."""
-    payload = requirement.model_dump()
+    payload = {**(project.requirement_json or {}), **requirement.model_dump()}
     payload["execution_gate"] = gate.model_dump()
     ProjectRepository(db).update_requirement(project.project_id, payload)
 

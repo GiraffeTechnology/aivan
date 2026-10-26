@@ -1,17 +1,26 @@
 """Core API regressions with synthetic dependencies and SQLite, not MySQL E2E."""
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 
 from aivan.api import workbench_routes
+from aivan.db.models.domain import AuditLogRecord
+from aivan.db.models.inquiry import InquiryDraftRecord
+from aivan.db.models.project import Project
+from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.execution import rfq_execution
+from aivan.execution.approval_state import DraftStateError
 from aivan.integrations.giraffe_db import GiraffeDBContextError
 from aivan.integrations.gltg import GLTGUnavailableError
 from aivan.schemas.requirement import BuyerRequirement
-from aivan.schemas.rfq import GiraffeContext
+from aivan.openclaw.contracts import OpenClawEvent
+from aivan.schemas.rfq import EventClassification, GiraffeContext
 from tests.test_invalidated_quote_approval import _approved_quote
+from tests.test_quote_rejection_concurrency import records, reject
 from tests.test_rfq_execution_iteration import (
     _customer_email_event,
     _explicit_unit_supplier_dataset,
@@ -76,10 +85,17 @@ def test_material_inbound_revision_invalidates_old_approval_before_pending(
     assert current["selected_option"] is None
     assert current["case_state"] != "approved"
     assert not current["requirement"].get("buyer_options")
+    for key in ("supplier_replies", "lead_time_estimates", "gltg_simulation", "gpm_guidance", "giraffe_db_graph"):
+        assert not current["requirement"].get(key)
     for previous in old:
         draft = api_client.get(f"/api/drafts/{previous['draft_id']}").json()
         assert draft["status"] == "superseded"
         assert draft["message_text"] == previous["message_text"]
+    assert api_client.post(f"/api/drafts/{quote_draft}/approve").status_code == 409
+    audit = api_db.query(AuditLogRecord).filter_by(
+        case_id=case_id, event_type="REQUIREMENT_APPROVAL_INVALIDATED").one()
+    assert "quantity" in audit.after_json["changed_fields"]
+    assert audit.actor_id
 
 
 def test_material_revision_recovery_cannot_confirm_old_order(api_client, api_db, monkeypatch):
@@ -158,3 +174,94 @@ def test_confirmed_projection_cannot_be_silently_rewritten(api_client, api_db, m
     assert response.json()["detail"]["error"] == "CONFIRMED_ORDER_REQUIRES_AMENDMENT"
     api_db.refresh(project)
     assert project.requirement_json == before
+
+
+@pytest.mark.parametrize("status", ["sent", "relayed", "delivery_unconfirmed", "sending"])
+def test_material_revision_preserves_delivery_history(api_client, api_db, monkeypatch, status):
+    case_id, draft_id, _ = _approved_quote(api_client, monkeypatch)
+    draft = DraftRepository(api_db).get(draft_id)
+    draft.status = status
+    api_db.commit()
+    before = draft.message_text
+    assert _revise(api_client, monkeypatch, case_id).status_code == 200
+    api_db.refresh(draft)
+    assert draft.status == status
+    assert draft.message_text == before
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled", "qc", "logistics"])
+def test_material_revision_does_not_reopen_terminal_case(api_client, api_db, monkeypatch, status):
+    case_id, _, _ = _approved_quote(api_client, monkeypatch)
+    project = ProjectRepository(api_db).get(case_id)
+    project.case_state = status
+    api_db.commit()
+    before = deepcopy(project.requirement_json)
+    response = _revise(api_client, monkeypatch, case_id)
+    assert response.status_code == 409, response.text
+    api_db.refresh(project)
+    assert project.case_state == status
+    assert project.requirement_json == before
+
+
+@pytest.mark.parametrize("first_lane", ["revise", "reject"])
+def test_requirement_revision_and_rejection_transaction_orderings(records, monkeypatch, first_lane):
+    """Controlled SQLite interleavings, not MySQL or real-provider acceptance."""
+    sessions, (pid, did) = records
+    monkeypatch.setattr(rfq_execution, "classify_event", lambda *a: EventClassification(
+        event_type="customer_followup", project_id=pid, confidence=1, reason="synthetic revision"))
+    monkeypatch.setattr(rfq_execution, "_get_or_create_project", lambda event, classification, db: db.get(Project, pid))
+    monkeypatch.setattr(rfq_execution, "structure_customer_requirement_with_llm", lambda **kwargs:
+                        kwargs["existing_requirement"].model_copy(update={"quantity": 11}))
+    monkeypatch.setattr(rfq_execution, "_send_user_control_notification", lambda *a: {"status": "not_sent"})
+    locked, attempted, done = Event(), Event(), Event()
+    original = ProjectRepository.get_for_update
+
+    def lock(repo, *args, **kwargs):
+        if repo.db.info["lane"] != first_lane:
+            attempted.set()
+            result = original(repo, *args, **kwargs)
+            assert done.wait(5)
+            return result
+        result = original(repo, *args, **kwargs)
+        locked.set()
+        assert attempted.wait(5)
+        return result
+
+    monkeypatch.setattr(ProjectRepository, "get_for_update", lock)
+
+    def run(lane):
+        with sessions() as db:
+            db.info["lane"] = lane
+            retained = db.get(Project, pid)
+            draft = db.get(InquiryDraftRecord, did)
+            if lane != first_lane:
+                assert locked.wait(5)
+            try:
+                if lane == "reject":
+                    reject(db, draft)
+                    db.commit()
+                else:
+                    result = rfq_execution._create_rfq_from_event_inner(OpenClawEvent(
+                        tenant_id="race", project_id=pid, channel="wechat", conversation_id="test-thread",
+                        sender_id="buyer", actor_id="buyer", business_role="buyer",
+                        message_text="Change quantity to eleven.", source_trace_id="race-revision"), db)
+                    assert not result.drafts_created
+                assert retained is not None
+                return "committed"
+            except DraftStateError:
+                db.rollback()
+                return "conflict"
+            finally:
+                if lane == first_lane:
+                    done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(run, first_lane)
+        b = pool.submit(run, "reject" if first_lane == "revise" else "revise")
+        assert a.result(timeout=15) == "committed"
+        assert b.result(timeout=15) == ("conflict" if first_lane == "revise" else "committed")
+    with sessions() as db:
+        assert db.get(Project, pid).case_state == "inquiry"
+        assert db.get(Project, pid).requirement_json["quantity"] == 11
+        assert db.get(InquiryDraftRecord, did).status == ("superseded" if first_lane == "revise" else "rejected")
+        assert db.query(AuditLogRecord).filter_by(event_type="REQUIREMENT_APPROVAL_INVALIDATED").count() == 1

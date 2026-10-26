@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.utils.ids import new_draft_id
@@ -144,14 +145,26 @@ class DraftRepository:
         be approved or sent after a newer supplier reply regenerates buyer options.
         Returns the list of draft_ids that were superseded.
         """
+        return self._supersede_unsent(project_id, ("customer_quote_email",))
+
+    def supersede_requirement_drafts(self, project_id: str, *, tenant_id: str) -> list[str]:
+        """Expire unsent inquiries and quotes derived from a material revision."""
+        return self._supersede_unsent(
+            project_id, ("customer_quote_email", "supplier_inquiry_email"), tenant_id=tenant_id,
+        )
+
+    def _supersede_unsent(self, project_id, draft_types, *, tenant_id=None) -> list[str]:
         # Old approval cannot authorize revised commercial terms. Preserve sent,
         # relayed and uncertain/in-flight delivery history, never turn it retryable.
         unsent_statuses = {"pending_approval", "approved", "approved_pending_send", "send_failed"}
-        stale = self.db.query(InquiryDraftRecord).filter(
+        query = self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.project_id == project_id,
             InquiryDraftRecord.status.in_(unsent_statuses),
-            InquiryDraftRecord.notes.contains("draft_type=customer_quote_email"),
-        ).all()
+            or_(*(InquiryDraftRecord.notes.contains("draft_type=" + kind) for kind in draft_types)),
+        )
+        if tenant_id is not None:
+            query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
+        stale = query.all()
         superseded_ids = []
         for d in stale:
             # A delivery claim can race this snapshot. Compare-and-set prevents
