@@ -164,7 +164,9 @@ class DraftRepository:
         )
         if tenant_id is not None:
             query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
-        stale = query.all()
+        # A request may retain a draft loaded before another transaction's
+        # approval. Refresh under the case lock before comparing its status.
+        stale = query.populate_existing().all()
         superseded_ids = []
         for d in stale:
             # A delivery claim can race this snapshot. Compare-and-set prevents

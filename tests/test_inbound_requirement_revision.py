@@ -127,13 +127,15 @@ def test_material_revision_recovery_cannot_confirm_old_order(api_client, api_db,
 
 
 def test_material_revision_recovery_cannot_relay_old_quote(api_client, monkeypatch):
-    case_id, draft_id, _ = _approved_quote(api_client, monkeypatch)
+    case_id, draft_id, preview = _approved_quote(api_client, monkeypatch)
     response = _revise(api_client, monkeypatch, case_id)
     assert response.status_code == 200, response.text
     result = api_client.post(f"/api/relay/{draft_id}/confirm",
         headers={"Idempotency-Key": "stale-requirement-relay"},
-        json={"receipt_reference": "synthetic-stale-manual-reference"})
+        json={"receipt_reference": "synthetic-stale-manual-reference",
+              "preview_id": preview["preview_id"], "content_sha256": preview["rendered_sha256"]})
     assert result.status_code == 409, result.text
+    assert result.json()["detail"]["error"] == "INVALID_DRAFT_STATE"
 
 
 @pytest.mark.parametrize("failure", ["gltg", "context", "graph"])
