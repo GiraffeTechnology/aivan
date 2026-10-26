@@ -390,6 +390,7 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
     )
     trace = build_graph_trace_metadata(event, project_id)
     timeout = float(os.environ.get("GIRAFFE_DB_TIMEOUT_SECONDS", "10"))
+    written_links: dict[str, dict[str, Any]] = {}
 
     def post(client: httpx.Client, step: str, path: str, payload: dict) -> dict:
         # A graph retry keeps a stable key per operation, while distinct writes
@@ -410,6 +411,21 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_INVALID_RESPONSE:{step}") from exc
         if not isinstance(result, dict):
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_INVALID_RESPONSE:{step}")
+        # Legacy provider profiles may omit tenant echo. An explicit echo must
+        # agree with the authenticated caller before its IDs drive more writes.
+        if "tenant_id" in result and result["tenant_id"] != tenant_id:
+            raise RuntimeError(f"GIRAFFE_DB_GRAPH_RESPONSE_TENANT_MISMATCH:{step}")
+        # Validate only relationships actually supplied by this operation.
+        # Omitted echoes remain compatible; explicit contradictions are unsafe.
+        links = {
+            field: payload[field]
+            for field in ("buyer_id", "procurement_case_id", "rfq_id", "gltg_run_id")
+            if field in payload
+        }
+        for field, expected in links.items():
+            if field in result and result[field] != expected:
+                raise RuntimeError(f"GIRAFFE_DB_GRAPH_RESPONSE_RELATION_MISMATCH:{step}:{field}")
+        written_links[step] = links
         return result
 
     def readback(client: httpx.Client, procurement_case_id: str) -> dict:
@@ -533,7 +549,6 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
                 "p80_days": gltg_payload.get("p80_days"),
                 "p90_days": gltg_payload.get("p90_days"),
                 "deadline_risk_level": gltg_payload.get("deadline_risk_level"),
-                "recommendation_score": 0.7,
                 "recommendation_reason_json": {"source": "aivan", "human_approval_required": True},
                 "tradeoff_summary_json": {"gltg": gltg_payload},
                 "status": "draft",
@@ -586,17 +601,47 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
         "decision_options": "metadata_json",
         "comparison_snapshots": "metadata_json",
     }
+    readback_links = {
+        "procurement_case": written_links["procurement-case"],
+        "rfqs": written_links["rfq"],
+        "gltg_runs": written_links["gltg-run"],
+        "pricing_inputs": written_links["pricing-input"],
+        "decision_options": written_links["decision-option"],
+        "comparison_snapshots": written_links["comparison-snapshot"],
+    }
     for section, lineage_field in lineage_fields.items():
+        identity_field, expected_identity = expected_readback[section]
         records = graph[section]
         records = [records] if isinstance(records, dict) else records
+        # A historical row cannot supply the lineage proof for another ID.
         matching_lineage = any(
             isinstance(record, dict)
+            and record.get(identity_field) == expected_identity
             and isinstance(record.get(lineage_field), dict)
             and record[lineage_field].get("source_trace_id") == trace["source_trace_id"]
             for record in records
         )
         if not matching_lineage:
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_READBACK_LINEAGE_MISMATCH:{section}")
+        # Do not let matching IDs/lineage mask contradictory tenant evidence.
+        # Unrelated historical rows are not proof for this operation's IDs.
+        if any(
+            isinstance(record, dict)
+            and record.get(identity_field) == expected_identity
+            and "tenant_id" in record
+            and record["tenant_id"] != tenant_id
+            for record in records
+        ):
+            raise RuntimeError(f"GIRAFFE_DB_GRAPH_READBACK_TENANT_MISMATCH:{section}")
+        for field, expected in readback_links[section].items():
+            if any(
+                isinstance(record, dict)
+                and record.get(identity_field) == expected_identity
+                and field in record
+                and record[field] != expected
+                for record in records
+            ):
+                raise RuntimeError(f"GIRAFFE_DB_GRAPH_READBACK_RELATION_MISMATCH:{section}:{field}")
 
     return {
         "tenant_id": tenant_id,

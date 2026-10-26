@@ -32,6 +32,21 @@ class ReversalConflict(EventCorrectionError):
     pass
 
 
+def _canonical_reversal_reason(reason: str, identity: ActorIdentity, tenant_id: str) -> str:
+    from aivan.integrations.language_skill import LanguageNormalizationRequired, canonical_english_text
+    from aivan.integrations.language_skill_client import LanguageSkillClient
+
+    result = LanguageSkillClient().normalize(source_text=reason, canonical_language="en",
+        domain_hint="event_correction", conversation_context={
+            "tenant_id": tenant_id, "sender_role": identity.business_role.value})
+    if not result.ok or result.status_code != 200 or not isinstance(result.data, dict):
+        raise LanguageNormalizationRequired()
+    try:
+        return canonical_english_text({"normalize": result.data})
+    except LanguageNormalizationRequired:
+        raise LanguageNormalizationRequired() from None
+
+
 def _canonical_digest(value: dict) -> str:
     encoded = json.dumps(
         value,
@@ -219,6 +234,9 @@ def reverse_event(
     if not impact["automatic_reverse_allowed"] and not compensation_only:
         raise UnsafeAutomaticReversal(impact)
 
+    # Replays above read durable truth without depending on translation again.
+    # Normalize before any correction/state/audit write, never store raw reason.
+    reason = _canonical_reversal_reason(reason, identity, tenant_id)
     status = "compensation_required" if compensation_only else "applied"
     record, created = reversals.create_or_get(
         tenant_id=tenant_id,
