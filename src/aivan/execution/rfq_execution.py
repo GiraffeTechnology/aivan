@@ -68,6 +68,11 @@ from aivan.execution.supplier_routing import (
 from aivan.observability.safe_logging import log_exception_safely
 from aivan.execution.conversation_history import persist_canonical_message
 from aivan.execution.inbound_receipt import replay_inbound_receipt
+from aivan.execution.requirement_revision import lock_requirement_case, invalidate_material_revision
+from aivan.execution.saved_attachment_source import (
+    RECEIPT_FIELD, authorize_saved_attachment, resolve_saved_attachment,
+    source_request_fingerprint, validate_source_replay,
+)
 from aivan.domain.roles import (
     BusinessRole,
     Capability,
@@ -108,6 +113,8 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
         InboundEventRepository,
         build_inbound_idempotency_key,
     )
+    source_project = authorize_saved_attachment(event, db)
+    source_fingerprint = source_request_fingerprint(event)
 
     idem_key = build_inbound_idempotency_key(
         tenant_id=event.tenant_id or "legacy",
@@ -123,9 +130,11 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     if idem_key:
         existing = repo.get(idem_key)
         if existing is not None:
+            validate_source_replay(existing, source_fingerprint, event)
             # Replay the stored result; create no new project/RFQ/draft/event.
             db.info["aivan_inbound_replayed"] = True
             return replay_inbound_receipt(existing, trace_id=event.source_trace_id)
+    event = resolve_saved_attachment(event, source_project)
 
     # Script shape is not language identification: Latin input may be French,
     # Spanish, German, or another language. The shared language service must
@@ -146,18 +155,25 @@ def create_rfq_from_event(event: OpenClawEvent, db: Session) -> RFQExecutionResu
     })
     claim = None
     if idem_key:
-        claim, acquired = repo.claim(idem_key, tenant_id=event.tenant_id or "legacy")
+        claim_kwargs = {"tenant_id": event.tenant_id or "legacy"}
+        if source_fingerprint:
+            claim_kwargs["source_request_fingerprint"] = source_fingerprint
+        claim, acquired = repo.claim(idem_key, **claim_kwargs)
         if not acquired:
+            validate_source_replay(claim, source_fingerprint, event)
             db.info["aivan_inbound_replayed"] = True
             return replay_inbound_receipt(claim, trace_id=event.source_trace_id)
     result = _create_rfq_from_event_inner(event, db, canonicalization=canonicalization)
 
     if claim is not None:
+        receipt_result = result.model_dump()
+        if source_fingerprint:
+            receipt_result[RECEIPT_FIELD] = source_fingerprint
         repo.complete(
             claim,
             project_id=result.project_id,
             event_type=result.event_type,
-            result_json=result.model_dump(),
+            result_json=receipt_result,
         )
     return result
 
@@ -192,6 +208,7 @@ def _create_rfq_from_event_inner(
         return _record_non_rfq_event(event, classification, db)
 
     project = _get_or_create_project(event, classification, db)
+    project = lock_requirement_case(project, event, db)
     existing_requirement = _load_requirement(project.requirement_json)
     language_kwargs = {"canonicalization": canonicalization} if canonicalization else {}
     requirement = structure_customer_requirement_with_llm(
@@ -202,6 +219,7 @@ def _create_rfq_from_event_inner(
         source_channel=event.channel,
         **language_kwargs,
     )
+    invalidate_material_revision(project, existing_requirement, requirement, event, db)
 
     # ---- Execution readiness gate ------------------------------------- #
     # Nothing downstream (strategy, giraffe-db context, GLTG, graph
@@ -281,7 +299,7 @@ def _create_rfq_from_event_inner(
         )
     routing = _select_suppliers(giraffe, strategy)
 
-    project_payload = requirement.model_dump()
+    project_payload = {**(project.requirement_json or {}), **requirement.model_dump()}
     project_payload["strategy"] = strategy.model_dump()
     project_payload["giraffe_context_summary"] = {
         "known_suppliers": len(giraffe.suppliers),
@@ -425,7 +443,7 @@ def _advance_to_awaiting_supplier(project, event: OpenClawEvent, db: Session) ->
 
 def _persist_raw_requirement_only(project, requirement, gate, db) -> None:
     """Persist the raw requirement and gate state without executing anything."""
-    payload = requirement.model_dump()
+    payload = {**(project.requirement_json or {}), **requirement.model_dump()}
     payload["execution_gate"] = gate.model_dump()
     ProjectRepository(db).update_requirement(project.project_id, payload)
 
@@ -791,6 +809,7 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
             strategy,
             supplier_count=len(all_replies),
             supplier_id=reply.supplier_id or None,
+            supplier_reply=reply,
             tenant_id=project.tenant_id or event.tenant_id,
             source_trace_id=event.source_trace_id,
         )
@@ -867,7 +886,9 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         if buyer_options
         else []
     )
-    if drafts_created and project.case_state == CaseState.SUPPLIER_REPLIED.value:
+    if drafts_created and project.case_state in {
+        CaseState.SUPPLIER_REPLIED.value, CaseState.APPROVED.value,
+    }:
         CaseDomainRepository(db).transition_case(
             project=project,
             after=CaseState.AWAITING_APPROVAL,
@@ -879,7 +900,11 @@ def _handle_supplier_reply_event(event: OpenClawEvent, classification: EventClas
         project_id=project.project_id,
         event_type="supplier_reply",
         action="buyer_options_ready" if buyer_options else "supplier_reply_parsed",
-        message=f"Supplier reply parsed. {len(buyer_options)} buyer options generated. Customer email draft is pending approval.",
+        message=(
+            f"Supplier reply parsed. {len(buyer_options)} buyer options generated. "
+            + ("Customer quote draft is pending approval." if drafts_created
+               else "No customer quote draft was created.")
+        ),
         strategy=strategy,
         requirement=requirement_payload,
         giraffe_context=GiraffeContext(),
@@ -926,7 +951,7 @@ def _create_customer_quote_email_draft(
     ExecutionEventRepository(db).append(
         project.project_id,
         "PENDING_EMAIL_DRAFT_CREATED",
-        "Customer quote email draft created from supplier reply",
+        "Customer quote draft created from supplier reply",
         payload={"draft_id": draft.draft_id, "draft_type": "customer_quote_email"},
         actor="buyer_option_agent",
     )

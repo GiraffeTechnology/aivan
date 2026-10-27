@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import json
 
 from pydantic import BaseModel
@@ -216,12 +217,16 @@ def structure_customer_requirement_with_llm(
             result["confidence"] = 0.5
             llm_used = False
 
+    inherited_fields: set[str] = set()
     if existing_requirement:
         for field in BuyerRequirement.model_fields:
-            if field not in result and getattr(existing_requirement, field, None):
-                existing_val = getattr(existing_requirement, field)
-                if existing_val is not None and existing_val != "" and existing_val != []:
-                    result[field] = existing_val
+            existing_val = getattr(existing_requirement, field, None)
+            # An omitted/empty extraction is not an instruction to erase a
+            # saved fact. Explicit changes still use the current input value.
+            if (result.get(field) in (None, "", [])
+                    and existing_val not in (None, "", [])):
+                result[field] = copy.deepcopy(existing_val)
+                inherited_fields.add(field)
 
     missing_raw = result.pop("missing_fields", [])
 
@@ -239,10 +244,20 @@ def structure_customer_requirement_with_llm(
     # is NOT authoritative for canonical product/destination.
     field_source = "llm_structured" if llm_used else "raw_text_only"
     sources: dict[str, str] = {}
+    prior_sources = (existing_requirement.extra or {}).get("field_sources", {}) if existing_requirement else {}
+    if not isinstance(prior_sources, dict):
+        prior_sources = {}
     for field in ("product_type", "category", "destination", "quantity",
                   "delivery_days", "color", "fabric_material"):
         if safe_data.get(field) not in (None, "", []):
-            sources[field] = field_source
+            if field in inherited_fields:
+                # Keep the authority of the persisted value, not the source of
+                # this later message. No prior evidence means no new authority.
+                prior_source = prior_sources.get(field)
+                if isinstance(prior_source, str) and prior_source:
+                    sources[field] = prior_source
+            else:
+                sources[field] = field_source
     req.extra["field_sources"] = sources
 
     # Overlay the language-skill canonicalization (authoritative for explicit
