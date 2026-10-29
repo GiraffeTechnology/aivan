@@ -60,6 +60,10 @@ def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[s
     price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
     price_clauses = []
     for clause in clauses:
+        # Explicit unit-price labels take precedence over ancillary introductions.
+        unit_label = re.search(r'\bunit\s+price\b|单价', clause, re.IGNORECASE)
+        if unit_label:
+            clause = clause[unit_label.start():]
         quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
         if quoted_amount and not re.search(
             r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
@@ -68,6 +72,16 @@ def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[s
             price_clauses.append(clause)
     named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
     price_clause = next(iter(named_prices or price_clauses), "")
+    # Ancillary charges in the same sentence are not unit-price alternatives.
+    # Keep ambiguity detection within the unit-price segment, including its
+    # currency, rather than borrowing freight/fee currencies or amounts.
+    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
+    if price_match:
+        suffix = re.split(
+            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
+            price_clause[price_match.end():], maxsplit=1, flags=re.IGNORECASE,
+        )[0]
+        price_clause = price_clause[:price_match.end()] + suffix
     price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
     prices = {float(match.group(1)) for match in re.finditer(price_pattern, price_clause, re.IGNORECASE)}
     if price_match:
