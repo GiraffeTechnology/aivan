@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
 
-from aivan.api.draft_preview_routes import ApprovalRequest, router as draft_preview_router
+from aivan.api.draft_preview_routes import ApprovalRequest, RejectionRequest, router as draft_preview_router
 app.include_router(draft_preview_router)
 
 def _cors_origins() -> list[str]:
@@ -553,16 +553,8 @@ def _do_approve_draft(
             "delivery_mode": channel_capability.delivery_mode.value,
         },
     )
-    project = ProjectRepository(db).get(
-        draft.project_id, tenant_id=draft.tenant_id
-    )
-    if project is not None and project.case_state == "awaiting_approval":
-        CaseDomainRepository(db).transition_case(
-            project=project,
-            after="approved",
-            identity=identity,
-            source_trace_id=context.trace_id,
-        )
+    from aivan.api.draft_state import advance_case_after_quote_approval
+    advance_case_after_quote_approval(db=db, draft=draft, identity=identity, source_trace_id=context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
         CaseDomainRepository(db).record_audit(
             tenant_id=draft.tenant_id,
@@ -608,10 +600,10 @@ def _do_approve_draft(
     }
 
 
-def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
+def _do_reject_draft(draft_id: str, db: Session, context: RequestContext, reason: str | None = None) -> dict:
     from aivan.domain.roles import Capability
     from aivan.execution.approval_state import DraftStateError
-    from aivan.execution.draft_rejection import reject_draft_atomically
+    from aivan.execution.draft_rejection import canonical_rejection_reason, reject_draft_atomically
 
     repo = DraftRepository(db)
     draft = repo.get(draft_id, tenant_id=context.tenant_id)
@@ -625,6 +617,9 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
         source_trace_id=context.trace_id,
         db=db,
     )
+    canonical_reason = canonical_rejection_reason(
+        reason, identity=identity, tenant_id=draft.tenant_id,
+    ) if draft.status == "pending_approval" else ""
     project_repo = ProjectRepository(db)
     project_repo.get_for_update(draft.project_id, tenant_id=draft.tenant_id)
     db.refresh(draft)
@@ -636,6 +631,7 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
     try:
         outcome = reject_draft_atomically(
             db=db, draft=draft, identity=identity, source_trace_id=context.trace_id,
+            canonical_reason=canonical_reason,
         )
     except DraftStateError as exc:
         db.rollback()
@@ -712,10 +708,11 @@ def approve_draft(
 @app.post("/api/openclaw/drafts/{draft_id}/reject")
 def reject_draft(
     draft_id: str,
+    body: RejectionRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db, context)
+    return _do_reject_draft(draft_id, db, context, reason=body.reason if body else None)
 
 
 @app.get("/api/openclaw/drafts/{draft_id}")
@@ -752,10 +749,11 @@ def approve_draft_alias(
 @app.post("/api/drafts/{draft_id}/reject")
 def reject_draft_alias(
     draft_id: str,
+    body: RejectionRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db, context)
+    return _do_reject_draft(draft_id, db, context, reason=body.reason if body else None)
 
 
 @app.get("/api/drafts/{draft_id}")

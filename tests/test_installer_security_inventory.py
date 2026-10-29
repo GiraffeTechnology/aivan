@@ -29,3 +29,12 @@ def test_installer_inventory_rejects_unpinned_or_hidden_dependencies(tmp_path, c
     path.write_text(content)
     with pytest.raises(RuntimeError):
         SCAN.expected_packages(str(path))
+
+
+def test_installer_dns_parser_security_floor():
+    """GHSA-45c3-73f7-pv4m must not return through a transitive lock downgrade."""
+    expected = SCAN.expected_packages(str(ROOT / "installer/requirements.lock"))
+    versions = [version for ecosystem, name, version in expected
+                if ecosystem == "PyPI" and name == "dnspython"]
+    assert len(versions) == 1
+    assert tuple(int(part) for part in versions[0].split(".")) >= (2, 9, 0)

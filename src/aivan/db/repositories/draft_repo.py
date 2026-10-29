@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.utils.ids import new_draft_id
@@ -138,21 +139,46 @@ class DraftRepository:
         return d
 
     def supersede_customer_quote_drafts(self, project_id: str) -> list[str]:
-        """Mark all pending_approval customer_quote_email drafts for the project as superseded.
+        """Supersede obsolete customer quotes that have not claimed delivery.
 
         Called before creating a new customer quote draft so that stale drafts cannot
         be approved or sent after a newer supplier reply regenerates buyer options.
         Returns the list of draft_ids that were superseded.
         """
-        stale = self.db.query(InquiryDraftRecord).filter(
+        return self._supersede_unsent(project_id, ("customer_quote_email",))
+
+    def supersede_requirement_drafts(self, project_id: str, *, tenant_id: str) -> list[str]:
+        """Expire unsent inquiries and quotes derived from a material revision."""
+        return self._supersede_unsent(
+            project_id, ("customer_quote_email", "supplier_inquiry_email"), tenant_id=tenant_id,
+        )
+
+    def _supersede_unsent(self, project_id, draft_types, *, tenant_id=None) -> list[str]:
+        # Old approval cannot authorize revised commercial terms. Preserve sent,
+        # relayed and uncertain/in-flight delivery history, never turn it retryable.
+        unsent_statuses = {"pending_approval", "approved", "approved_pending_send", "send_failed"}
+        query = self.db.query(InquiryDraftRecord).filter(
             InquiryDraftRecord.project_id == project_id,
-            InquiryDraftRecord.status == "pending_approval",
-            InquiryDraftRecord.notes.contains("draft_type=customer_quote_email"),
-        ).all()
+            InquiryDraftRecord.status.in_(unsent_statuses),
+            or_(*(InquiryDraftRecord.notes.contains("draft_type=" + kind) for kind in draft_types)),
+        )
+        if tenant_id is not None:
+            query = query.filter(InquiryDraftRecord.tenant_id == tenant_id)
+        # A request may retain a draft loaded before another transaction's
+        # approval. Refresh under the case lock before comparing its status.
+        stale = query.populate_existing().all()
         superseded_ids = []
         for d in stale:
-            d.status = "superseded"
-            superseded_ids.append(d.draft_id)
+            # A delivery claim can race this snapshot. Compare-and-set prevents
+            # overwriting a committed delivery_unconfirmed or terminal outcome.
+            changed = self.db.query(InquiryDraftRecord).filter(
+                InquiryDraftRecord.draft_id == d.draft_id,
+                InquiryDraftRecord.tenant_id == d.tenant_id,
+                InquiryDraftRecord.status == d.status,
+            ).update({"status": "superseded"}, synchronize_session=False)
+            self.db.refresh(d)
+            if changed:
+                superseded_ids.append(d.draft_id)
         if superseded_ids:
             self.db.flush()
         return superseded_ids

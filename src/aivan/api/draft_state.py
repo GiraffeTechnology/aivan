@@ -8,6 +8,24 @@ from aivan.db.models.inquiry import InquiryDraftRecord
 from aivan.db.repositories.domain_repo import CaseDomainRepository
 from aivan.db.repositories.project_repo import ProjectRepository
 from aivan.domain.roles import ActorIdentity
+from aivan.api.serializers import draft_type_from_notes
+
+
+def advance_case_after_quote_approval(
+    *, db: Session, draft: InquiryDraftRecord, identity: ActorIdentity, source_trace_id: str,
+) -> None:
+    """Only the reviewed customer quotation can approve its case for ordering.
+
+    The caller already holds the case row lock acquired during preview review.
+    Supplier inquiries and operator notices authorize only their own message.
+    """
+    if draft_type_from_notes(draft) != "customer_quote_email":
+        return
+    project = ProjectRepository(db).get(draft.project_id, tenant_id=draft.tenant_id)
+    if project is not None and project.case_state == "awaiting_approval":
+        CaseDomainRepository(db).transition_case(
+            project=project, after="approved", identity=identity, source_trace_id=source_trace_id,
+        )
 
 
 def recover_case_after_quote_rejection(

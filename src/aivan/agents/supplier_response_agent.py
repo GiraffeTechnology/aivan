@@ -1,8 +1,105 @@
 from __future__ import annotations
+import re
 from aivan.schemas.response import SupplierReply
+from aivan.agents.supplier_material_reply import parse_material_declarations
 from aivan.llm.gateway import llm_complete_json
 from aivan.llm.prompts import SUPPLIER_RESPONSE_PARSING_SYSTEM
 from aivan.utils.time_utils import utcnow_iso
+
+def _declared_moq(clauses: list[str]) -> tuple[bool, int | None]:
+    """Bind explicit MOQ terms without truncating fractions or choosing ranges."""
+    values: set[int] = set()
+    seen = unresolved = False
+    integer = r'(?:\d{1,3}(?:,\d{3})+|\d+)(?=\s|$|[,;.)](?!\d)|(?:pcs?|pieces?|units?)\b)'
+    for clause in clauses:
+        for label in re.finditer(r'\bmoq(?![A-Za-z_])\s*(?::|=|is\b|of\b)?\s*', clause, re.IGNORECASE):
+            tail = clause[label.end():]
+            match = re.match(integer, tail, re.IGNORECASE)
+            if match is None:
+                # Preserve the existing semantic extraction path for written-out
+                # quantities; unsupported numeric tokens and explicit unknowns
+                # must not become a guessed or truncated integer.
+                if not tail.strip() or re.match(
+                    r'(?:[+\-]?\d|[.,]\d|not\b|unconfirmed\b|unknown\b|tbd\b|pending\b)',
+                    tail, re.IGNORECASE,
+                ):
+                    seen = unresolved = True
+                continue
+            seen = True
+            if re.match(
+                r'\s*(?:(?:pcs?|pieces?|units?)\b\s*)?(?:or\b|to\b|[-–—/])',
+                tail[match.end():], re.IGNORECASE,
+            ):
+                unresolved = True
+                continue
+            try:
+                values.add(int(match.group().replace(',', '')))
+            except ValueError:
+                unresolved = True
+    return seen, next(iter(values)) if not unresolved and len(values) == 1 else None
+
+def _declared_lead_time_values(clauses: list[str]) -> set[float]:
+    """Read the existing literal day clauses, excluding unrelated durations."""
+    # These explicitly labelled material fields have their own source-backed
+    # meaning; neither a substage nor a time delta is the total supplier lead time.
+    lead_clauses = [clause for clause in clauses if re.search(
+        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)
+        and not re.search(r'^\s*(?:raw\s+material\s+lead\s*time|substitute\s+material\s+lead\s*time\s+effect)\b',
+                          clause, re.IGNORECASE)]
+    return {float(value) for clause in lead_clauses for value in re.findall(
+        r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
+
+def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[str], bool]:
+    """Read literal unit-price terms without borrowing ancillary cost currencies."""
+    clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
+    currency_codes = (
+        "USD|EUR|GBP|CNY|JPY|HKD|CAD|AUD|CHF|NZD|SGD|KRW|INR|BRL|MXN|ZAR|"
+        "SEK|NOK|DKK|PLN|THB|TWD|VND|IDR|AED|SAR|TRY|RUB"
+    )
+    amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
+    price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
+    price_clauses = []
+    for clause in clauses:
+        # Explicit unit-price labels take precedence over ancillary introductions.
+        unit_label = re.search(r'\bunit\s+price\b|单价', clause, re.IGNORECASE)
+        if unit_label:
+            clause = clause[unit_label.start():]
+        quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
+        if quoted_amount and not re.search(
+            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
+            clause[:quoted_amount.start()], re.IGNORECASE,
+        ):
+            price_clauses.append(clause)
+    named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
+    price_clause = next(iter(named_prices or price_clauses), "")
+    # Ancillary charges in the same sentence are not unit-price alternatives.
+    # Keep ambiguity detection within the unit-price segment, including its
+    # currency, rather than borrowing freight/fee currencies or amounts.
+    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
+    if price_match:
+        suffix = re.split(
+            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
+            price_clause[price_match.end():], maxsplit=1, flags=re.IGNORECASE,
+        )[0]
+        price_clause = price_clause[:price_match.end()] + suffix
+    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
+    prices = {float(match.group(1)) for match in re.finditer(price_pattern, price_clause, re.IGNORECASE)}
+    if price_match:
+        # Only a range adjacent to the quoted amount is price evidence; a
+        # subsequent order-quantity range must not become a second price.
+        price_range = re.match(
+            rf'{amount}\s*(?:\b(?:{currency_codes})\b\s*)?'
+            rf'(?:or\b|to\b|[-–—])\s*(?:\b(?:{currency_codes})\b\s*)?{amount}',
+            price_clause[price_match.start(1):], re.IGNORECASE,
+        )
+        if price_range:
+            prices.update(float(value) for value in price_range.groups())
+    ambiguous_price = len(prices) > 1
+    unit_price = next(iter(prices)) if len(prices) == 1 else None
+    currencies = {
+        code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
+    }
+    return clauses, unit_price, currencies, ambiguous_price
 
 def parse_supplier_reply(
     raw_text: str,
@@ -12,7 +109,9 @@ def parse_supplier_reply(
     channel: str = "",
 ) -> SupplierReply:
     """Parse a supplier reply message using LLM with deterministic fallback."""
-    import re
+    clauses, unit_price, explicit_currencies, ambiguous_price = _quote_price_evidence(raw_text)
+    lead_values = _declared_lead_time_values(clauses)
+    moq_declared, moq = _declared_moq(clauses)
 
     user_prompt = f"""Supplier message:
 {raw_text}
@@ -22,9 +121,38 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     try:
         result = llm_complete_json("supplier_response_parsing", SUPPLIER_RESPONSE_PARSING_SYSTEM, user_prompt)
         if result.get("confidence", 0) > 0.4:
-            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id")}
+            safe_data = {k: v for k, v in result.items() if k in SupplierReply.model_fields and k not in ("project_id", "supplier_id", "candidate_id", "raw_text", "source_event_id", "material_declarations")}
+            if moq_declared:
+                safe_data["moq"] = moq
+                missing = [item for item in (safe_data.get("missing_info") or []) if item != "moq"]
+                safe_data["missing_info"] = missing + (["moq"] if moq is None else [])
+            if unit_price is not None or ambiguous_price:
+                # Literal quotation evidence takes precedence over extraction,
+                # including zero and fractional prices; this is not repricing.
+                safe_data["unit_price"] = unit_price
+                safe_data["missing_info"] = [
+                    item for item in (safe_data.get("missing_info") or []) if item != "unit_price"
+                ]
+                if ambiguous_price:
+                    safe_data["missing_info"].append("unit_price")
+            if lead_values:
+                # Confidence cannot change a supplier's literal declaration or
+                # choose between explicit alternatives. This is not GLTG output.
+                safe_data["lead_time_days"] = next(iter(lead_values)) if len(lead_values) == 1 else None
+                missing = list(safe_data.get("missing_info") or [])
+                if safe_data["lead_time_days"] is not None:
+                    missing = [item for item in missing if item != "lead_time_days"]
+                elif "lead_time_days" not in missing:
+                    missing.append("lead_time_days")
+                safe_data["missing_info"] = missing
             # An omitted currency is missing evidence, not an implicit USD quote.
             safe_data.setdefault("currency", "")
+            if explicit_currencies:
+                # A model cannot override a literal quote currency or resolve
+                # explicit alternatives without the supplier's clarification.
+                safe_data["currency"] = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
+                if safe_data["currency"] and isinstance(safe_data.get("missing_info"), list):
+                    safe_data["missing_info"] = [item for item in safe_data["missing_info"] if item != "currency"]
             if not safe_data["currency"]:
                 missing = list(safe_data.get("missing_info") or [])
                 if "currency" not in missing:
@@ -37,46 +165,17 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
                 raw_text=raw_text,
                 channel=channel,
                 received_at=utcnow_iso(),
+                material_declarations=parse_material_declarations(raw_text),
                 **safe_data,
             )
     except Exception:
         pass
 
-    text_lower = raw_text.lower()
     # Bind fallback facts to their business clause, not unrelated freight,
     # payment or offer-validity facts elsewhere in the same message.
-    clauses = re.split(r';|\n|\.(?=\s|$)|,\s+(?=[A-Za-z])', raw_text)
-    currency_codes = (
-        "USD|EUR|GBP|CNY|JPY|HKD|CAD|AUD|CHF|NZD|SGD|KRW|INR|BRL|MXN|ZAR|"
-        "SEK|NOK|DKK|PLN|THB|TWD|VND|IDR|AED|SAR|TRY|RUB"
-    )
-    amount = r'(\d+(?:\.\d+)?)(?![\w.,])'
-    price_pattern = rf'(?:\bprice\b|\b(?:{currency_codes})\b|单价|¥|\$)\s*[:=]?\s*{amount}'
-    price_clauses = []
-    for clause in clauses:
-        quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
-        if quoted_amount and not re.search(
-            r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
-            clause[:quoted_amount.start()], re.IGNORECASE,
-        ):
-            price_clauses.append(clause)
-    named_prices = [clause for clause in price_clauses if re.search(r'\bprice\b|单价', clause, re.IGNORECASE)]
-    price_clause = next(iter(named_prices or price_clauses), "")
-    price_match = re.search(price_pattern, price_clause, re.IGNORECASE)
-    unit_price = float(price_match.group(1)) if price_match else None
-    explicit_currencies = {
-        code.upper() for code in re.findall(rf'\b(?:{currency_codes})\b', price_clause, re.IGNORECASE)
-    }
     currency = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
 
-    lead_clauses = [clause for clause in clauses if re.search(
-        r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)]
-    lead_values = {float(value) for clause in lead_clauses for value in re.findall(
-        r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
     lead_time = next(iter(lead_values)) if len(lead_values) == 1 else None
-
-    moq_match = re.search(r'moq[:\s]*(\d[\d,]*)', text_lower)
-    moq = int(moq_match.group(1).replace(",", "")) if moq_match else None
 
     return SupplierReply(
         project_id=project_id,
@@ -88,8 +187,10 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         currency=currency,
         moq=moq,
         lead_time_days=lead_time,
-        missing_info=[] if currency else ["currency"],
+        missing_info=([] if currency else ["currency"]) + (["unit_price"] if ambiguous_price else [])
+                     + (["moq"] if moq_declared and moq is None else []),
         confidence=0.4,
+        material_declarations=parse_material_declarations(raw_text),
         received_at=utcnow_iso(),
     )
 
