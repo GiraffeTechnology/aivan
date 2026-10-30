@@ -1,8 +1,6 @@
 """Safe file/image intake with durable provider readback and no local blob store."""
 from __future__ import annotations
 
-from aivan.execution.attachment_reference import attachment_provider_case
-
 import base64
 import binascii
 import hashlib
@@ -67,7 +65,8 @@ def _jpeg_dimensions(content):
 
 def _case_reference(db, context, case_id):
     project = _get_case(db, context, case_id)
-    provider_case = attachment_provider_case(project)
+    reference = (project.requirement_json or {}).get("giraffe_db_graph") or {}
+    provider_case = reference.get("procurement_case_id")
     if not isinstance(provider_case, str) or not provider_case:
         raise HTTPException(409, detail={"error": "ATTACHMENT_PERSISTED_CASE_REQUIRED"})
     return provider_case
@@ -131,7 +130,8 @@ def _raise_provider(error, context):
 
 def export_attachment_metadata(db, context, case_id):
     project = _get_case(db, context, case_id)
-    provider_case = attachment_provider_case(project)
+    reference = (project.requirement_json or {}).get("giraffe_db_graph") or {}
+    provider_case = reference.get("procurement_case_id")
     if not provider_case:
         return []
     try:

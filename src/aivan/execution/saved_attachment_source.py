@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 
-from aivan.execution.attachment_reference import attachment_provider_case
 from fastapi import HTTPException
 
 from aivan.api.request_context import RequestContext, actor_identity_from_context
@@ -73,7 +72,7 @@ def resolve_saved_attachment(event, project):
     source = event.saved_attachment_source
     if source is None:
         return event
-    provider_case = attachment_provider_case(project)
+    provider_case = ((project.requirement_json or {}).get("giraffe_db_graph") or {}).get("procurement_case_id")
     if not isinstance(provider_case, str) or not provider_case:
         _fail(409, "ATTACHMENT_PERSISTED_CASE_REQUIRED", event)
     try:

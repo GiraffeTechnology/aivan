@@ -33,12 +33,6 @@ def invalidate_material_revision(project, before, requirement, event, db):
     previous_state = project.case_state
     previous_selection = project.selected_option_json
     payload = dict(project.requirement_json or {})
-    graph = payload.get("giraffe_db_graph")
-    if isinstance(graph, dict):
-        provider_case = graph.get("procurement_case_id")
-        if isinstance(provider_case, str) and provider_case:
-            # Attachment ownership is stable evidence, not commercial approval.
-            payload["attachment_case_reference"] = {"procurement_case_id": provider_case}
     # Historical source events/drafts remain. These fields are only the current
     # recommendation and graph pointers, not a valid quote for the revised facts.
     for key in ("buyer_options", "supplier_replies", "lead_time_estimates", "gltg_simulation",
