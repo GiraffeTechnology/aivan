@@ -132,7 +132,7 @@ def test_chinese_rfq_unresolved_destination_blocks_gltg_and_drafts(db_session, m
 
     assert result.action == "pending_destination_confirmation"
     assert result.drafts_created == []
-    assert result.gltg_simulation.p50_days == 0  # GLTG not run
+    assert result.gltg_simulation is None  # Not run is not a fabricated zero-day estimate.
     reply = result.user_control_message
     assert "Tokyo" in reply
     assert "destination" in reply.lower()
