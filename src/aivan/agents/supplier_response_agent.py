@@ -38,7 +38,7 @@ def _declared_moq(clauses: list[str]) -> tuple[bool, int | None]:
                 unresolved = True
     return seen, next(iter(values)) if not unresolved and len(values) == 1 else None
 
-def _declared_lead_time_values(clauses: list[str]) -> set[float]:
+def _declared_lead_time_values(clauses: list[str]) -> tuple[set[float], bool]:
     """Read the existing literal day clauses, excluding unrelated durations."""
     # These explicitly labelled material fields have their own source-backed
     # meaning; neither a substage nor a time delta is the total supplier lead time.
@@ -46,8 +46,18 @@ def _declared_lead_time_values(clauses: list[str]) -> set[float]:
         r'\b(?:lead\s*time|delivery|production)\b|交期|交货|生产', clause, re.IGNORECASE)
         and not re.search(r'^\s*(?:raw\s+material\s+lead\s*time|substitute\s+material\s+lead\s*time\s+effect)\b',
                           clause, re.IGNORECASE)]
-    return {float(value) for clause in lead_clauses for value in re.findall(
+    # In "10 to 15 days" only 15 directly precedes the unit. Reading that
+    # suffix as a commitment would invent a scalar even if the model abstained.
+    number = r'(?:\d+(?:\.\d+)?|\.\d+)'
+    duration_unit = r'(?:days?\b|天)'
+    has_range = any(re.search(
+        rf'(?<![\w.,+\-]){number}\s*(?:{duration_unit}\s*)?'
+        rf'(?:to\b|or\b|and\b|[-–—/]|至|到)\s*{number}\s*{duration_unit}',
+        clause, re.IGNORECASE,
+    ) for clause in lead_clauses)
+    values = {float(value) for clause in lead_clauses for value in re.findall(
         r'(?<![\w.,\-])(\d+(?:\.\d+)?|\.\d+)\s*(?:days?\b|天)', clause, re.IGNORECASE)}
+    return values, has_range
 
 def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[str], bool]:
     """Read literal unit-price terms without borrowing ancillary cost currencies."""
@@ -63,7 +73,15 @@ def _quote_price_evidence(raw_text: str) -> tuple[list[str], float | None, set[s
         # Explicit unit-price labels take precedence over ancillary introductions.
         unit_label = re.search(r'\bunit\s+price\b|单价', clause, re.IGNORECASE)
         if unit_label:
-            clause = clause[unit_label.start():]
+            # Keep only currency evidence immediately qualifying this label,
+            # not an earlier freight/sample amount or its unrelated currency.
+            currency_prefix = re.search(
+                rf'\b(?:{currency_codes})\b'
+                rf'(?:\s*(?:/|or\b)\s*\b(?:{currency_codes})\b)*\s*[:=]?\s*$',
+                clause[:unit_label.start()], re.IGNORECASE,
+            )
+            prefix = currency_prefix.group() if currency_prefix else ""
+            clause = prefix + clause[unit_label.start():]
         quoted_amount = re.search(price_pattern, clause, re.IGNORECASE)
         if quoted_amount and not re.search(
             r'\b(?:freight|shipping|sample|tooling|packaging|fee)\b',
@@ -110,7 +128,7 @@ def parse_supplier_reply(
 ) -> SupplierReply:
     """Parse a supplier reply message using LLM with deterministic fallback."""
     clauses, unit_price, explicit_currencies, ambiguous_price = _quote_price_evidence(raw_text)
-    lead_values = _declared_lead_time_values(clauses)
+    lead_values, ambiguous_lead_time = _declared_lead_time_values(clauses)
     moq_declared, moq = _declared_moq(clauses)
 
     user_prompt = f"""Supplier message:
@@ -135,10 +153,12 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
                 ]
                 if ambiguous_price:
                     safe_data["missing_info"].append("unit_price")
-            if lead_values:
+            if lead_values or ambiguous_lead_time:
                 # Confidence cannot change a supplier's literal declaration or
                 # choose between explicit alternatives. This is not GLTG output.
-                safe_data["lead_time_days"] = next(iter(lead_values)) if len(lead_values) == 1 else None
+                safe_data["lead_time_days"] = (
+                    next(iter(lead_values)) if len(lead_values) == 1 and not ambiguous_lead_time else None
+                )
                 missing = list(safe_data.get("missing_info") or [])
                 if safe_data["lead_time_days"] is not None:
                     missing = [item for item in missing if item != "lead_time_days"]
@@ -175,7 +195,7 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
     # payment or offer-validity facts elsewhere in the same message.
     currency = next(iter(explicit_currencies)) if len(explicit_currencies) == 1 else ""
 
-    lead_time = next(iter(lead_values)) if len(lead_values) == 1 else None
+    lead_time = next(iter(lead_values)) if len(lead_values) == 1 and not ambiguous_lead_time else None
 
     return SupplierReply(
         project_id=project_id,
@@ -188,7 +208,8 @@ Extract: unit_price, currency, moq, capacity_per_day, capacity_per_month, lead_t
         moq=moq,
         lead_time_days=lead_time,
         missing_info=([] if currency else ["currency"]) + (["unit_price"] if ambiguous_price else [])
-                     + (["moq"] if moq_declared and moq is None else []),
+                     + (["moq"] if moq_declared and moq is None else [])
+                     + (["lead_time_days"] if ambiguous_lead_time or len(lead_values) > 1 else []),
         confidence=0.4,
         material_declarations=parse_material_declarations(raw_text),
         received_at=utcnow_iso(),
@@ -210,3 +231,4 @@ We need a few more details to proceed:
 Please reply at your earliest convenience.
 
 Best regards."""
+
