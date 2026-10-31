@@ -1,4 +1,12 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class SavedAttachmentSource(BaseModel):
+    """A requested immutable source, not a caller assertion of verification."""
+    model_config = ConfigDict(extra="forbid")
+    attachment_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
 
 class OpenClawEvent(BaseModel):
     tenant_id: str = ""
@@ -14,6 +22,7 @@ class OpenClawEvent(BaseModel):
     message_text: str = ""
     message_type: str = "text"
     attachments: list[dict] = Field(default_factory=list)
+    saved_attachment_source: SavedAttachmentSource | None = None
     timestamp: str = ""
     project_id: str | None = None
     actor_id: str | None = None
@@ -38,6 +47,7 @@ class OpenClawSendRequest(BaseModel):
 
 class OpenClawSendResponse(BaseModel):
     success: bool
+    outcome_uncertain: bool = False
     message_id: str = ""
     sent_at: str = ""
     error: str | None = None

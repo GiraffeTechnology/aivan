@@ -18,7 +18,7 @@ def test_stub_suppliers_disabled_in_production(monkeypatch, db_session):
     monkeypatch.setenv("AIVAN_ENV", "production")
     clear_registry()
     assert stub_suppliers_allowed() is False
-    with pytest.raises(RuntimeError, match="GIRAFFE_DB_CANONICAL_CONTEXT_REQUIRED"):
+    with pytest.raises(RuntimeError, match="GIRAFFE_DB_CONTEXT_ENDPOINT_REQUIRED"):
         GiraffeDBClient(db_session).build_context(_requirement())
 
 
@@ -48,11 +48,12 @@ def test_zero_suppliers_pending_selection():
     assert supplier_action([]) == "pending_supplier_selection"
 
 
-def test_one_supplier_returns_pending_supplier_confirmation_not_error():
+def test_one_supplier_proceeds_without_invented_cardinality_gate():
     from aivan.execution.safety import supplier_action
 
     action = supplier_action([{"supplier_id": "s1", "email": "a@x.com"}])
-    assert action == "pending_supplier_confirmation"  # confirmation, never an error
+    assert action == "proceed"
+    assert evaluate_supplier_readiness([{"supplier_id": "s1", "email": "a@x.com"}]) == ("single", True)
 
 
 def test_two_suppliers_allowed_with_thin_feasibility():

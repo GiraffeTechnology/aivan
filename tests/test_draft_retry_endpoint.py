@@ -52,7 +52,7 @@ def _headers(tenant="tenant-a"):
     }
 
 
-def _seed(Session, *, tenant_id="tenant-a", status="send_failed"):
+def _seed(Session, *, tenant_id="tenant-a", status="send_failed", bind_preview=True):
     from aivan.db.repositories.draft_repo import DraftRepository
 
     db = Session()
@@ -70,6 +70,11 @@ def _seed(Session, *, tenant_id="tenant-a", status="send_failed"):
                 "approved_by": "operator-001",
             },
         )
+        if status == "send_failed" and bind_preview:
+            from aivan.execution.draft_preview import create_preview, bind_approval
+            proof, _ = create_preview(db, draft, "en")
+            draft.approval_id = "synthetic-prior-approval"
+            bind_approval(db, draft, proof)
         db.commit()
         return draft.draft_id
     finally:
@@ -112,3 +117,17 @@ def test_retry_hides_other_tenant_draft(client_and_session):
     response = client.post(f"/api/drafts/{draft_id}/retry", headers=_headers())
     assert response.status_code == 404
     assert response.json()["detail"]["error"] == "not_found"
+
+
+def test_retry_without_prior_bound_preview_requires_review(client_and_session, monkeypatch):
+    from aivan.execution import approval_state
+    calls = []
+    monkeypatch.setattr(approval_state, "get_openclaw_client", lambda: calls.append("unexpected transport"))
+    client, Session = client_and_session
+    draft_id = _seed(Session, bind_preview=False)
+    response = client.post(f"/api/drafts/{draft_id}/retry", headers=_headers())
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending_approval"
+    assert response.json()["sent"] is False
+    assert response.json()["error"] == "DRAFT_APPROVAL_PREVIEW_REQUIRED"
+    assert calls == []

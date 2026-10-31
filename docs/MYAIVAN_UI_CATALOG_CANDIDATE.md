@@ -1,0 +1,41 @@
+# myAIVAN UI catalog candidate evidence
+
+This is a historical catalog/brand implementation record, not the product acceptance boundary. Current work and interaction use standard English, with non-English input/output dynamically translated through `giraffe-language-skill`. Static catalogs and fixed locale readiness are preserved implementation assets to reconcile, not mandatory product gates. This document authorizes no deployment or infrastructure change.
+
+## Candidate lineage
+
+- Permanent destination branch: `myaivan-web` only. These product files must never merge to `main`.
+- Withdrawn baseline: commit `0747e79a8dd4ea4f1f6405f72db9ba82fe97ff89`, tree `eb76907b0380f66fbb2fb412afdb0250d608477f`.
+- A new full commit SHA and tree are recorded in the immutable build evidence after the candidate commit exists. The withdrawn baseline is never a production candidate.
+
+## Historical UI catalog implementation
+
+- The earlier implementation used the Python catalog in `src/aivan/app/ui_catalog.py` as its versioned English UI source. Stable message IDs are independent of their English values; any value or key-set change rotates `catalog_version`.
+- The earlier candidate generated FR, ES, DE, KO, and JA through `giraffe-language-skill`. It assigned qwen3.5:9b a `proofread-only` role. This is an implementation record, not a new product restriction on a model brand.
+- Generated catalogs are candidate-bound, complete-key-set, fixed-input, read-only artifacts. The public API never accepts source text and never triggers translation.
+- Catalog files and directories must be absolute, non-symlink, private on POSIX, safely opened and atomically replaced. Artifact SHA-256 is emitted by the generator.
+- The historical `/readyz` implementation fails closed until all five generated locales match the active candidate, catalog version, policy, provider/model/backend, message set, and per-message provenance.
+- The browser forces English-manifest revalidation across deployment switches, rejects an old candidate, loads generated languages before authentication, caches one promise per locale, ignores late responses for inactive locales, and renders generated values only through text or escaped HTML paths.
+
+## Giraffe Technology VI input
+
+- Authority: `Giraffe_Technology_VI_Guidelines_CN_v1.2.pdf`, Version 1.2 / 2026, 23 pages.
+- SHA-256: `dcbc6b2e81572b474baa6922deb392785f126ce8d844409e09e0f2fe4b9f3e97`.
+- Implemented application rules include the approved palette (`#FCB13C`, `#D6720E`, `#080808`, `#FFFFFF`), Noto Sans CJK-first UI typography, 12-column/large-margin/left-aligned layout, and single-focus treatment. The 40px independent-mark/white-circle and 140px combination-mark rules remain acceptance checks for a future approved master.
+
+### Approved-PDF-derived raster provenance
+
+The authoritative PDF contains no independent vector `/Form` logo object, so the project does not claim an original SVG/vector master. The approved standard pages do contain lossless RGB `/Image` XObjects with `/SMask`. The independently verified delivery reconstructs those objects as transparent PNG without screenshots, OCR, vectorization, generative redraw, or cross-brand assets.
+
+- Delivery ZIP: `giraffe-vi-v1.2-approved-pdf-derived-raster-assets.zip`, 1,242,218 bytes, SHA-256 `91FA47AC57DE5E77D745A0479C812417CE62D1EAC5079D81DD0669E48CD515D9`.
+- Web asset: `giraffe-logo-graphic-mark-approved-pdf-derived.png`, 615×802, 271,382 bytes, SHA-256 `DFD19B25AE703DD1F4584CC255D822A26A967BE3100EB2C94202CCC541724E4F`.
+- Traceability manifest: `docs/brand/giraffe-vi-v1.2-approved-pdf-derived-raster-manifest.json`, repository copy SHA-256 `94261811698178C804BF6FEA94BD136DA164450A3BD02BE4B14F5F9594F0CA2D`.
+  The manifest's human-readable labels and usage constraints are translated to English; source PDF, extraction-tool, image identities and asset hashes are unchanged. The immediately preceding tracked manifest bytes had SHA-256 `41EFD4377AE884594A2A2F2136F901C04061E84ADBAB23AE663DE38D26FA5DD0`. Earlier documentation recorded `0131A4C0564A5E2AFC3ACC3CE66BF17B618C4646C3264A501E687A81C2DA71E1`; that historical value differs from those tracked bytes and has not been revalidated against the imported source.
+
+The UI renders the independent mark without distortion inside a white, strictly circular base. The approved mark is at least 40px high in the header and 52px on the login screen. ArtCCH, the QC icon, JINÉ/NÉSHA, old Stage 3 UI, `giraffe-icon-tight.png`, screenshots, and JPG sources are excluded. This asset may be called an **approved-PDF-derived raster asset**, never an original vector master; unlimited scaling/print editing still requires brand-owner SVG/AI/EPS/vector-PDF delivery.
+
+## Current acceptance and preservation
+
+Use [MyAivan Web Requirements](MYAIVAN_WEB_PRD.md) and [Acceptance Criteria](ACCEPTANCE_CRITERIA.md). A fixed five-locale set, public A-K checklist, zero-P0/P1 review label or paid scanning feature does not independently establish an additional product gate. CI must be green before a merge; unavailable checks and engineering risks are reported accurately, not hidden.
+
+Retain brand assets and truthful raster provenance. Preserve candidate code/tests and record legacy static-catalog/readiness differences in the scope inventory for separate authorized implementation. Do not delete useful assets, silently disable runtime guards or claim this documentation update changed the UI. Any target deployment or external message still requires its applicable authorization.

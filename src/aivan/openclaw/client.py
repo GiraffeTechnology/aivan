@@ -1,11 +1,11 @@
 from __future__ import annotations
 import os
-import httpx
 import logging
+from aivan.observability.safe_logging import log_exception_safely
+import httpx
+from aivan.governance.runtime_policy import is_production
 from aivan.openclaw.contracts import OpenClawSendRequest, OpenClawSendResponse
 from aivan.utils.time_utils import utcnow_iso
-from aivan.observability.safe_logging import log_exception_safely
-from aivan.governance.runtime_policy import is_production
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,8 @@ class OpenClawClient:
         self.base_url = os.environ.get("OPENCLAW_BASE_URL", "")
         self.api_key = os.environ.get("OPENCLAW_API_KEY", "")
         self.mock_mode = os.environ.get("OPENCLAW_MOCK_MODE", "true").lower() == "true"
-        if is_production() and self.mock_mode:
-            raise RuntimeError("OPENCLAW_MOCK_FORBIDDEN_IN_PRODUCTION")
+        if self.mock_mode and is_production():
+            raise RuntimeError("OPENCLAW_MOCK_FORBIDDEN")
         self.timeout = 30
 
     def _headers(self) -> dict:
@@ -26,10 +26,12 @@ class OpenClawClient:
 
     def send_message(self, request: OpenClawSendRequest) -> OpenClawSendResponse:
         if self.mock_mode:
+            # A simulation is not a transport acknowledgement. Callers persist
+            # sent only on success; never let a mock create that business fact.
             return OpenClawSendResponse(
-                success=True,
-                message_id=f"mock_msg_{request.conversation_id}_{utcnow_iso()}",
-                sent_at=utcnow_iso(),
+                success=False,
+                outcome_uncertain=False,
+                error="OPENCLAW_MOCK_MODE_NOT_SENT",
             )
         if not self.base_url:
             return OpenClawSendResponse(success=False, error="OPENCLAW_BASE_URL not configured")
@@ -43,21 +45,28 @@ class OpenClawClient:
             )
             resp.raise_for_status()
             data = resp.json()
+            if not isinstance(data, dict) or type(data.get("success")) is not bool:
+                raise ValueError("Missing explicit transport acknowledgement")
+            if data["success"] and not (isinstance(data.get("message_id"), str) and data["message_id"].strip()):
+                raise ValueError("Missing transport message identifier")
             return OpenClawSendResponse(
-                success=data.get("success", True),
-                message_id=data.get("message_id", ""),
+                success=data["success"], message_id=data.get("message_id", ""),
                 sent_at=data.get("sent_at", utcnow_iso()),
+                error=None if data["success"] else "Outbound transport rejected the request",
             )
-        except Exception as exc:
-            error_id = log_exception_safely(logger, "OpenClaw send failed", exc=exc)
-            return OpenClawSendResponse(
-                success=False,
-                error=f"OPENCLAW_REQUEST_FAILED:{error_id}",
-            )
+        except httpx.HTTPStatusError as exc:
+            uncertain = not (400 <= exc.response.status_code < 500)
+            return OpenClawSendResponse(success=False, outcome_uncertain=uncertain,
+                                       error="Outbound delivery is unconfirmed" if uncertain else "Outbound transport rejected the request")
+        except Exception:
+            # A lost response does not establish that the remote side rejected it.
+            return OpenClawSendResponse(success=False, outcome_uncertain=True,
+                                       error="Outbound delivery is unconfirmed")
 
     def check_account_status(self, account_connection_id: str) -> dict:
         if self.mock_mode:
-            return {"status": "connected", "account_connection_id": account_connection_id}
+            return {"status": "mock", "account_connection_id": account_connection_id,
+                    "error": "OPENCLAW_MOCK_MODE_NOT_CONNECTED"}
         if not self.base_url:
             return {"status": "error", "error": "OPENCLAW_BASE_URL not configured"}
         try:

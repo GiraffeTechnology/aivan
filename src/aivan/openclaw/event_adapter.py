@@ -17,6 +17,7 @@ def parse_openclaw_event(data: dict) -> OpenClawEvent:
         message_text=data.get("message_text", ""),
         message_type=data.get("message_type", "text"),
         attachments=data.get("attachments", []),
+        saved_attachment_source=data.get("saved_attachment_source"),
         timestamp=data.get("timestamp", ""),
         project_id=data.get("project_id"),
         actor_id=data.get("actor_id"),

@@ -179,6 +179,7 @@ async function safeFetch(path, options, policy = {}) {
         try {
             const res = await fetch(url, {
                 ...options,
+                redirect: "manual",
                 signal: controller.signal,
                 headers: { ...buildHeaders(policy), ...(options?.headers ?? {}) },
             });
@@ -338,22 +339,40 @@ export async function getPendingDrafts(projectId) {
 }
 /**
  * aivan.approveDraft — Approve a pending draft for sending.
- * AIVAN will then send the message via OpenClaw. This plugin does NOT
- * send the message itself.
+ * Core reports the actual approval and delivery state; IM remains manual.
+ * This plugin does not send the message itself.
  */
-export async function approveDraft(draftId) {
+export async function approveDraft(draftId, previewId) {
     const result = await safeFetch(`/api/drafts/${encodeURIComponent(draftId)}/approve`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ preview_id: previewId }),
     });
     if (!result.ok) {
         return {
             approved: false,
             draft_id: draftId,
+            status: "unknown",
+            sent: false,
             error: result.error?.message ?? "Approval failed",
         };
     }
-    return { approved: true, draft_id: draftId };
+    const data = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+        ? result.data : {};
+    const knownStatuses = new Set([
+        "pending_approval", "approved", "approved_pending_send", "sent", "relayed",
+        "send_failed", "delivery_unconfirmed", "rejected", "superseded", "error",
+    ]);
+    const status = typeof data.status === "string" && knownStatuses.has(data.status)
+        ? data.status : "unknown";
+    const approved = ["approved", "approved_pending_send", "sent", "relayed",
+        "send_failed", "delivery_unconfirmed"].includes(status);
+    const error = typeof data.error === "string" && data.error.trim()
+        ? data.error : approved ? undefined : "Approval was not confirmed by AIVAN.";
+    return {
+        approved, draft_id: draftId, status,
+        sent: approved && status === "sent" && (data.sent === true || data.sent === undefined),
+        ...(error ? { error } : {}),
+    };
 }
 /**
  * aivan.rejectDraft — Reject and discard a pending draft.
@@ -401,7 +420,7 @@ function registerAivanTools(api) {
             }, undefined],
         [{ name: "aivan.openDashboard", description: "Return the local AIVAN dashboard URL without opening a browser.", parameters: Type.Object({}, { additionalProperties: false }), async execute() { return toolResult(openDashboard()); } }, undefined],
         [{ name: "aivan.getPendingDrafts", description: "List outbound AIVAN drafts still awaiting human approval.", parameters: Type.Object({ project_id: Type.Optional(Type.String()) }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await getPendingDrafts(params.project_id)); } }, undefined],
-        [{ name: "aivan.approveDraft", description: "Submit an explicit human approval decision to AIVAN Core; the plugin cannot send directly or bypass authorization.", parameters: Type.Object({ draft_id: Type.String() }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await approveDraft(params.draft_id)); } }, { optional: true }],
+        [{ name: "aivan.approveDraft", description: "Submit an explicit human approval decision to AIVAN Core, carrying an existing reviewed preview reference when required; the plugin cannot create review proof or bypass authorization.", parameters: Type.Object({ draft_id: Type.String(), preview_id: Type.Optional(Type.String({ pattern: "^render_[a-f0-9]{32}$" })) }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await approveDraft(params.draft_id, params.preview_id)); } }, { optional: true }],
         [{ name: "aivan.rejectDraft", description: "Reject a pending AIVAN draft with an optional operator reason.", parameters: Type.Object({ draft_id: Type.String(), reason: Type.Optional(Type.String()) }, { additionalProperties: false }), async execute(_id, params) { return toolResult(await rejectDraft(params.draft_id, params.reason)); } }, { optional: true }],
     ];
     for (const [descriptor, options] of registrations) {
@@ -435,8 +454,8 @@ function extractPrompt(params) {
     ];
     return candidates.find((v) => typeof v === "string" && v.trim().length > 0)?.trim() ?? "";
 }
-// This is the single runtime boundary consumed by both supports() and
-// runAttempt(). The SKILL artifact references the same JSON contract.
+// Message intent is checked in runAttempt(), after explicit runtime selection.
+// The SKILL artifact references the same JSON contract.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isTradeSourcingIntent(params) {
     const structured = String(params?.metadata?.intent ?? params?.intent ?? "").toLowerCase();
@@ -489,7 +508,7 @@ function extractSessionContext(params) {
     return ctx;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildPassThroughResult(params) {
+function buildEmptyAttemptResult(params) {
     const sessionId = typeof params?.sessionId === "string" ? params.sessionId : "";
     return {
         aborted: false,
@@ -519,7 +538,7 @@ function buildPassThroughResult(params) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildNoOutboundResult(params) {
     return {
-        ...buildPassThroughResult(params),
+        ...buildEmptyAttemptResult(params),
         didSendViaMessagingTool: true,
         aivanHandled: true,
         outboundAuthorization: "required",
@@ -541,28 +560,32 @@ export function register(api) {
         api.registerAgentHarness({
             id: "openclaw-aivan",
             label: "AIVAN Agent Harness",
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            // The SDK selects harnesses before it supplies a message prompt. AIVAN
+            // must be explicitly routed; it never claims arbitrary model providers.
+            autoSelection: { providerIds: [] },
             supports(ctx) {
-                const supported = isTradeSourcingIntent(ctx);
+                const supported = ctx.requestedRuntime === "openclaw-aivan";
                 return {
                     supported,
                     reason: supported
-                        ? "Matched the shared AIVAN trade-sourcing intent boundary."
-                        : "Non-trade message: explicit pass-through to the next OpenClaw harness.",
+                        ? "Explicit AIVAN runtime selected; trade intent is checked per attempt."
+                        : "AIVAN requires explicit openclaw-aivan runtime selection.",
                 };
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             async runAttempt(params) {
+                let matchedTrade = false;
                 try {
                     const prompt = extractPrompt(params);
                     if (!prompt) {
-                        process.stderr.write("[aivan] runAttempt: no prompt found in params, returning pass-through\n");
-                        return buildPassThroughResult(params);
+                        process.stderr.write("[aivan] runAttempt: no prompt found in params, returning an empty attempt\n");
+                        return buildEmptyAttemptResult(params);
                     }
                     if (!isTradeSourcingIntent(params)) {
-                        process.stderr.write("[aivan] runAttempt: outside trade-sourcing boundary, returning pass-through\n");
-                        return buildPassThroughResult(params);
+                        process.stderr.write("[aivan] runAttempt: outside trade-sourcing boundary, no Core call or reply\n");
+                        return buildEmptyAttemptResult(params);
                     }
+                    matchedTrade = true;
                     const ctx = extractSessionContext(params);
                     const stableMessageId = ctx.message_id ??
                         `ocmsg_${createHash("sha256")
@@ -597,14 +620,11 @@ export function register(api) {
                     }
                     catch (fetchErr) {
                         process.stderr.write(`[aivan] AIVAN fetch error: ${String(fetchErr)}\n`);
-                        return buildPassThroughResult(params);
+                        return buildNoOutboundResult(params);
                     }
                     if (!result.accepted) {
                         process.stderr.write(`[aivan] AIVAN did not accept event: ${result.error ?? "no reason"}\n`);
-                        if (result.reply_text) {
-                            return buildNoOutboundResult(params);
-                        }
-                        return buildPassThroughResult(params);
+                        return buildNoOutboundResult(params);
                     }
                     const replyText = result.reply_text ??
                         (result.project_id
@@ -615,7 +635,9 @@ export function register(api) {
                 }
                 catch (err) {
                     process.stderr.write(`[aivan] runAttempt unexpected error: ${String(err)}\n`);
-                    return buildPassThroughResult(params);
+                    return matchedTrade
+                        ? buildNoOutboundResult(params)
+                        : buildEmptyAttemptResult(params);
                 }
             },
         });

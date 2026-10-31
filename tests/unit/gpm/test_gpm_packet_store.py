@@ -175,9 +175,10 @@ def test_production_durable_success_never_populates_memory(monkeypatch, mock_db)
     mock_db.get_packet.return_value = SAMPLE
     mock_db.update_packet_status.return_value = approved
 
-    assert store.save(SAMPLE) == SAMPLE
+    assert store.save(SAMPLE, tenant_id="default") == SAMPLE
     assert store.get(SAMPLE["packet_id"], tenant_id="default") == SAMPLE
     assert store.update_status(
         SAMPLE["packet_id"], "approved", "op-001", tenant_id="default"
     ) == approved
     assert store._mem == {}
+

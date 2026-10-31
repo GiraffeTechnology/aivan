@@ -17,7 +17,24 @@ let lastEvent = null;
 let lastIdempotencyKey = null;
 let lastHeaders = null;
 let previousIdempotencyKey = null;
+let approvalPayload = {status: "approved"};
+let requirePreviewProof = false;
+let lastApprovalBody = null;
+let approvalRequestCount = 0;
+const reviewedPreviewId = "render_" + "a".repeat(32);
+let redirectStatus = 0;
+let redirectSourceCount = 0;
+const redirectedRequests = [];
 const reply = "RFQ accepted for supplier sourcing.";
+
+const redirectDestination = createServer((request, response) => {
+  redirectedRequests.push({ method: request.method, headers: request.headers });
+  request.resume();
+  response.writeHead(200, { "Content-Type": "application/json" });
+  response.end(JSON.stringify({status: "approved", output: "Unexpected destination"}));
+});
+await new Promise((resolve) => redirectDestination.listen(0, "127.0.0.1", resolve));
+const redirectUrl = `http://127.0.0.1:${redirectDestination.address().port}/unexpected`;
 
 const server = createServer((request, response) => {
   let body = "";
@@ -27,6 +44,11 @@ const server = createServer((request, response) => {
       response.writeHead(status, { "Content-Type": "application/json" });
       response.end(JSON.stringify(data));
     };
+    if (redirectStatus && (request.url === "/invoke" || request.url === "/api/drafts/draft-1/approve")) {
+      redirectSourceCount += 1;
+      response.writeHead(redirectStatus, {Location: redirectUrl});
+      return response.end();
+    }
     if (request.url === "/api/health") return json(200, { status: "ok", version: "0.3.0" });
     if (request.url === "/invoke" && request.method === "POST") {
       invokeCount += 1;
@@ -40,7 +62,16 @@ const server = createServer((request, response) => {
     if (request.url?.startsWith("/api/drafts?") || request.url === "/api/drafts") {
       return json(200, { drafts: [{ draft_id: "draft-1", project_id: "project-1", channel: "weixin", target_role: "supplier", message_text: "Please quote", created_at: "2026-08-03T00:00:00Z" }] });
     }
-    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") return json(200, { status: "approved" });
+    if (request.url === "/api/drafts/draft-1/approve" && request.method === "POST") {
+      approvalRequestCount += 1;
+      lastApprovalBody = JSON.parse(body || "{}");
+      if (requirePreviewProof && lastApprovalBody.preview_id !== reviewedPreviewId) {
+        return json(lastApprovalBody.preview_id ? 404 : 409, {
+          detail: {error: lastApprovalBody.preview_id ? "DRAFT_PREVIEW_NOT_FOUND" : "DRAFT_LOCALIZED_PREVIEW_REQUIRED"},
+        });
+      }
+      return json(200, approvalPayload);
+    }
     if (request.url === "/api/drafts/draft-1/reject" && request.method === "POST") return json(200, { status: "rejected" });
     return json(404, { detail: "not found" });
   });
@@ -82,13 +113,13 @@ assert("reject tool is optional", toolOptions.get("aivan.rejectDraft")?.optional
 assert("Agent Harness registered", harness?.id === "openclaw-aivan");
 
 const nonTrade = { prompt: "What is the weather today?", sessionId: "non-trade" };
-assert("supports rejects non-trade messages", harness.supports(nonTrade).supported === false);
+assert("supports rejects automatic runtime selection", harness.supports({ provider: "test-provider", modelId: "test-model", requestedRuntime: "auto" }).supported === false);
 const beforePassThrough = invokeCount;
 const passThrough = await harness.runAttempt(nonTrade);
-assert("non-trade messages explicitly pass through", passThrough.assistantTexts.length === 0 && invokeCount === beforePassThrough);
+assert("selected harness makes no Core call and returns no reply for non-trade messages", passThrough.assistantTexts.length === 0 && invokeCount === beforePassThrough);
 
 const trade = { prompt: "Please source suppliers and request for quotation for 5,000 shirts", sessionId: "trade-1", senderId: "buyer-1", channel: "weixin", metadata: { intent: "trade-sourcing" } };
-assert("supports accepts shared trade-sourcing intent", harness.supports(trade).supported === true);
+assert("supports accepts explicit AIVAN runtime selection without a prompt", harness.supports({ provider: "test-provider", modelId: "test-model", requestedRuntime: "openclaw-aivan" }).supported === true);
 mode = "success";
 const attempt = await harness.runAttempt(trade);
 assert("trade attempt is captured without automatic outbound reply", attempt.assistantTexts.length === 0 && attempt.didSendViaMessagingTool === true && attempt.outboundAuthorization === "required");
@@ -113,7 +144,83 @@ assert("tool parameters cannot self-assert an internal sales role", lastHeaders[
 assert("openDashboard tool callable", (await invokeTool("aivan.openDashboard")).details.url.endsWith("/app"));
 assert("getPendingDrafts tool callable", (await invokeTool("aivan.getPendingDrafts", { project_id: "project-1" })).details.drafts.length === 1);
 assert("approveDraft tool callable", (await invokeTool("aivan.approveDraft", { draft_id: "draft-1" })).details.approved === true);
+for (const payload of [
+  {status: "pending_approval", sent: false, error: "DRAFT_APPROVAL_PREVIEW_CHANGED"},
+  {status: "pending_approval", sent: true},
+  {status: "error", error: "Approval is unavailable"},
+  {},
+]) {
+  approvalPayload = payload;
+  const result = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert(`HTTP 200 ${payload.status ?? "missing status"} is not approval`, result.approved === false);
+  assert(`HTTP 200 ${payload.status ?? "missing status"} is not delivery`, result.sent !== true);
+  assert(`HTTP 200 ${payload.status ?? "missing status"} explains unconfirmed approval`, typeof result.error === "string" && result.error.length > 0);
+}
+for (const payload of [
+  {status: "approved_pending_send", sent: false},
+  {status: "sent", sent: true},
+  {status: "send_failed", sent: false, error: "Outbound transport failed"},
+  {status: "delivery_unconfirmed", sent: false, error: "Outbound delivery is unconfirmed"},
+]) {
+  approvalPayload = payload;
+  const result = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert(`${payload.status} retains the actual approval decision`, result.approved === true);
+  assert(`${payload.status} preserves actual delivery state`, result.status === payload.status && result.sent === payload.sent);
+  if (payload.error) assert(`${payload.status} preserves the operator recovery reason`, result.error === payload.error);
+}
+approvalPayload = {status: "approved"};
 assert("rejectDraft tool callable", (await invokeTool("aivan.rejectDraft", { draft_id: "draft-1", reason: "operator decision" })).details.rejected === true);
+
+assert("approval tool exposes the reviewed preview reference", tools.get("aivan.approveDraft").parameters.properties.preview_id?.type === "string");
+requirePreviewProof = true;
+approvalPayload = {status: "approved_pending_send", sent: false};
+try {
+  approvalRequestCount = 0;
+  const missing = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert("missing localized review proof is rejected without retry", missing.approved === false && approvalRequestCount === 1);
+  approvalRequestCount = 0;
+  const invalid = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1", preview_id: "render_" + "b".repeat(32)})).details;
+  assert("unknown review proof remains rejected by Core", invalid.approved === false && approvalRequestCount === 1);
+  assert("unknown review proof is not silently replaced", lastApprovalBody.preview_id === "render_" + "b".repeat(32));
+  approvalRequestCount = 0;
+  const reviewed = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1", preview_id: reviewedPreviewId})).details;
+  assert("reviewed localized proof reaches the existing approval endpoint", reviewed.approved === true && lastApprovalBody.preview_id === reviewedPreviewId);
+  assert("review proof transport neither retries nor claims delivery", approvalRequestCount === 1 && reviewed.status === "approved_pending_send" && reviewed.sent === false);
+} finally {
+  requirePreviewProof = false;
+  approvalPayload = {status: "approved"};
+}
+
+// Credential-bearing Core requests must never follow an HTTP redirect to a
+// different origin or replay a human-authorized action at its destination.
+const priorApiKey = process.env.AIVAN_API_KEY;
+const priorTenant = process.env.AIVAN_TENANT_ID;
+process.env.AIVAN_API_KEY = "synthetic-redirect-test-key";
+process.env.AIVAN_TENANT_ID = "synthetic-redirect-test-tenant";
+try {
+  for (const status of [301, 302, 303, 307, 308]) {
+    redirectStatus = status;
+    redirectSourceCount = 0;
+    const result = (await invokeTool("aivan.forwardEvent", {
+      channel: "weixin", conversation_id: "redirect-check", sender_id: "buyer-redirect",
+      message_text: "RFQ", message_id: `redirect-${status}`,
+    })).details;
+    assert(`HTTP ${status} is not accepted as a Core result`, result.accepted === false);
+    assert(`HTTP ${status} does not retry the redirected request`, redirectSourceCount === 1);
+    assert(`HTTP ${status} sends no identity or body to the destination`, redirectedRequests.length === 0);
+  }
+  redirectStatus = 307;
+  redirectSourceCount = 0;
+  const result = (await invokeTool("aivan.approveDraft", {draft_id: "draft-1"})).details;
+  assert("redirected approval is not reported as approved or sent", result.approved === false && result.sent === false);
+  assert("redirected approval is attempted once without destination action", redirectSourceCount === 1 && redirectedRequests.length === 0);
+} finally {
+  redirectStatus = 0;
+  if (priorApiKey === undefined) delete process.env.AIVAN_API_KEY;
+  else process.env.AIVAN_API_KEY = priorApiKey;
+  if (priorTenant === undefined) delete process.env.AIVAN_TENANT_ID;
+  else process.env.AIVAN_TENANT_ID = priorTenant;
+}
 
 mode = "error";
 invokeCount = 0;
@@ -128,7 +235,32 @@ const degraded = await harness.runAttempt(trade);
 assert("HTTP 200 fail-soft result remains local and does not auto-reply", degraded.assistantTexts.length === 0 && degraded.didSendViaMessagingTool === true);
 globalThis.fetch = originalFetch;
 
+// Matched trade events must never unlock automatic downstream replies on failure.
+function noOutbound(result) {
+  return result.aivanHandled === true && result.didSendViaMessagingTool === true &&
+    result.outboundAuthorization === "required" && result.assistantTexts.length === 0 &&
+    result.messagingToolSentTexts.length === 0 && result.messagingToolSentMediaUrls.length === 0 &&
+    result.messagingToolSentTargets.length === 0;
+}
+try {
+  for (const status of [401, 403, 409, 422, 503]) {
+    globalThis.fetch = async () => new Response(JSON.stringify({ detail: "Controlled dependency failure" }), {
+      status, headers: { "Content-Type": "application/json" },
+    });
+    assert(`matched HTTP ${status} failure suppresses automatic outbound fallback`, noOutbound(await harness.runAttempt(trade)));
+  }
+  globalThis.fetch = async () => { throw new Error("Controlled transport failure"); };
+  assert("matched transport failure suppresses automatic outbound fallback", noOutbound(await harness.runAttempt(trade)));
+  let contextFetches = 0;
+  globalThis.fetch = async () => { contextFetches += 1; throw new Error("Unexpected request"); };
+  const invalidContext = { ...trade, get senderId() { throw new Error("Controlled context failure"); } };
+  assert("matched context failure suppresses automatic outbound fallback", noOutbound(await harness.runAttempt(invalidContext)) && contextFetches === 0);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 await new Promise((resolve) => server.close(resolve));
+await new Promise((resolve) => redirectDestination.close(resolve));
 console.log(`GATEWAY STAGE3 TEST: ${failed === 0 ? "PASS" : "FAIL"} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);
 

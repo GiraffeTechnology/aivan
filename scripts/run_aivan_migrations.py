@@ -28,10 +28,11 @@ from scripts import (
     migrate_stage2_role_domain as stage2,
     migrate_stage4_relay as stage4,
     migrate_stage5a_event_correction as stage5a,
+    migrate_ui_ticket_receipts as ui_tickets,
 )
 
 
-SCHEMA_VERSION = "2026.08.10-stage7b"
+SCHEMA_VERSION = "2026.11.01-ui-ticket-receipts"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -65,6 +66,7 @@ def plan(database_url: str, tenant_id: str) -> dict:
             "stage2": stage2.plan(database_url),
             "stage4": stage4.plan(database_url),
             "stage5a": stage5a.plan(database_url),
+            "ui_tickets": ui_tickets.plan(database_url),
         },
         "tenant_id_present": bool(tenant_id.strip()),
     }
@@ -102,6 +104,7 @@ def apply(
                 "stage2": stage2.apply(database_url),
                 "stage4": stage4.apply(database_url),
                 "stage5a": stage5a.apply(database_url),
+                "ui_tickets": ui_tickets.apply(database_url),
             }
             SchemaMigrationRecord.__table__.create(engine, checkfirst=True)
         issues = schema_issues(engine)

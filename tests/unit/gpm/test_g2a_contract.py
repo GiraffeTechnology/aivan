@@ -554,6 +554,9 @@ def test_versioned_httpx_decision_errors_reach_api_status(
     monkeypatch.setenv("AIVAN_ENV", "local")
     adapter = _client(monkeypatch)
     adapter._session = MagicMock()
+    # This test isolates the accepted legacy atomic-decision adapter, not the
+    # newer quote-lineage packet API or its separate capability discovery.
+    adapter.packet_api_version = None
     adapter._session.get.return_value = _response(
         {"contract_version": GPM_PERSISTENCE_CONTRACT_VERSION}
     )
@@ -610,3 +613,39 @@ def test_decision_route_rejects_body_operator_and_all_tenant_hmac_decisions(deci
         "error": "GPM_HMAC_DECISION_FORBIDDEN",
         "correlation_id": "trace-route-1",
     }
+
+
+def test_verified_production_api_key_context_is_preserved_for_principal(monkeypatch):
+    from fastapi import Depends
+    from aivan.gpm.auth import require_principal
+
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_API_KEY", "synthetic-deployment-key")
+    monkeypatch.setenv("AIVAN_TENANT_ID", "tenant-a")
+    monkeypatch.delenv("AIVAN_TENANT_API_KEYS", raising=False)
+    monkeypatch.delenv("AIVAN_AUTH_SECRET", raising=False)
+    app = FastAPI()
+    provider = MagicMock()
+    provider.get_tenant.return_value = {"tenant_id": "tenant-a", "status": "active"}
+    app.state.giraffe_db_client = provider
+
+    @app.get("/principal")
+    async def identity(principal=Depends(require_principal)):
+        return {"tenant": principal.tenant_id, "actor": principal.actor_id,
+                "role": principal.role, "basis": principal.authorization_basis}
+
+    response = TestClient(app).get("/principal", headers={
+        "X-AIVAN-API-Key": "synthetic-deployment-key",
+        "X-AIVAN-Tenant-ID": "tenant-a",
+        "X-AIVAN-Actor-ID": "operator-1",
+        "X-AIVAN-Role-Context": "sales",
+        "X-AIVAN-Trace-ID": "synthetic-principal-check",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "tenant": "tenant-a", "actor": "operator-1", "role": "sales",
+        "basis": "deployment_api_key",
+    }
+    provider.create_packet.assert_not_called()
+    provider.apply_decision.assert_not_called()
+

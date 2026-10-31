@@ -21,10 +21,7 @@ This plugin is a **thin HTTP bridge** between OpenClaw and your local AIVAN serv
 - Exposes helper commands to check AIVAN health and open the local dashboard
 - Lets OpenClaw operators view, approve, or reject pending outbound drafts
 
-The plugin contains **no business logic**. It cannot authorize an outbound
-message: AIVAN's shared authorization and channel-policy gates remain mandatory.
-Business facts and process state stay authoritative in the chosen private-domain DB (`giraffe-db` or a compatible replacement), and lead-time results stay
-authoritative in GLTG.
+The plugin contains **no business logic**. Aivan owns the trade workflow and consumes configured GLTG/GPM APIs for their lead-time and pricing results. The bridge neither embeds those calculation engines nor replaces the private-domain DB.
 
 ---
 
@@ -53,6 +50,11 @@ Authorized channel action / manual IM relay
 ---
 
 ## Install
+
+For the unpublished explicit-routing compatibility candidate, review
+[existing Gateway reuse](EXISTING_GATEWAY_REUSE.md) before changing a working
+WeChat installation. The candidate does not install or upgrade Tencent's channel
+plugin, log in an account, or enable automatic replies.
 
 ### 1. Install and run AIVAN locally
 
@@ -96,23 +98,39 @@ clawhub package link .
 | `AIVAN_ROLE_CONTEXT` | Production | *(none)* | Static Core role context for the service actor |
 | `AIVAN_CONVERSATION_ROLE` | No | *(none)* | Static conversation role for the service actor |
 | `AIVAN_EXECUTION_MODE` | No | *(none)* | Static execution mode for the service actor |
+| `AIVAN_CHANNEL_ACCOUNT_ID` | Production channel binding | *(none)* | Trusted channel account for this plugin process |
 
 `aivan.forwardEvent` supplies a stable `Idempotency-Key`, so connection, 429 and
 5xx failures can be retried without duplicating an inbound event. Approval and
 rejection actions are never automatically retried. Failures are returned as
 user-visible `AIVAN_*` error codes with a `retryable` flag.
 
+Core requests do not follow HTTP redirects. Configure `AIVAN_BASE_URL` with the
+actual Core API destination rather than a redirecting landing page. A 3xx
+response is an error: the bridge does not forward credentials, tenant/actor
+headers or an approval request to the redirect destination.
+
 Set these in your OpenClaw workspace or in the shell before starting the OpenClaw agent.
 
-### Stage 3 trusted-identity limitation
+### Service and participant identity
 
-The identity variables above are read from the process environment and apply to
-every message handled by that OpenClaw process. Stage 3 does **not** map an
-individual WeChat participant to a trusted AIVAN actor or role. Do not enable this
-bridge for production multi-participant role attribution until Stage 4 adds a
-per-channel/per-participant trust binding. In production mode, missing required
-service identity values fail closed; using one fixed identity does not make every
-participant that identity. AIVAN Core RBAC and human approval remain mandatory.
+The process environment supplies the static service identity. The current bridge
+separately derives a participant ID from the event channel, account (or `default`)
+and sender, and sends participant role/conversation headers. Internal/operator
+role aliases are reduced to buyer for participant attribution; they do not grant
+operator capabilities. Aivan Core still authenticates the service, binds the
+tenant/account and enforces role and object access.
+
+This supersedes the historical Stage 3 statement that every message has only one
+service identity. It does not establish a live provider's sender authenticity.
+The upstream gateway must supply trustworthy sender, account and role metadata;
+missing SDK metadata and fallback identities require integration validation.
+The checked-in gateway harness uses synthetic inputs, not real IM accounts.
+
+The legacy `content/from_user/room_id` callback is a supported input shape, not
+proof of a personal WeChat or WeCom connection. No WeCom-specific login, signature
+verification or account connector is implemented in this bridge. Account access
+belongs to the configured OpenClaw gateway; do not bypass platform restrictions.
 
 ---
 
@@ -129,7 +147,7 @@ OPENCLAW_MOCK_MODE=true
 In mock mode:
 - All LLM calls return deterministic mock responses
 - OpenClaw events are simulated without a real IM/email connection
-- No external API calls are made
+- These switches simulate the model/channel boundary; they do not disable configured DB, GLTG or language-service HTTP calls
 - Test results must be recorded for the exact candidate; mock success does not establish live channel delivery
 
 ---
@@ -159,10 +177,26 @@ OpenClaw has no generic numeric priority field for skills. The explicit
 invocation, and the skill description carries the same first-match rule in the
 eligible-skill catalog. The Agent Harness `supports()` phase receives
 provider/model facts rather than the inbound prompt, so it is not used to fake
-message-level skill priority. Outside the shared boundary the workflow must
-explicitly pass through. Neither mechanism authorizes outbound delivery.
+message-level skill priority. Once explicitly selected, a non-trade attempt
+returns no reply and makes no Core call; this does not replay the turn through
+another runtime. The workflow boundary metadata is not an SDK handoff. Neither
+mechanism authorizes outbound delivery.
 
 The plugin cannot bypass this gate. Calling `aivan.approveDraft` sends the action to the AIVAN API, which enforces the policy server-side.
+
+`aivan.approveDraft` returns Core's actual `status`, `approved` and `sent`
+outcomes. Pending, revoked or unknown approval is not success. A real approval
+may coexist with failed or unconfirmed delivery, with an explanation for the
+operator; it does not trigger an automatic retry. Manual IM relay is not a
+provider delivery receipt, and approval alone never means a message was sent.
+
+When reviewing a localized draft through Core's existing preview interface,
+pass its reviewed `preview_id` alongside `draft_id` to `aivan.approveDraft`.
+Core still verifies the draft, tenant, source, recipient and rendered content.
+The bridge forwards this reference unchanged: it does not generate a preview,
+replace an unknown reference or retry after missing/stale proof. Omitting the
+field retains Core's existing English-approval compatibility behavior, not a
+bypass for a localized review.
 
 ---
 

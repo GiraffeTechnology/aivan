@@ -1,0 +1,75 @@
+{
+  "upstream_repository": "GiraffeTechnology/abcdYi",
+  "upstream_commit": "da881d30ded1d89df987c0e7d9e3cccb1902c3fc",
+  "source_files_sha256": {
+    "frontend/package.json": "aa4a22e8116303e474fa7d2690703f16005626bfc9855f897fd1158422ee40c8",
+    "frontend/package-lock.json": "16f8d84b91da9fcbb56a0661fc8f6aff1b7085fd6743441a738f91eb21777b9c",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "frontend/src/execution/ExecutionWorkspace.tsx": "4edf2293a4a6a4ecf21ba47e091a1ada00ca7a8ea0f70a6190ba5c619fae894f",
+    "frontend/src/execution/host.tsx": "793d3798b59db611a46ea8cd898abc6d32604aa2e3e884241dfbb178979a993b",
+    "frontend/src/execution/store.ts": "82411e704f97d17035d206f65e79ed73c128c0ea582fd75bb6b9b40d9d3afe96",
+    "frontend/src/execution/transport.ts": "78400428b15931942b43bfc08a946ba4a9bf0548ca37aba738eacd490474f315",
+    "frontend/src/execution/contracts.ts": "f6ab646db875f2dcae761bad693cc93496a4b6bc53b589057d6a7c468e10b19c",
+    "frontend/src/execution/execution.css": "204951b8d228c9f29133cdb5e09fc4b19832930e2691b74b3697be8c8bae43f1",
+    "frontend/src/execution/host-source-adapter.js": "df40c0cd345f52d38f7b0c068723d3d08f538b5fab3f4ea1a2ee16274c77aa0e",
+    "LICENSE_NOTICE.md": "270ef40d9e2b19c80342e5ad66a63ad5533aaf41445bc9bb4aaa6e46b96b6126",
+    "PATENT_NOTICE.md": "b7a92bb063d63698cb8a626e7bb25f59d11f02fa6129704310198aa15a3ba6c8"
+  },
+  "build": {
+    "node": "v24.18.0",
+    "versions": {
+      "react": "18.3.1",
+      "react-dom": "18.3.1",
+      "scheduler": "0.23.2",
+      "vite": "4.5.14",
+      "esbuild": "0.18.20"
+    }
+  },
+  "assets": {
+    "r6-workspace-f988a2df90fe83aa.css": {
+      "bytes": 1039,
+      "sha256": "f988a2df90fe83aa51735f44d031e891d4be1f8f81289b466ac920ee7cba239a"
+    },
+    "r6-workspace-dbdc4b643d7add02.js": {
+      "bytes": 156244,
+      "sha256": "dbdc4b643d7add02fcfc01f36f20b50c9fcb5ce3aaf1e30178e063b8becea14d"
+    },
+    "r6-execution-LICENSES.txt": {
+      "bytes": 14766,
+      "sha256": "3222d5839f729deedcac024fd48e0774008a6e4ca4530c9d7561dcbce602750e"
+    },
+    "r6-execution-NOTICES.txt": {
+      "bytes": 8247,
+      "sha256": "d6b7b1b1128e1a9d2ef50e48dafb77122a02047a4a87d8978d4a1e96a0d95b2c"
+    }
+  },
+  "qualification": "Pinned R6 read-only workspace and adapter. Host integration remains a separate source file; no backend or credentials embedded.",
+  "build_entry": "export {mountExecutionHost} from './src/execution/host.tsx'; export {bindExecutionHost} from './src/execution/host-source-adapter.js';",
+  "build_options": {
+    "configFile": false,
+    "define": {
+      "process.env.NODE_ENV": "\"production\""
+    },
+    "esbuild": {
+      "jsx": "automatic"
+    },
+    "build": {
+      "target": "es2020",
+      "sourcemap": false,
+      "lib": {
+        "entry": "entry.mjs",
+        "name": "myAivanR6Execution",
+        "formats": [
+          "iife"
+        ],
+        "fileName": "r6-workspace"
+      },
+      "rollupOptions": {
+        "output": {
+          "inlineDynamicImports": true
+        }
+      }
+    }
+  },
+  "notices_provenance": "Unmodified LICENSE_NOTICE.md and PATENT_NOTICE.md copied from the same pinned upstream Git commit; no legal text rewritten."
+}

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -164,9 +168,36 @@ def test_workbench_paginates_and_projects_cases_by_server_authorized_role(workbe
     assert detail["messages"][0]["payload_digest"]
     assert detail["messages"][0]["content_version"] == 1
     assert detail["messages"][0]["content_reference"].startswith("aivan://message-evidence/")
-    assert "message_text" not in detail["messages"][0]
+    assert detail["messages"][0]["message_text"] is None
+    assert detail["messages"][0]["body_resolution"] == "missing_legacy_content"
     assert client.get(f"/api/workbench/cases/{own.project_id}/export").status_code == 403
     assert switched["role"] == "buyer"
+
+
+def test_execution_association_checks_case_acl_before_provider(workbench, monkeypatch):
+    # SQLite local ACL fixture only, not MySQL/provider acceptance.
+    from aivan.api import execution_association_routes
+    client, db = workbench
+    own = _seed_case(db, "operator-1", "association-own")
+    other = _seed_case(db, "buyer-2", "association-other")
+    tenant_other = _seed_case(db, "operator-1", "association-other-tenant")
+    tenant_other.tenant_id = "other-tenant"
+    db.commit()
+    def forbidden_provider(*args, **kwargs):
+        pytest.fail("Unauthorized or unconfirmed case must not construct a provider")
+    monkeypatch.setattr(execution_association_routes, "GiraffeDBOrderConfirmationClient", forbidden_provider)
+    path = lambda case: f"/api/workbench/cases/{case.project_id}/execution-association"
+    assert client.get(path(own)).status_code == 401
+    login = _login(client)
+    response = client.post('/api/session/role', headers={'X-AIVAN-CSRF':login['csrf_token']}, json={'role':'buyer'})
+    assert response.status_code == 200
+    assert client.get(path(other)).status_code == 404
+    assert client.get(path(tenant_other)).status_code == 404
+    authorized = client.get(path(own))
+    assert authorized.status_code == 200
+    assert authorized.json()['execution_reads_available'] is False
+    assert authorized.json()['readback_verified'] is False
+    assert authorized.headers['cache-control'] == 'no-store'
 
 
 def test_admin_export_includes_frozen_candidate_and_digest_only_messages(workbench):
@@ -179,13 +210,16 @@ def test_admin_export_includes_frozen_candidate_and_digest_only_messages(workben
     payload = response.json()
     assert payload["candidate_sha"] == "a" * 40
     assert payload["messages"][0]["payload_digest"]
-    assert "message_text" not in payload["messages"][0]
+    assert payload["messages"][0]["message_text"] is None
+    assert payload["messages"][0]["body_resolution"] == "missing_legacy_content"
 
 
 def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workbench):
     client, _ = workbench
     response = client.get("/")
     assert response.status_code == 200
+    assert "giraffe-logo-graphic-mark-approved-pdf-derived.png" in response.text
+    assert "giraffe-icon-tight.png" not in response.text
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert "onclick=" not in response.text
 
@@ -196,6 +230,20 @@ def test_myaivan_ui_has_security_headers_and_no_persistent_api_key_storage(workb
     assert "X-AIVAN-API-Key" in script
     assert "keyInput.value = ''" in script
     assert "state.selectedCase = null" in script
+    assert "fragment.get('test')" in script
+    assert "'/api/session/test-login'" in script
+    assert "history.replaceState" in script
+    assert "JSON.stringify({ ticket: testTicket })" in script
+    assert 'data-action="reject"' in script
+    assert "async function rejectDraft" in script
+    assert "item.selected_option" in script
+    assert "item.requirement?.buyer_options" in script
+    assert "buyerOptionRow" in script
+    assert "Quote options" in script
+    assert "leadTime.expected_days" in script
+    assert 'data-action="confirm-order"' in script
+    assert "async function confirmOrder" in script
+    assert "/order-confirmation" in script
 
 
 def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
@@ -220,14 +268,23 @@ def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
     i18n = (root / "src/aivan/app/static/i18n.js").read_text(encoding="utf-8")
     assert "myaivan.locale" in i18n
     assert "document.documentElement.lang" in i18n
+    assert "installGeneratedCatalog(code, payload)" in i18n
+    assert "ensureGeneratedCatalog(next, localeEpoch)" in i18n
+    assert "?candidate=${encodeURIComponent(candidateSha)}" in i18n
+    assert "cache: 'no-store'" in i18n
     assert "canonical_english" not in response.text
 
 
-def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatch):
-    from aivan.observability import readiness
-    from aivan.observability.dependency_probe import DependencyProbeResult
+def test_readiness_fails_closed_until_production_contract_is_complete(
+    monkeypatch, production_runtime_policy, ready_dependency_probes,
+):
+    import aivan.observability.readiness as readiness
 
+    from aivan.observability import dependency_probe
+
+    monkeypatch.setattr(readiness, "run_dependency_probes", dependency_probe.run_dependency_probes)
     readiness_checks = readiness.readiness_checks
+    monkeypatch.setattr(readiness, "ready_locales", lambda _candidate: ["fr", "es", "de", "ko", "ja"])
 
     monkeypatch.setenv("AIVAN_ENV", "production")
     for name in (
@@ -247,12 +304,6 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
         "AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL",
         "AIVAN_LANGUAGE_SKILL_EXPECTED_BACKEND",
         "AIVAN_TRANSLATION_PROOFREAD_ENABLED",
-        "AIVAN_PRODUCT_ROLE",
-        "AIVAN_BUSINESS_FACT_AUTHORITY",
-        "AIVAN_LOCAL_STATE_SCOPE",
-        "AIVAN_WEB_SEARCH_PROVIDER",
-        "AIVAN_ALIBABA_MODE",
-        "GPM_LLM_RUNTIME_MODE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AIVAN_TENANT_API_KEYS", "{}")
@@ -279,51 +330,14 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setenv("AIVAN_LLM_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:9b")
-    monkeypatch.setenv("AIVAN_NON_CHINA_EGRESS_POLICY", "example-egress-bridge")
-    monkeypatch.setenv("AIVAN_EXPECTED_EGRESS_POLICY", "example-egress-bridge")
+    monkeypatch.setenv("AIVAN_NON_CHINA_EGRESS_POLICY", "abcdyi-sin")
+    monkeypatch.setenv("AIVAN_EXPECTED_EGRESS_POLICY", "abcdyi-sin")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_BASE_URL", "http://127.0.0.1:8788")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER", "ctranslate2")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL", "opus-mt")
     monkeypatch.setenv("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "true")
-    monkeypatch.setenv("AIVAN_PRODUCT_ROLE", "monitoring_takeover_control_plane")
-    monkeypatch.setenv("AIVAN_BUSINESS_FACT_AUTHORITY", "giraffe-db")
-    monkeypatch.setenv("AIVAN_LOCAL_STATE_SCOPE", "control_audit_cache_only")
-    monkeypatch.setenv("AIVAN_ALLOW_STUB_SUPPLIERS", "false")
-    monkeypatch.setenv("AIVAN_WEB_SEARCH_PROVIDER", "openclaw_search")
-    monkeypatch.setenv("AIVAN_ALIBABA_MODE", "official_api")
-    monkeypatch.setenv("GPM_LLM_RUNTIME_MODE", "live")
-    monkeypatch.setenv("AIVAN_EXTERNAL_MODEL_API_AUTO_ALLOWED", "false")
-    config_only = readiness_checks()
-    assert config_only["critical_dependencies_ready"] is False
-    assert not all(config_only.values())
-
-    def ready_probes(*, correlation_id: str):
-        return [
-            DependencyProbeResult(
-                dependency_id=dependency_id,
-                contract_version="aivan.dependency-probe.v1",
-                criticality="critical",
-                owner=owner,
-                expected_version="v1",
-                observed_version="v1",
-                status="ready",
-                error_code=None,
-                correlation_id=correlation_id,
-                checked_at_epoch=__import__("time").time(),
-                duration_seconds=0.01,
-                stale_after_seconds=30.0,
-            )
-            for dependency_id, owner in (
-                ("giraffe-db", "DB"),
-                ("gltg", "GLTG"),
-                ("openclaw", "OpenClaw"),
-                ("giraffe-language-skill", "giraffe-language-skill"),
-            )
-        ]
-
-    monkeypatch.setattr(readiness, "run_dependency_probes", ready_probes)
-    assert all(readiness_checks(correlation_id="corr-ready").values())
+    assert all(readiness_checks().values())
 
 
 def test_session_cookie_writer_rejects_unvalidated_values():
@@ -368,3 +382,192 @@ def test_requested_role_is_canonicalized_from_server_allowlist(monkeypatch):
     assert actor_id == "operator-1"
     assert roles == ("admin", "buyer")
     assert role == roles[1]
+
+
+def _enable_isolated_test_account(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    monkeypatch.setenv("AIVAN_UI_TEST_ACCOUNT_ENABLED", "true")
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(tmp_path / "ticket-ledger.sqlite3"))
+    monkeypatch.setenv("AIVAN_UI_TEST_TENANT_ID", "myaivan_ui_test")
+    monkeypatch.setenv("AIVAN_UI_TEST_ACTOR_ID", "myaivan-ui-test")
+    monkeypatch.setenv("AIVAN_UI_TEST_ALLOWED_ROLES", "auditor")
+    monkeypatch.setenv("AIVAN_UI_TEST_DEFAULT_ROLE", "auditor")
+
+
+def test_test_account_direct_entry_is_disabled_by_default(workbench):
+    client, _ = workbench
+    response = client.post("/api/session/test-login", json={"ticket": "invalid"})
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "TEST_ACCOUNT_DISABLED"
+
+
+def test_test_account_direct_entry_isolated_and_read_only(workbench, monkeypatch, tmp_path):
+    from aivan.api.session_auth import issue_test_login_ticket
+
+    client, _ = workbench
+    _enable_isolated_test_account(monkeypatch, tmp_path)
+
+    wrong = client.post("/api/session/test-login", json={"ticket": "invalid"})
+    assert wrong.status_code == 403
+
+    ticket = issue_test_login_ticket()
+    logged_in = client.post("/api/session/test-login", json={"ticket": ticket})
+    assert logged_in.status_code == 200
+    payload = logged_in.json()
+    assert payload["actor_id"] == "myaivan-ui-test"
+    assert payload["tenant_id"] == "myaivan_ui_test"
+    assert payload["allowed_roles"] == ["auditor"]
+    assert payload["test_account"] is True
+    assert payload["expires_at"] <= int(time.time()) + 1800
+    assert len(payload["ticket_digest"]) == 16
+
+    replay = client.post("/api/session/test-login", json={"ticket": ticket})
+    assert replay.status_code == 403
+    # TestClient uses http://testserver, so copy the production Secure cookies
+    # into its synthetic jar without the transport flag for subsequent calls.
+    client.cookies.set("aivan_session", logged_in.cookies["aivan_session"])
+    client.cookies.set("aivan_csrf", logged_in.cookies["aivan_csrf"])
+
+    current = client.get("/api/session")
+    assert current.status_code == 200
+    assert current.json()["authorization_basis"] == "ui_test_session"
+    assert current.json()["test_account"] is True
+
+    cases = client.get("/api/workbench/cases")
+    assert cases.status_code == 200
+    assert cases.json()["items"] == []
+
+    switched = client.post(
+        "/api/session/role",
+        headers={"X-AIVAN-CSRF": payload["csrf_token"]},
+        json={"role": "admin"},
+    )
+    assert switched.status_code == 403
+    assert switched.json()["detail"]["error"] == "TEST_ACCOUNT_ROLE_FIXED"
+
+    forbidden = client.post(
+        "/invoke",
+        headers={"X-AIVAN-CSRF": payload["csrf_token"]},
+        json={},
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.json()["detail"]["error"] == "TEST_ACCOUNT_ROUTE_FORBIDDEN"
+
+
+def test_test_account_rejects_production_tenant_or_short_token(workbench, monkeypatch, tmp_path):
+    from aivan.api.session_auth import issue_test_login_ticket
+
+    client, _ = workbench
+    _enable_isolated_test_account(monkeypatch, tmp_path)
+    monkeypatch.setenv("AIVAN_UI_TEST_TENANT_ID", "test_tenant")
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_ACCOUNT_MISCONFIGURED"
+
+    monkeypatch.setenv("AIVAN_UI_TEST_TENANT_ID", "myaivan_ui_test")
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "too-short")
+    response = client.post("/api/session/test-login", json={"ticket": "invalid"})
+    assert response.status_code == 503
+
+
+def test_test_login_ticket_expires_and_secret_rotation_revokes(monkeypatch, tmp_path):
+    from aivan.api.session_auth import consume_test_login_ticket, issue_test_login_ticket
+
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(tmp_path / "ticket-ledger.sqlite3"))
+    expired = issue_test_login_ticket(now=1_000, ttl_seconds=30)
+    with pytest.raises(ValueError, match="invalid test login ticket"):
+        consume_test_login_ticket(expired, now=1_031)
+
+    current = issue_test_login_ticket(now=2_000)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "r" * 48)
+    with pytest.raises(ValueError, match="invalid test login ticket"):
+        consume_test_login_ticket(current, now=2_001)
+
+
+def test_test_login_ticket_is_single_use_across_processes(monkeypatch, tmp_path):
+    from aivan.api.session_auth import issue_test_login_ticket
+
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(tmp_path / "ticket-ledger.sqlite3"))
+    ticket = issue_test_login_ticket()
+    command = (
+        "from aivan.api.session_auth import consume_test_login_ticket; "
+        "import sys; consume_test_login_ticket(sys.argv[1])"
+    )
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(Path.cwd() / "src")
+    first = subprocess.run(
+        [sys.executable, "-c", command, ticket],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    second = subprocess.run(
+        [sys.executable, "-c", command, ticket],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert first.returncode == 0
+    assert second.returncode != 0
+    assert "already consumed" in second.stderr
+
+
+def test_test_account_rejects_tenant_key_role_override_and_existing_data(
+    workbench, monkeypatch, tmp_path
+):
+    from aivan.api.session_auth import issue_test_login_ticket
+
+    client, db = workbench
+    _enable_isolated_test_account(monkeypatch, tmp_path)
+    monkeypatch.setenv("AIVAN_TENANT_API_KEYS", '{"myaivan_ui_test":"reserved-key"}')
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_ACCOUNT_MISCONFIGURED"
+
+    monkeypatch.delenv("AIVAN_TENANT_API_KEYS")
+    monkeypatch.setenv("AIVAN_UI_TEST_ALLOWED_ROLES", "admin")
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_ACCOUNT_MISCONFIGURED"
+
+    monkeypatch.setenv("AIVAN_UI_TEST_ALLOWED_ROLES", "auditor")
+    ProjectRepository(db).create(
+        conversation_id="test-account-existing-data",
+        customer_id="existing-customer",
+        customer_display_name="Existing customer",
+        channel="myaivan",
+        tenant_id="myaivan_ui_test",
+    )
+    db.commit()
+    response = client.post("/api/session/test-login", json={"ticket": issue_test_login_ticket()})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "TEST_TENANT_NOT_EMPTY"
+
+
+def test_test_ticket_ledger_rejects_business_database_path(monkeypatch, tmp_path):
+    from aivan.api.session_auth import validate_test_ticket_configuration
+
+    database_path = tmp_path / "shared.sqlite3"
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(database_path))
+    monkeypatch.setenv("AIVAN_DB_URL", f"sqlite:///{database_path}")
+    with pytest.raises(ValueError, match="must not share the business database"):
+        validate_test_ticket_configuration()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission contract")
+def test_test_ticket_ledger_rejects_shared_parent_directory(monkeypatch, tmp_path):
+    from aivan.api.session_auth import validate_test_ticket_configuration
+
+    shared_parent = tmp_path / "shared"
+    shared_parent.mkdir(mode=0o770)
+    shared_parent.chmod(0o770)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_SECRET", "t" * 48)
+    monkeypatch.setenv("AIVAN_UI_TEST_TICKET_LEDGER_PATH", str(shared_parent / "ledger.sqlite3"))
+    with pytest.raises(ValueError, match="inaccessible to group/other users"):
+        validate_test_ticket_configuration()

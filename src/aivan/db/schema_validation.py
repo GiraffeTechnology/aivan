@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from sqlalchemy import inspect
 
 from aivan.db.models import Base
@@ -12,6 +13,13 @@ def schema_issues(engine) -> list[str]:
     actual_tables = set(schema.get_table_names())
     issues: list[str] = []
     for table_name, table in sorted(Base.metadata.tables.items()):
+        # The optional test-login endpoint is closed when disabled. Its own
+        # production configuration validation requires this migrated table
+        # before enabling or consuming a ticket; normal login does not use it.
+        if table_name == "ui_test_ticket_receipts" and os.environ.get(
+            "AIVAN_UI_TEST_ACCOUNT_ENABLED", ""
+        ).strip().lower() not in {"1", "true", "yes", "on"}:
+            continue
         if table_name not in actual_tables:
             issues.append(f"missing_table:{table_name}")
             continue

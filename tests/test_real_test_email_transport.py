@@ -19,10 +19,16 @@ def _draft(db, *, target: str, status: str = "approved") -> str:
                 "Dear Michael,\n\n"
                 "Please quote 5,000 high-quality plaid shirts for delivery to Tokyo within 45 days."
             ),
-            "status": status,
+            "status": "pending_approval" if status == "approved" else status,
             "created_by_agent": "test",
         },
     )
+    if status == "approved":
+        from aivan.execution.draft_preview import create_preview, bind_approval
+        proof, _ = create_preview(db, draft, "en")
+        draft.approval_id = "synthetic-email-approval"
+        repo.approve(draft.draft_id, approved_by="synthetic-email-reviewer")
+        bind_approval(db, draft, proof)
     db.commit()
     return draft.draft_id
 
@@ -59,7 +65,7 @@ def test_real_test_email_blocks_unapproved_recipient(db_session, monkeypatch):
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
-    assert "allowlisted" in (result.error or "")
+    assert result.error == "EMAIL_RECIPIENT_NOT_ALLOWED"
     assert calls["smtp"] == 0
     assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
@@ -79,7 +85,7 @@ def test_real_test_email_requires_openclaw_gateway_marker(db_session, monkeypatc
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
-    assert "AIVAN_EMAIL_GATEWAY" in (result.error or "")
+    assert result.error == "EMAIL_GATEWAY_REQUIRED"
     assert calls["smtp"] == 0
     assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
@@ -145,7 +151,7 @@ def test_real_test_email_blocks_multiple_recipients(db_session, monkeypatch):
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
-    assert "exactly one recipient" in (result.error or "")
+    assert result.error == "EMAIL_ADDRESS_COUNT_INVALID"
     assert calls["smtp"] == 0
     assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
@@ -165,7 +171,7 @@ def test_real_test_email_blocks_sender_username_mismatch(db_session, monkeypatch
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
-    assert "sender must match SMTP username" in (result.error or "")
+    assert result.error == "EMAIL_SENDER_MISMATCH"
     assert calls["smtp"] == 0
     assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
