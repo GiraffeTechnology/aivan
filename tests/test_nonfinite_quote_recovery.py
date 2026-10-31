@@ -25,11 +25,14 @@ def options(replies):
 
 @pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")],
                          ids=["nan", "positive-infinity", "negative-infinity"])
-def test_nonfinite_quote_does_not_break_valid_supplier_alternative(invalid):
+def test_nonfinite_quote_does_not_break_valid_supplier_alternative(invalid, monkeypatch):
+    monkeypatch.setenv("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "false")
     replies = [quote("invalid-price", invalid), quote("valid-price", 12.34567)]
     result = options(replies)
     assert [item.supplier_id for item in result] == ["valid-price"]
-    assert result[0].reasoning == "Lowest cost: GBP 12.34567/pc"
+    assert result[0].reasoning == "Lowest cost: GBP 12.35/pc"
+    assert result[0].quote.unit_price == 12.34567
+    assert result[0].quote.calculation_trace[0].startswith("Unit price: 12.34567 × ")
     assert math.isfinite(result[0].quote.buyer_total)
     assert len(replies) == 2
     assert not math.isfinite(replies[0].unit_price)
@@ -42,9 +45,13 @@ def test_only_nonfinite_quotes_produce_no_actionable_option(invalid):
 
 
 @pytest.mark.parametrize("valid", [0.0, 12.34567])
-def test_finite_zero_and_precise_quotes_remain_available(valid):
+def test_finite_zero_and_precise_quotes_remain_available(valid, monkeypatch):
+    monkeypatch.setenv("AIVAN_HIDE_SUPPLIER_PRICE_FROM_BUYER", "false")
     result = options([quote("valid-price", valid)])
     assert len(result) == 1
     assert result[0].supplier_id == "valid-price"
     assert result[0].quote.currency == "GBP"
-    assert result[0].reasoning == f"Lowest cost: GBP {valid}/pc"
+    assert result[0].reasoning == f"Lowest cost: GBP {valid:.2f}/pc"
+    assert result[0].quote.unit_price == valid
+    assert result[0].quote.calculation_trace[0].startswith(f"Unit price: {valid} × ")
+
