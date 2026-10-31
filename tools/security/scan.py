@@ -55,7 +55,7 @@ def check_version(tool: str, report_dir: Path) -> None:
 
 
 def normalized(path: str) -> str:
-    return os.path.relpath(Path(path).resolve(), Path.cwd())
+    return os.path.relpath(Path(path).resolve(), Path.cwd()).replace(os.sep, "/")
 
 
 def verify_rules() -> dict:
