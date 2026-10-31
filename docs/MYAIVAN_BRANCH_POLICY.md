@@ -1,30 +1,14 @@
-# myaivan-web Branch Policy
+# MyAivan Release Branch Policy
 
-Branch-direction rules retained from 2026-07-05; product terminology reconciled 2026-10-02. MyAivan is Aivan's web version, not a separate business system. This wording change does not authorize or perform any branch operation.
+MyAivan is Aivan's web version, not a separate business system. `myaivan-web` is the existing release branch. A release branch is an engineering delivery choice, not an additional product boundary.
 
-## Rules
+## Release integration
 
-1. **`myaivan-web` is the permanent, separately released web branch of Aivan** for the
-   myaivan.com / myaivan.cn responsive workbench, session UI, role projection,
-   case/audit views, i18n and Giraffe VI assets. It is deployed to the AIVAN
-   server as a whole:
-
-   ```bash
-   git clone -b myaivan-web https://github.com/GiraffeTechnology/aivan.git
-   ```
-
-2. **Never merge `myaivan-web` into `main`.** PR #35 was intentionally closed
-   unmerged. `main` must stay free of myaivan Web UI code.
-
-3. **`main` stays stable** for AIVAN core and the OpenClaw skill/plugin
-   (`integrations/openclaw-aivan-plugin/`, `skills/aivan-trade-salesperson/`).
-
-4. **All myaivan.com Web UI work happens on `myaivan-web`** or on child
-   branches whose PRs target `myaivan-web` (never `main`).
-
-5. **Sync direction is one-way: `main` → `myaivan-web`.** Shared AIVAN fixes
-   may be merged into this branch, including unrelated-history reconciliation
-   when required. Never merge or cherry-pick this branch back into `main`.
+- Select the target release ref explicitly. Submit integration and policy changes as normal pull requests under the repository's current protections; a draft proposal does not enable a new policy.
+- Do not silently retarget open PRs, rename branches to evade checks, rewrite history, or bypass required reviews, status checks, code ownership or unresolved-thread rules.
+- Branch names and changed file paths alone do not create a permanent integration prohibition. Reviewed changes may establish a different release layout without changing product responsibilities or duplicating business state.
+- Preserve existing source and release history. This document does not rename, move, merge or delete any branch, approve a deployment, or change authentication and human-approval requirements.
+- Record the exact source commit and applicable check results for each authorized integration. A merged source change and a deployed, accepted release remain different outcomes.
 
 ## Public-deployment gate
 

@@ -6,7 +6,7 @@ Reconciled: 2026-10-02. Scope: the first usable web version of Aivan, within the
 
 MyAivan is the user-facing web version of Aivan, the Giraffe Agent frontend for inquiry, quotation and order confirmation. The first web iteration provides a simple conversation workflow for receiving trade information, preparing outbound drafts, human review, manual IM handling, controlled email and case backup. It is not a separate CRM, mailbox, IM aggregator or monitoring-only business system.
 
-`myaivan-web` remains its permanent release branch. Web implementation PRs target that branch; never merge it into `main`. Shared product facts and business state remain consistent across entry points. Release separation does not justify duplicate authoritative Case/Draft/Approval/Order state machines.
+`myaivan-web` is the existing web release branch. The selected release ref and any integration into `main` follow an explicit release plan and normal pull-request review under existing repository protections. Branch names and file locations do not independently define product boundaries or authorize integration. Do not silently retarget an open PR or treat a draft policy proposal as permission to merge or deploy. Shared product facts and business state remain consistent across entry points; release layout does not justify duplicate authoritative Case/Draft/Approval/Order state machines.
 
 ## 2. Required user experience
 
