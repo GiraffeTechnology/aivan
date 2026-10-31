@@ -16,7 +16,7 @@ def _draft(db, *, target: str, status: str = "approved") -> str:
             "target_role": "supplier",
             "message_text": (
                 "Subject: RFQ: 5,000 High-Quality Plaid Shirts for Delivery to Tokyo Within 45 Days\n\n"
-                "Dear Michael,\n\n"
+                "Dear Approved Recipient,\n\n"
                 "Please quote 5,000 high-quality plaid shirts for delivery to Tokyo within 45 days."
             ),
             "status": "pending_approval" if status == "approved" else status,
@@ -36,19 +36,19 @@ def _draft(db, *, target: str, status: str = "approved") -> str:
 def _real_test_env(monkeypatch):
     monkeypatch.setenv("AIVAN_EMAIL_SEND_MODE", "real_test")
     monkeypatch.setenv("AIVAN_EMAIL_GATEWAY", "openclaw_real_test")
-    monkeypatch.setenv("AIVAN_EMAIL_ALLOWED_RECIPIENTS", "mich@giraffe.technology")
-    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "giraffetechnology@163.com")
-    monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.163.com")
+    monkeypatch.setenv("AIVAN_EMAIL_ALLOWED_RECIPIENTS", "approved.recipient@example.invalid")
+    monkeypatch.setenv("AIVAN_PRESET_MAILBOX", "sender@example.invalid")
+    monkeypatch.setenv("AIVAN_SMTP_HOST", "smtp.example.invalid")
     monkeypatch.setenv("AIVAN_SMTP_PORT", "465")
     monkeypatch.setenv("AIVAN_SMTP_USE_SSL", "true")
     monkeypatch.setenv("AIVAN_SMTP_USE_TLS", "false")
-    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "giraffetechnology@163.com")
-    monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "super-secret-app-password")
-    monkeypatch.setenv("AIVAN_POP3_HOST", "pop.163.com")
+    monkeypatch.setenv("AIVAN_SMTP_USERNAME", "sender@example.invalid")
+    monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "synthetic-unused-app-password")
+    monkeypatch.setenv("AIVAN_POP3_HOST", "pop.example.invalid")
     monkeypatch.setenv("AIVAN_POP3_PORT", "995")
     monkeypatch.setenv("AIVAN_POP3_USE_SSL", "true")
-    monkeypatch.setenv("AIVAN_POP3_USERNAME", "giraffetechnology@163.com")
-    monkeypatch.setenv("AIVAN_POP3_PASSWORD", "super-secret-app-password")
+    monkeypatch.setenv("AIVAN_POP3_USERNAME", "sender@example.invalid")
+    monkeypatch.setenv("AIVAN_POP3_PASSWORD", "synthetic-unused-app-password")
 
 
 def test_real_test_email_blocks_unapproved_recipient(db_session, monkeypatch):
@@ -81,7 +81,7 @@ def test_real_test_email_requires_openclaw_gateway_marker(db_session, monkeypatc
 
     monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
-    draft_id = _draft(db_session, target="mich@giraffe.technology")
+    draft_id = _draft(db_session, target="approved.recipient@example.invalid")
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
@@ -90,7 +90,7 @@ def test_real_test_email_requires_openclaw_gateway_marker(db_session, monkeypatc
     assert DraftRepository(db_session).get(draft_id).status == "send_failed"
 
 
-def test_real_test_email_allows_mich_giraffe_technology_only(db_session, monkeypatch):
+def test_real_test_email_allows_only_the_configured_synthetic_recipient(db_session, monkeypatch):
     _real_test_env(monkeypatch)
     sent = {}
 
@@ -123,18 +123,18 @@ def test_real_test_email_allows_mich_giraffe_technology_only(db_session, monkeyp
 
     monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
-    draft_id = _draft(db_session, target="Michael <mich@giraffe.technology>")
+    draft_id = _draft(db_session, target="Approved Recipient <approved.recipient@example.invalid>")
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is True
     assert DraftRepository(db_session).get(draft_id).status == "sent"
-    assert sent["from"] == "giraffetechnology@163.com"
-    assert sent["to"] == "Michael <mich@giraffe.technology>"
-    assert sent["envelope_from"] == "giraffetechnology@163.com"
-    assert sent["envelope_to"] == ["mich@giraffe.technology"]
-    assert sent["username"] == "giraffetechnology@163.com"
+    assert sent["from"] == "sender@example.invalid"
+    assert sent["to"] == "Approved Recipient <approved.recipient@example.invalid>"
+    assert sent["envelope_from"] == "sender@example.invalid"
+    assert sent["envelope_to"] == ["approved.recipient@example.invalid"]
+    assert sent["username"] == "sender@example.invalid"
     assert sent["subject"] == "RFQ: 5,000 High-Quality Plaid Shirts for Delivery to Tokyo Within 45 Days"
-    assert "Dear Michael" in sent["body"]
+    assert "Dear Approved Recipient" in sent["body"]
 
 
 def test_real_test_email_blocks_multiple_recipients(db_session, monkeypatch):
@@ -147,7 +147,7 @@ def test_real_test_email_blocks_multiple_recipients(db_session, monkeypatch):
 
     monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
-    draft_id = _draft(db_session, target="mich@giraffe.technology, other@example.com")
+    draft_id = _draft(db_session, target="approved.recipient@example.invalid, other@example.com")
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
@@ -167,7 +167,7 @@ def test_real_test_email_blocks_sender_username_mismatch(db_session, monkeypatch
 
     monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
-    draft_id = _draft(db_session, target="mich@giraffe.technology")
+    draft_id = _draft(db_session, target="approved.recipient@example.invalid")
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
@@ -177,10 +177,10 @@ def test_real_test_email_blocks_sender_username_mismatch(db_session, monkeypatch
 
 
 def test_email_secrets_not_logged(monkeypatch):
-    monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "super-secret-app-password")
-    monkeypatch.setenv("AIVAN_POP3_PASSWORD", "super-secret-app-password")
-    text = redact_secret("SMTP/POP3 failed with password super-secret-app-password")
-    assert "super-secret-app-password" not in text
+    monkeypatch.setenv("AIVAN_SMTP_PASSWORD", "synthetic-unused-app-password")
+    monkeypatch.setenv("AIVAN_POP3_PASSWORD", "synthetic-unused-app-password")
+    text = redact_secret("SMTP/POP3 failed with password synthetic-unused-app-password")
+    assert "synthetic-unused-app-password" not in text
     assert "<redacted>" in text
 
 
@@ -194,7 +194,7 @@ def test_no_send_before_approval(db_session, monkeypatch):
 
     monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", _SMTP)
 
-    draft_id = _draft(db_session, target="mich@giraffe.technology", status="pending_approval")
+    draft_id = _draft(db_session, target="approved.recipient@example.invalid", status="pending_approval")
     result = send_if_approved(draft_id, db_session)
 
     assert result.success is False
@@ -220,8 +220,8 @@ def test_real_test_pop3_receive_fetches_recent_messages(monkeypatch):
     calls = {}
 
     raw_message = (
-        b"From: Michael <mich@giraffe.technology>\r\n"
-        b"To: giraffetechnology@163.com\r\n"
+        b"From: Approved Recipient <approved.recipient@example.invalid>\r\n"
+        b"To: sender@example.invalid\r\n"
         b"Subject: Re: RFQ: 5,000 High-Quality Plaid Shirts\r\n"
         b"Date: Fri, 03 Jul 2026 04:20:00 +0000\r\n"
         b"Content-Type: text/plain; charset=utf-8\r\n"
@@ -255,15 +255,15 @@ def test_real_test_pop3_receive_fetches_recent_messages(monkeypatch):
 
     messages = fetch_real_test_pop3_messages(limit=5)
 
-    assert calls["host"] == "pop.163.com"
+    assert calls["host"] == "pop.example.invalid"
     assert calls["port"] == 995
-    assert calls["username"] == "giraffetechnology@163.com"
+    assert calls["username"] == "sender@example.invalid"
     assert calls["password_seen"] is True
     assert calls["retr_index"] == 1
     assert calls["quit"] is True
     assert len(messages) == 1
-    assert messages[0].from_address == "Michael <mich@giraffe.technology>"
-    assert messages[0].to_address == "giraffetechnology@163.com"
+    assert messages[0].from_address == "Approved Recipient <approved.recipient@example.invalid>"
+    assert messages[0].to_address == "sender@example.invalid"
     assert messages[0].subject == "Re: RFQ: 5,000 High-Quality Plaid Shirts"
     assert "within 60 minutes" in messages[0].body_excerpt
 
@@ -289,7 +289,7 @@ def test_real_test_pop3_receive_redacts_secret_on_error(monkeypatch):
     try:
         fetch_real_test_pop3_messages()
     except RuntimeError as exc:
-        assert "super-secret-app-password" not in str(exc)
+        assert "synthetic-unused-app-password" not in str(exc)
         assert str(exc).startswith("EMAIL_POP3_FETCH_FAILED:")
     else:
         raise AssertionError("POP3 receive failure should redact configured secrets")
