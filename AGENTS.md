@@ -32,7 +32,7 @@ Inventory and freeze scope-expanded or unconfirmed code with exact revisions, pa
 
 ## Web and branch boundaries
 
-`myaivan-web` is a permanent, separately released web branch. Never merge it into `main`. MyAivan UI PRs target `myaivan-web`; shared Core changes belong in their proper branch and may flow from `main` to `myaivan-web`. No branch operation is authorized merely by these instructions.
+`myaivan-web` is the existing web release branch. Branch layout is an engineering release choice, not an additional product requirement. Propose changes to the selected release ref or its integration through normal pull requests and existing repository protections. Do not silently retarget open PRs, rewrite history, bypass failing checks, or treat a draft proposal as permission to merge or deploy. Preserve product responsibilities and shared business state across release lines.
 
 First-web-iteration UX is Welcome → Start Working → conversation stream / draft review / input. File/image uploads must be usable; voice may be deferred. All IM channels use copy/manual-send/confirmation. Configured email uses explicit confirmation; unavailable email retains a truthful copy fallback. Existing operation screens and adapters do not redefine this scope.
 
