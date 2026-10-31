@@ -325,7 +325,7 @@ def main():
         for cache in payload.rglob("__pycache__"):
             shutil.rmtree(cache)
         runtime_version = subprocess.check_output([str(payload / "runtime/bin/python3"), "-I", "-c", "import platform; print(platform.python_version())"], text=True).strip()
-        manifest = {"format": 1, "release": args.release, "components": components, "python_version": runtime_version, "abi": abi_report(payload), "wheels": {wheel.name: digest(wheel) for wheel in wheels}, "requirements_lock_sha256": digest(HERE / "requirements.lock"), "files": {str(path.relative_to(payload)): digest(path) for path in sorted(payload.rglob("*")) if path.is_file()}}
+        manifest = {"format": 1, "deployment_stages": ["aivan", "integrated"], "release": args.release, "components": components, "python_version": runtime_version, "abi": abi_report(payload), "wheels": {wheel.name: digest(wheel) for wheel in wheels}, "requirements_lock_sha256": digest(HERE / "requirements.lock"), "files": {str(path.relative_to(payload)): digest(path) for path in sorted(payload.rglob("*")) if path.is_file()}}
         (payload / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
         destination = args.output / f"myaivan-{args.release}-linux-x86_64.run"
         write_installer(payload, destination)

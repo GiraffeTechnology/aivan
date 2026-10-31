@@ -32,7 +32,7 @@ Inventory and freeze scope-expanded or unconfirmed code with exact revisions, pa
 
 ## Web and branch boundaries
 
-`myaivan-web` is a permanent, separately released web branch. Never merge it into `main`. MyAivan UI PRs target `myaivan-web`; shared Core changes belong in their proper branch and may flow from `main` to `myaivan-web`. No branch operation is authorized merely by these instructions.
+`myaivan-web` is the existing web release branch. Branch layout is an engineering release choice, not an additional product requirement. Propose changes to the selected release ref or its integration through normal pull requests and existing repository protections. Do not silently retarget open PRs, rewrite history, bypass failing checks, or treat a draft proposal as permission to merge or deploy. Preserve product responsibilities and shared business state across release lines.
 
 First-web-iteration UX is Welcome → Start Working → conversation stream / draft review / input. File/image uploads must be usable; voice may be deferred. All IM channels use copy/manual-send/confirmation. Configured email uses explicit confirmation; unavailable email retains a truthful copy fallback. Existing operation screens and adapters do not redefine this scope.
 
@@ -54,8 +54,8 @@ Before handoff: identify the exact scope and revision, run relevant checks, dist
 
 ## Deployment listener protection
 
-Select service bindings from the deployment's confirmed configuration and existing listener inventory. Preserve configured reserved ports and existing SSH or other service listeners. Never stop, replace, or rebind another service to free a web port.
+HTTPS defaults to port 443 and SSH to port 22. If a default port is occupied, use an alternative verified as unoccupied in the deployment's confirmed configuration and current listener inventory. Do not hardcode 443, 8443 or any other port as permanently forbidden. Never stop, replace, or rebind an unrelated service to free a port.
 
-Host vendor or profile names do not define a product-wide forbidden-port list. Deployment-specific reservations remain operator-owned configuration. If an intended binding is unclear, report the missing configuration rather than guessing a port. Repository examples must not contain private host addresses or connection details.
+Host vendor or profile names do not define a product-wide forbidden-port list. Coordinate shared listeners, proxy routes and certificates with the existing deployment owner; preserve unrelated applications and mail/MX. Record the actual selected ports and access URL, update applicable proxy/firewall configuration and delivery instructions, and verify the actual connection and HTTPS readback. If an intended binding is unclear, report the missing configuration rather than guessing a port. Repository examples must not contain private host addresses or connection details.
 
 This guidance does not authorize server access, firewall or SSH changes, credentials, account changes, service restarts, or deployments.

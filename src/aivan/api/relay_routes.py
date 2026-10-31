@@ -24,6 +24,32 @@ def _request_context(request: Request) -> RequestContext:
     return resolve_request_context(request)
 
 
+def _validate_receipt_metadata(metadata: dict) -> None:
+    """Validate optional prose, not opaque external receipt/message identities."""
+    from aivan.integrations.language_skill_client import LanguageSkillClient
+
+    # These proof fields are overwritten from the server's actual approval.
+    # The web's existing exact source enum is machine metadata, not free text.
+    free_metadata = {key: value for key, value in metadata.items()
+                     if key not in {"preview_id", "target_language", "rendered_sha256"}
+                     and not (key == "source" and value == "myaivan_mobile")}
+    if not free_metadata:
+        return
+    result = LanguageSkillClient()._request("POST", "/api/language/canonical-db/validate", json={
+        "repository": "aivan", "table_name": "relay_receipts",
+        "record": {"metadata_json": free_metadata}, "policy": "standard_english_canonical_db_v1",
+    })
+    data = result.data
+    if result.ok and result.status_code == 200 and isinstance(data, dict):
+        if data.get("valid") is True and data.get("violations") == []:
+            return
+        violations = data.get("violations")
+        if (data.get("valid") is False and isinstance(violations, list) and violations
+                and all(isinstance(item, dict) for item in violations)):
+            raise HTTPException(422, detail={"error": "RELAY_RECEIPT_LANGUAGE_NORMALIZATION_REQUIRED"})
+    raise HTTPException(503, detail={"error": "RELAY_RECEIPT_LANGUAGE_VALIDATION_UNAVAILABLE"})
+
+
 def _serialize_relay_receipt(receipt) -> dict:
     return {
         "receipt_id": receipt.receipt_id,
@@ -190,6 +216,7 @@ def confirm_relay_delivery(
     # Only proof metadata is copied from the transient localized rendering.
     metadata = {**metadata, "preview_id": bound.get("preview_id"),
                 "target_language": rendered.target_language, "rendered_sha256": rendered.rendered_sha256}
+    _validate_receipt_metadata(metadata)
     receipt, created = receipts.create_or_get(
         tenant_id=context.tenant_id,
         draft_id=draft.draft_id,

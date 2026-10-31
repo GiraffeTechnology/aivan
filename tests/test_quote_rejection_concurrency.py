@@ -74,7 +74,7 @@ def test_transaction_orderings(records, monkeypatch, first_lane):
     monkeypatch.setattr(outbound_approval, 'send_if_approved', lambda *a, **k: sends.append(True))
     monkeypatch.setattr(w, 'bind_conversation', lambda *a: None)
     monkeypatch.setattr(w, 'parse_supplier_reply', lambda **k: SupplierReply(
-        project_id=pid, supplier_id='supplier', raw_text='fixture', unit_price=1))
+        project_id=pid, supplier_id='supplier', raw_text='fixture', unit_price=1, currency='USD'))
     lead = LeadTimeEstimate(estimate_id='fixture', project_id=pid, category='test',
         calculated_lead_time_days=2, earliest_possible_days=1, expected_days=2,
         conservative_days=3, p50_days=1, p80_days=2, p90_days=3, risk_buffer_days=0)

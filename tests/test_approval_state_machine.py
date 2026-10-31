@@ -6,6 +6,15 @@ import pytest
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.execution import approval_state
 from aivan.execution.approval_state import DraftStateError, approve_and_send
+from aivan.openclaw.contracts import OpenClawSendResponse
+
+
+def _acknowledged_transport(monkeypatch):
+    # Explicit synthetic acknowledgement tests the state machine, not delivery.
+    class Transport:
+        def send_message(self, request):
+            return OpenClawSendResponse(success=True, message_id="synthetic-ack")
+    monkeypatch.setattr(approval_state, "get_openclaw_client", lambda: Transport())
 
 
 def _draft(db, *, channel="email", target="supplier@example.com", role="supplier") -> str:
@@ -27,7 +36,7 @@ def _draft(db, *, channel="email", target="supplier@example.com", role="supplier
 
 
 def test_approve_draft_success_marks_sent(db_session, monkeypatch):
-    monkeypatch.setenv("OPENCLAW_MOCK_MODE", "true")
+    _acknowledged_transport(monkeypatch)
     draft_id = _draft(db_session)
     result = approve_and_send(draft_id, db_session)
     assert result.status == approval_state.SENT
@@ -99,8 +108,19 @@ def test_reject_pending_draft_still_works(db_session):
 
 
 def test_sent_draft_cannot_be_reapproved(db_session, monkeypatch):
-    monkeypatch.setenv("OPENCLAW_MOCK_MODE", "true")
+    _acknowledged_transport(monkeypatch)
     draft_id = _draft(db_session)
     approve_and_send(draft_id, db_session)
     with pytest.raises(DraftStateError):
         approve_and_send(draft_id, db_session)
+
+
+def test_mock_transport_never_marks_approved_draft_sent(db_session, monkeypatch):
+    from aivan.openclaw.client import OpenClawClient
+    monkeypatch.setenv("OPENCLAW_MOCK_MODE", "true")
+    monkeypatch.setattr(approval_state, "get_openclaw_client", OpenClawClient)
+    draft_id = _draft(db_session)
+    result = approve_and_send(draft_id, db_session)
+    assert result.sent is False
+    assert result.status == approval_state.SEND_FAILED
+    assert DraftRepository(db_session).get(draft_id).status != "sent"

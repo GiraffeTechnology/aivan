@@ -49,13 +49,17 @@ def sql_target(component, descriptor):
 
 
 def configured_targets(config, root):
+    stage = config.get('deployment_stage', 'integrated')
+    if stage not in ('aivan', 'integrated'):
+        raise ValueError('Deployment stage must be aivan or integrated')
+    fulfillment = stage == 'integrated'
     mode = config.get('database_mode', 'external')
     if mode == 'isolated':
         if config.get('host_profile') != 'isolated':
             raise ValueError('SQLite is permitted only in the explicitly selected isolated test profile')
         return {
             'aivan': {'url': config.get('external', {}).get('aivan_database_url') or f'sqlite:///{root}/data/aivan.db', 'schema': 'main', 'engine': 'sqlite'},
-            'abcdyi': {'url': f'sqlite+aiosqlite:///{root}/data/abcdyi.db', 'schema': 'main', 'engine': 'sqlite'},
+            **({'abcdyi': {'url': f'sqlite+aiosqlite:///{root}/data/abcdyi.db', 'schema': 'main', 'engine': 'sqlite'}} if fulfillment else {}),
             **({} if config.get('external', {}).get('database') else {
                 'database': {'url': f'sqlite+pysqlite:///{root}/data/giraffe.db', 'schema': 'main', 'engine': 'sqlite'}}),
         }
@@ -77,10 +81,14 @@ def configured_targets(config, root):
     if not isinstance(contents, dict) or set(contents) != {'version', 'databases'} or type(contents['version']) is not int or contents['version'] != 1:
         raise ValueError('Unsupported private database configuration schema')
     databases = contents['databases']
-    required = {'aivan', 'abcdyi'} | (set() if config.get('external', {}).get('database') else {'database'})
-    if not isinstance(databases, dict) or set(databases) != required:
+    required = {'aivan'} | ({'abcdyi'} if fulfillment else set()) | (set() if config.get('external', {}).get('database') else {'database'})
+    allowed = required | {'abcdyi'}
+    if not isinstance(databases, dict) or not required <= set(databases) or set(databases) - allowed:
         raise ValueError('Provide distinct Aivan/abcdYi SQL targets and provider SQL unless an external provider HTTP API is selected')
-    targets = {name: sql_target(name, value) for name, value in databases.items()}
+    # A retained fulfillment descriptor is syntax-checked, never connected in
+    # the Aivan stage. Activation restores all physical namespace checks.
+    configured = {name: sql_target(name, value) for name, value in databases.items()}
+    targets = {name: value for name, value in configured.items() if name in required}
     identities = [item['namespace'] for item in targets.values()]
     if len(set(identities)) != len(identities):
         raise ValueError('Application table inventories require distinct database/schema namespaces')

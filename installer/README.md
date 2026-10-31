@@ -358,3 +358,36 @@ the existing project membership API before buyer-only decisions. This preserves
 a separate buyer identity and normal tenant/project/role checks. Account creation
 is not buyer approval, order confirmation or sign-off. Real account/password
 creation remains an action of the approved operator, not a build-time fixture.
+# Explicit deployment stages
+
+The private deployment profile accepts `"deployment_stage": "aivan"` or
+`"deployment_stage": "integrated"`. Omission preserves the existing integrated
+behavior; it never silently changes an existing installation's stage.
+
+Select `aivan` explicitly through `install --profile-file FILE` or
+`setup --profile-file FILE` to deploy Aivan/MyAivan before abcdYi. This keeps
+Aivan, its selected private-data provider, GLTG, GPM and language services active.
+Inquiry, quotation and human order confirmation remain Aivan functions.
+The installer does not connect to, migrate, bootstrap or start abcdYi in this
+stage, and does not supply its execution bridge credentials or URL. The health
+report labels abcdYi `not_deployed` with `ok: false` and `required: false`;
+overall readiness covers the selected stage only, not the later industry app
+or product acceptance. Buyer provisioning is unavailable until integration.
+
+SQL configuration requires Aivan plus the provider target when a provider HTTP
+API is not selected. An existing abcdYi descriptor may be retained and is
+syntax-checked without connecting to it. It is not erased from the private file.
+Explicitly selecting `integrated` later requires the abcdYi SQL descriptor and
+restores all authentication, tenant, schema, physical-namespace and health checks.
+An empty external schema still requires the existing explicit migration workflow;
+stage selection is not migration authorization. Migration plans bind the stage.
+
+Apply changes to a running installation only through the existing transactional
+`setup --restart` procedure with the applicable operational authorization.
+Rollback refuses a release that cannot preserve the Aivan-only stage. A dormant
+port and tenant identity may remain in private configuration for later activation,
+but the published ports file does not advertise a dormant abcdYi endpoint.
+`install --no-start` is still an installation operation, not a dry run: it can
+stop the managed installation and switch its release pointer. These options do
+not authorize operations on unrelated services, databases or shared storage.
+

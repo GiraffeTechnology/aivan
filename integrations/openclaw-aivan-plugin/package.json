@@ -76,9 +76,15 @@
   },
   "overrides": {
     "openclaw@2026.7.2-beta.7": {
-      "undici": "8.10.2",
-      "@modelcontextprotocol/sdk": "1.31.0"
+      "undici": "8.12.2",
+      "@modelcontextprotocol/sdk": "1.32.0",
+      "minimatch": "11.0.1"
     },
-    "proxy-addr": "2.0.8"
+    "proxy-addr": "2.0.8",
+    "hono": "4.13.11",
+    "ip-address": "10.7.4",
+    "body-parser": "2.4.0",
+    "fast-uri": "3.1.9",
+    "zod": "4.6.6"
   }
 }
