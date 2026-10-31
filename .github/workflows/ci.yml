@@ -4,7 +4,8 @@ on:
   push:
     branches: ["main", "myaivan-web", "feature/**"]
   pull_request:
-    branches: ["main", "myaivan-web"]
+    # Include the exact integration base so its draft receives the full checks.
+    branches: ["main", "myaivan-web", "codex/gpm-upstream-downstream-wiring-20261031"]
 
 permissions:
   contents: read
