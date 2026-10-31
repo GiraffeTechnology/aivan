@@ -213,6 +213,11 @@ class _CapturingStore:
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.decisions: list[dict] = []
+
+    def decide(self, *args, **kwargs):
+        self.decisions.append({"args": args, **kwargs})
+        raise AssertionError("Advisory creation must not invoke a second approval")
 
     def get(self, packet_id: str, **kwargs):
         return None  # This fixture represents a first request, not a replay.
@@ -310,7 +315,7 @@ def test_unavailable_model_does_not_create_a_persisted_guidance_packet(
     _reset_store(store)  # type: ignore[arg-type]
     app = FastAPI()
     app.include_router(router, prefix="/api/gpm")
-    app.dependency_overrides[require_gpm_tenant] = lambda: TENANT
+    app.dependency_overrides[require_gpm_principal] = principal_for_tenant(TENANT)
     with patch(
         "aivan.gpm.router.analyze_quote",
         return_value={
@@ -362,7 +367,7 @@ def test_status_query_reads_persisted_result_without_running_model(
     _reset_store(store)
     app = FastAPI()
     app.include_router(router, prefix="/api/gpm")
-    app.dependency_overrides[require_gpm_tenant] = lambda: TENANT
+    app.dependency_overrides[require_gpm_principal] = principal_for_tenant(TENANT)
 
     with patch("aivan.gpm.router.analyze_quote") as analyze:
         with TestClient(app) as client:
@@ -391,7 +396,7 @@ def test_status_query_rejects_invalid_correlation_before_provider_read(
     _reset_store(store)
     app = FastAPI()
     app.include_router(router, prefix="/api/gpm")
-    app.dependency_overrides[require_gpm_tenant] = lambda: TENANT
+    app.dependency_overrides[require_gpm_principal] = principal_for_tenant(TENANT)
 
     with TestClient(app) as client:
         response = client.get(
@@ -425,7 +430,7 @@ def test_production_create_requires_actor_context_before_model_execution(
     _reset_store(store)  # type: ignore[arg-type]
     app = FastAPI()
     app.include_router(router, prefix="/api/gpm")
-    app.dependency_overrides[require_gpm_tenant] = lambda: TENANT
+    app.dependency_overrides[require_gpm_principal] = principal_for_tenant(TENANT)
     with patch("aivan.gpm.router.analyze_quote") as analyze:
         with TestClient(app) as client:
             response = client.post(
@@ -443,33 +448,47 @@ def test_production_create_requires_actor_context_before_model_execution(
     assert store.calls == []
 
 
-def test_capabilities_advertise_stage1_advisory_without_second_approval(
+def test_capabilities_preserve_legacy_api_without_requiring_second_stage1_approval(
     quote_guidance_client,
 ) -> None:
-    client, _ = quote_guidance_client
+    client, store = quote_guidance_client
     response = client.get("/api/gpm/capabilities")
 
     assert response.status_code == 200
     features = response.json()["features"]
     assert features["quote_guidance"] is True
-    assert features["approval_workflow"] is False
-    assert features["rejection_workflow"] is False
-    assert features["stage1_advisory_only"] is True
+    # The shared 2026-10-02 PRD preserves useful secure APIs; availability is
+    # not a requirement to add their approval to the bounded consumer flow.
+    assert features["approval_workflow"] is True
+    assert features["rejection_workflow"] is True
+    created = client.post("/api/gpm/quote-guidance", json=_guidance_payload(), headers={
+        "Idempotency-Key": "synthetic-advisory-only", "X-AIVAN-Trace-ID": "trace-advisory",
+        "X-AIVAN-Actor-ID": "sales-001", "X-AIVAN-Role-Context": "sales",
+    })
+    assert created.status_code == 201, created.text
+    assert created.json()["approval_status"] == "pending"
+    assert created.json()["human_approval_required"] is True
+    assert created.json()["dispatched"] is False
+    assert len(store.calls) == 1
+    assert store.decisions == []
 
 
 @pytest.mark.parametrize("action", ["approve", "reject"])
-def test_production_second_approval_routes_are_disabled(
+def test_production_decision_routes_reject_body_operator_without_side_effects(
     quote_guidance_client,
     action: str,
 ) -> None:
-    client, _ = quote_guidance_client
+    client, store = quote_guidance_client
     response = client.post(
         f"/api/gpm/quote-guidance/gpm_pkt_contract001/{action}",
         json={"operator_id": "operator-001"},
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"]["error"] == "GPM_DECISION_PATH_DISABLED"
+    assert response.status_code == 422
+    assert any(item["loc"] == ["body", "operator_id"] and item["type"] == "extra_forbidden"
+               for item in response.json()["detail"])
+    assert store.calls == []
+    assert store.decisions == []
 
 
 def test_missing_provider_auth_stops_before_any_http(monkeypatch):
@@ -500,4 +519,5 @@ def test_tenant_service_profile_never_falls_back_to_another_tenant(monkeypatch):
         with pytest.raises(PersistenceContractError):
             client.check_packet_capabilities("tenant-b")
     request.assert_not_called()
+
 

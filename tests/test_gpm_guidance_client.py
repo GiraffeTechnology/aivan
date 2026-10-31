@@ -109,9 +109,10 @@ def test_test_transport_is_rejected_in_production(monkeypatch):
 
 
 def test_create_guidance_sends_tenant_auth_trace_and_idempotency(monkeypatch):
-    captured = {}
+    captured = {"requests": []}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        captured["requests"].append((request.method, request.url.path))
         captured["request"] = request
         captured["payload"] = json.loads(request.content)
         return httpx.Response(201, json=_response())
@@ -144,6 +145,7 @@ def test_create_guidance_sends_tenant_auth_trace_and_idempotency(monkeypatch):
     assert request.headers["X-AIVAN-Tenant-ID"] == "tenant-alpha"
     assert request.headers["X-AIVAN-Actor-ID"] == "sales-1"
     assert request.headers["X-AIVAN-Role"] == "sales"
+    assert request.headers["X-AIVAN-Role-Context"] == "sales"
     assert request.headers["X-AIVAN-Trace-ID"] == "trace-stage1"
     assert request.headers["Idempotency-Key"] == "gpm-case-1-option-1"
     assert captured["payload"] == {
@@ -163,6 +165,10 @@ def test_create_guidance_sends_tenant_auth_trace_and_idempotency(monkeypatch):
         "evidence_ids": None,
         "notes": "case=case-1",
     }
+    # Actual bounded consumer call: no second approval/rejection endpoint.
+    assert captured["requests"] == [("POST", "/api/gpm/quote-guidance")]
+    assert result["approval_status"] == "pending"
+    assert result["human_approval_required"] is True
     assert result["packet_id"] == "gpm_pkt_stage1"
     assert result["recommendation"] == "negotiate"
     assert result["dispatched"] is False
@@ -342,3 +348,4 @@ def test_original_trace_requires_verified_business_input_replay(monkeypatch, rep
     else:
         with pytest.raises(GPMGuidanceUnavailableError, match="GPM_RESPONSE_INVALID"):
             client.create_guidance(**request)
+

@@ -154,11 +154,11 @@ def test_existing_ready_response_accepts_the_selected_database_profile(monkeypat
     monkeypatch.setattr(readiness, "run_dependency_probes", lambda **_: [observed])
     monkeypatch.setattr(readiness, "ready_locales", lambda _: ())
     response = readiness.ready(Request({"type": "http", "headers": []}))
-    assert response.status_code == 503
-    assert all(
-        json.loads(response.body)["checks"][f"ui_catalog_{locale}_ready"] is False
-        for locale in readiness.GENERATED_LOCALES
-    )
+    # Product source reconciliation C3 explicitly withdraws the old fixed
+    # five-locale gate. Missing unrequested catalogs cannot block a ready
+    # English workflow; the critical real language-service probe still must pass.
+    assert response.status_code == 200
+    assert not any(key.startswith("ui_catalog_") for key in json.loads(response.body)["checks"])
     monkeypatch.setattr(readiness, "ready_locales", lambda _: readiness.GENERATED_LOCALES)
     monkeypatch.setenv("AIVAN_DB_URL", "invalid")
     response = readiness.ready(Request({"type": "http", "headers": []}))

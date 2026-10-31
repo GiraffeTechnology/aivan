@@ -10,7 +10,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from aivan.app.ui_catalog import GENERATED_LOCALES, ready_locales
+# Historical catalog helpers are re-exported, not production readiness gates.
+# Requested-language translation still uses the real service boundary.
+from aivan.app.ui_catalog import GENERATED_LOCALES as GENERATED_LOCALES, ready_locales as ready_locales
 
 from aivan.governance.runtime_policy import production_policy_checks
 from aivan.observability.dependency_probe import (
@@ -150,10 +152,6 @@ def _readiness_snapshot(
         and os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
         == os.environ.get("AIVAN_EXPECTED_EGRESS_POLICY", "").strip(),
     }
-    catalog_ready = set(ready_locales(candidate))
-    checks.update(
-        {f"ui_catalog_{locale}_ready": locale in catalog_ready for locale in GENERATED_LOCALES}
-    )
     checks.update(production_policy_checks())
     results = run_dependency_probes(correlation_id=correlation_id)
     checks["critical_dependencies_ready"] = critical_dependencies_ready(results)
