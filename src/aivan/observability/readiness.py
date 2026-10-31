@@ -7,6 +7,10 @@ import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+
+from aivan.app.ui_catalog import GENERATED_LOCALES, ready_locales
 
 from aivan.governance.runtime_policy import production_policy_checks
 from aivan.observability.dependency_probe import (
@@ -42,6 +46,41 @@ def _tenant_keys_configured() -> bool:
     )
 
 
+def _database_profile_configured(database_url: str) -> bool:
+    """Validate selected SQL configuration without connecting or exposing it.
+
+    Runtime state uses a synchronous SQLAlchemy engine. Installer external mode
+    must not silently become SQLite; an unset mode preserves source deployments.
+    This is configuration evidence, not proof of connectivity or schema health.
+    """
+    mode = os.environ.get("MYAIVAN_DATABASE_MODE", "").strip().lower()
+    if mode not in {"", "external", "isolated"} or not database_url:
+        return False
+    if any(ord(character) < 32 or ord(character) == 127 for character in database_url):
+        return False
+    try:
+        url = make_url(database_url)
+        dialect = url.get_dialect()
+    except (ArgumentError, ImportError, TypeError, ValueError):
+        return False
+    if dialect.is_async or not url.database:
+        return False
+    if url.port is not None and not 1 <= url.port <= 65535:
+        return False
+    if url.host and any(character.isspace() for character in url.host):
+        return False
+    sqlite = dialect.name == "sqlite"
+    if (mode == "external" and sqlite) or (mode == "isolated" and not sqlite):
+        return False
+    if sqlite:
+        if url.host or url.username or url.password or url.port is not None:
+            return False
+        if (url.database == ":memory:" or url.database.startswith("file::memory:")
+                or url.query.get("mode") == "memory"):
+            return False
+    return True
+
+
 def _configured_port_avoids_reservations(port: str) -> bool:
     def valid(value: str) -> bool:
         return bool(re.fullmatch(r"[1-9][0-9]{0,4}", value)) and int(value) <= 65535
@@ -72,7 +111,7 @@ def _readiness_snapshot(
     ]
     checks = {
         "candidate_frozen": bool(_SHA.fullmatch(candidate)),
-        "database_profile_sqlite": database_url == "sqlite:///./data/aivan.db",
+        "database_profile_configured": _database_profile_configured(database_url),
         "tenant_configured": _configured("AIVAN_TENANT_ID") or _tenant_keys_configured(),
         "api_auth_configured": _configured("AIVAN_API_KEY")
         or _configured("AIVAN_AUTH_SECRET")
@@ -111,6 +150,10 @@ def _readiness_snapshot(
         and os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
         == os.environ.get("AIVAN_EXPECTED_EGRESS_POLICY", "").strip(),
     }
+    catalog_ready = set(ready_locales(candidate))
+    checks.update(
+        {f"ui_catalog_{locale}_ready": locale in catalog_ready for locale in GENERATED_LOCALES}
+    )
     checks.update(production_policy_checks())
     results = run_dependency_probes(correlation_id=correlation_id)
     checks["critical_dependencies_ready"] = critical_dependencies_ready(results)
@@ -137,3 +180,4 @@ def ready(request: Request):
             "correlation_id": correlation_id,
         },
     )
+

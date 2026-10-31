@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
+from starlette.requests import Request
 
 from aivan.observability import readiness
 
@@ -13,6 +15,8 @@ def selected_configuration(monkeypatch):
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.delenv("MYAIVAN_DATABASE_MODE", raising=False)
     monkeypatch.setattr(readiness, "ready_locales", lambda _: ())
+    # These tests isolate configuration parsing; never contact configured endpoints.
+    monkeypatch.setattr(readiness, "run_dependency_probes", lambda **_: [])
 
 
 def database_ready(monkeypatch, url, mode=None):
@@ -89,7 +93,7 @@ def test_database_configuration_check_never_connects_or_discloses_credentials(mo
     secret = "synthetic-private-marker"
     url = f"mysql+pymysql://synthetic:{secret}@db.example.invalid/aivan"
     assert database_ready(monkeypatch, url, "external") is True
-    result = json.loads(readiness.ready().body)
+    result = json.loads(readiness.ready(Request({"type": "http", "headers": []})).body)
     assert secret not in json.dumps(result) and url not in json.dumps(result)
     assert result["checks"]["database_profile_configured"] is True
 
@@ -121,14 +125,59 @@ def test_existing_ready_response_accepts_the_selected_database_profile(monkeypat
         "AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER": "ctranslate2",
         "AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL": "opus-mt",
         "AIVAN_TRANSLATION_PROOFREAD_ENABLED": "true",
+        "AIVAN_EXPECTED_EGRESS_POLICY": "abcdyi-sin",
+        "AIVAN_PRODUCT_ROLE": "monitoring_takeover_control_plane",
+        "AIVAN_BUSINESS_FACT_AUTHORITY": "giraffe-db",
+        "AIVAN_LOCAL_STATE_SCOPE": "control_audit_cache_only",
+        "GPM_LLM_RUNTIME_MODE": "live",
+        "AIVAN_WEB_SEARCH_PROVIDER": "live",
+        "AIVAN_ALIBABA_MODE": "live",
     }
     for name, value in configured.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(readiness, "ready_locales", lambda _: readiness.GENERATED_LOCALES)
-    response = readiness.ready()
+    observed = readiness.DependencyProbeResult(
+        dependency_id="synthetic-provider", contract_version="aivan.dependency-probe.v1",
+        criticality="critical", owner="synthetic-unit-fixture", expected_version="v1",
+        observed_version="v1", status="ready", error_code=None,
+        correlation_id="synthetic-config-test", checked_at_epoch=time.time(),
+        duration_seconds=0.001, stale_after_seconds=30.0,
+    )
+    monkeypatch.setattr(readiness, "run_dependency_probes", lambda **_: [observed])
+    response = readiness.ready(Request({"type": "http", "headers": []}))
     assert response.status_code == 200
     assert all(json.loads(response.body)["checks"].values())
+    monkeypatch.setattr(readiness, "run_dependency_probes", lambda **_: [])
+    response = readiness.ready(Request({"type": "http", "headers": []}))
+    assert response.status_code == 503
+    assert json.loads(response.body)["checks"]["critical_dependencies_ready"] is False
+    monkeypatch.setattr(readiness, "run_dependency_probes", lambda **_: [observed])
+    monkeypatch.setattr(readiness, "ready_locales", lambda _: ())
+    response = readiness.ready(Request({"type": "http", "headers": []}))
+    assert response.status_code == 503
+    assert all(
+        json.loads(response.body)["checks"][f"ui_catalog_{locale}_ready"] is False
+        for locale in readiness.GENERATED_LOCALES
+    )
+    monkeypatch.setattr(readiness, "ready_locales", lambda _: readiness.GENERATED_LOCALES)
     monkeypatch.setenv("AIVAN_DB_URL", "invalid")
-    response = readiness.ready()
+    response = readiness.ready(Request({"type": "http", "headers": []}))
     assert response.status_code == 503
     assert json.loads(response.body)["checks"]["database_profile_configured"] is False
+
+
+
+def test_valid_configuration_without_critical_observation_is_not_ready(monkeypatch):
+    monkeypatch.setenv("AIVAN_DB_URL", "mysql+pymysql:///synthetic_schema")
+    response = readiness.ready(Request({"type": "http", "headers": []}))
+    assert response.status_code == 503
+    checks = json.loads(response.body)["checks"]
+    assert checks["database_profile_configured"] is True
+    assert checks["critical_dependencies_ready"] is False
+
+
+def test_invalid_port_never_exposes_the_database_url_or_credential():
+    assert readiness._database_profile_configured(
+        "mysql+pymysql://synthetic:private-marker@db.example.invalid:invalid/aivan"
+    ) is False
+
