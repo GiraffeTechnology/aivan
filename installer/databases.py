@@ -49,10 +49,18 @@ def migration_config(component):
     return config
 
 
+
+def aivan_migrations():
+    # The caller verifies the complete pinned package before planning/applying.
+    sys.path.insert(0, str(HERE / 'provider-assets/aivan'))
+    from scripts import run_aivan_migrations
+    return run_aivan_migrations
+
 def inspect_target(component, target):
     from sqlalchemy import create_engine, inspect
-    from alembic.migration import MigrationContext
-    from alembic.script import ScriptDirectory
+    if component != 'aivan':
+        from alembic.migration import MigrationContext
+        from alembic.script import ScriptDirectory
     engine = create_engine(CONFIG.sync_url(target['url']))
     try:
         CONFIG.verify_namespace(engine, target['schema'])
@@ -64,7 +72,7 @@ def inspect_target(component, target):
         physical = CONFIG.physical_namespace(engine, target)
         with engine.connect() as connection:
             revisions = list(MigrationContext.configure(connection).get_current_heads()) if component != 'aivan' else []
-        heads = ScriptDirectory.from_config(migration_config(component)).get_heads() if component != 'aivan' else ['2026.08.10-stage7b']
+        heads = ScriptDirectory.from_config(migration_config(component)).get_heads() if component != 'aivan' else [aivan_migrations().SCHEMA_VERSION]
         return {'engine': target['engine'], 'target_sha256': target['target_sha256'],
                 'namespace_sha256': digest(physical), 'schema_sha256': digest(shape), 'empty': not names,
                 'schema_current': not issues, 'schema_issues': issues,
@@ -111,9 +119,7 @@ def apply_component(component, target, snapshot, manifest, tenant, authorization
         if snapshot['schema_current']:
             return {'changed': False, 'schema_current': True}
         # Scripts remain independently source-pinned assets, not a host checkout.
-        sys.path.insert(0, str(HERE / 'provider-assets/aivan'))
-        from scripts.run_aivan_migrations import _apply_verified_candidate
-        return _apply_verified_candidate(target['url'], tenant_id=tenant,
+        return aivan_migrations()._apply_verified_candidate(target['url'], tenant_id=tenant,
             candidate_sha=manifest['components']['aivan']['revision'], authorization_reference=authorization,
             backup_reference=backup, bootstrap_empty=bootstrap_empty)
     if snapshot['unversioned_existing_schema']:
