@@ -124,7 +124,7 @@ def test_production_giraffe_context_never_uses_local_placeholder_facts(
 
     _production_safe(monkeypatch)
     requirement = BuyerRequirement(raw_text="100 shirts")
-    with pytest.raises(RuntimeError, match="GIRAFFE_DB_CANONICAL_CONTEXT_REQUIRED"):
+    with pytest.raises(RuntimeError, match="GIRAFFE_DB_CONTEXT_ENDPOINT_REQUIRED"):
         GiraffeDBClient(db_session, tenant_id="tenant-a").build_context(requirement)
 
 

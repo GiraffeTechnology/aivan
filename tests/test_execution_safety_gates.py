@@ -110,16 +110,18 @@ def test_missing_delivery_blocks():
     assert "delivery" in gate.missing_fields
 
 
-def test_confirmation_message_is_language_matched_chinese():
+def test_confirmation_state_is_canonical_before_presentation_translation():
     req = BuyerRequirement(
         raw_text="询价 5000 件格子衬衫，45天，高品质",
         language="zh",
-        product_type="格子衬衫",
+        product_type="plaid shirt",
         quantity=5000,
         delivery_days=45,
     )
     req.extra["field_sources"] = {"product_type": "language_skill", "destination": "raw_text_only"}
     gate = evaluate_requirement_readiness(req)
     assert not gate.ready
-    assert "目的地" in gate.operator_message
+    assert "destination" in gate.operator_message.lower()
+    assert "plaid shirt" in gate.operator_message
+    assert "目的地" not in gate.operator_message
     assert "GLTG" in gate.operator_message

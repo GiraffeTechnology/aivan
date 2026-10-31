@@ -122,6 +122,7 @@ def test_smtp_lost_ack_is_unconfirmed_and_not_retried(db_session, monkeypatch):
             calls.append(message)
             raise TimeoutError("Synthetic SMTP acknowledgement loss")
     monkeypatch.setattr("aivan.openclaw.email_transport.smtplib.SMTP_SSL", SMTP)
+    monkeypatch.setenv("AIVAN_EMAIL_ALLOWED_RECIPIENTS", "approved.recipient@example.invalid")
     draft_id = smtp_draft(db_session, target="approved.recipient@example.invalid")
     response = send_if_approved(draft_id, db_session)
     assert response.outcome_uncertain and not response.success

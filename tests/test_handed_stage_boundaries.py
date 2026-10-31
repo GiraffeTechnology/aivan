@@ -94,14 +94,18 @@ def test_openclaw_mock_never_claims_delivery_or_connection(monkeypatch):
     assert client.check_account_status('synthetic-account')['status'] != 'connected'
 
 
-def test_openclaw_account_failure_does_not_expose_exception(monkeypatch):
+def test_openclaw_account_failure_does_not_expose_exception(monkeypatch, caplog):
     monkeypatch.setenv('OPENCLAW_MOCK_MODE', 'false')
     monkeypatch.setenv('OPENCLAW_BASE_URL', 'https://transport.invalid')
     def fail(*args, **kwargs):
         raise RuntimeError('synthetic-private-token-and-response-body')
     monkeypatch.setattr(httpx, 'get', fail)
-    assert OpenClawClient().check_account_status('fixture') == {
-        'status': 'error', 'error': 'OPENCLAW_ACCOUNT_STATUS_UNAVAILABLE'}
+    result = OpenClawClient().check_account_status('fixture')
+    assert result['status'] == 'error'
+    assert result['error'].startswith('OPENCLAW_REQUEST_FAILED:')
+    assert len(result['error'].split(':', 1)[1]) == 32
+    assert 'synthetic-private-token-and-response-body' not in str(result)
+    assert 'synthetic-private-token-and-response-body' not in caplog.text
 
 
 def association_fixture():

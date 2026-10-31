@@ -93,13 +93,28 @@ def test_normalized_replay_survives_session_reset_and_is_tenant_scoped(shape, db
 
 
 @pytest.mark.parametrize("shape", ["wechat", "standard"])
-def test_api_preserves_distinct_messages_and_replays_across_new_clients(shape, tmp_path, monkeypatch):
+def test_api_preserves_distinct_messages_and_replays_across_new_clients(
+    shape, tmp_path, monkeypatch, production_runtime_policy, ready_dependency_probes,
+):
     from fastapi.testclient import TestClient
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from aivan.api.main import app, get_db
     from aivan.db.models import Base
 
+    # Isolate authenticated ingress/replay from language/model availability.
+    # This explicit synthetic service result is not live-provider acceptance.
+    import aivan.execution.rfq_execution as execution
+    def synthetic_canonical(text, **kwargs):
+        assert text == "Please request a quote for 5000 plaid shirts to Tokyo within 45 days."
+        return {"normalize": {"canonical_language": "en", "canonical_text": text,
+                              "language": {"detected": "en"}, "field_evidence": {}},
+                "structure": {"validation_status": "valid", "structured": {
+                    "product_name": "plaid shirt", "destination": "Tokyo",
+                    "quantity": 5000, "lead_time_days": 45, "product_category": "apparel",
+                }}}
+    monkeypatch.setattr(execution, "canonicalize_rfq", synthetic_canonical)
+    monkeypatch.setenv("AIVAN_LLM_API_ENABLED", "false")
     monkeypatch.setenv("AIVAN_ENV", "production")
     monkeypatch.setenv("AIVAN_TENANT_API_KEYS", '{"tenant-a":"synthetic-a","tenant-b":"synthetic-b"}')
     monkeypatch.delenv("AIVAN_TENANT_ID", raising=False)

@@ -19,6 +19,14 @@ from aivan.utils.env import env_bool
 
 logger = logging.getLogger(__name__)
 
+
+class EmailTransportValidationError(ValueError):
+    """An allowlisted validation code, never an address, credential or response."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
 SECRET_KEYS = {
     "AIVAN_SMTP_PASSWORD",
     "AIVAN_IMAP_PASSWORD",
@@ -84,7 +92,7 @@ def redact_secret(text: str | None) -> str:
 def _single_email_address(raw: str) -> str:
     addresses = [(name, addr) for name, addr in getaddresses([raw or ""]) if addr]
     if len(addresses) != 1:
-        raise ValueError("real_test email must have exactly one recipient")
+        raise EmailTransportValidationError("EMAIL_ADDRESS_COUNT_INVALID", "real_test email must have exactly one recipient")
     return addresses[0][1].strip().lower()
 
 
@@ -96,7 +104,7 @@ def validate_real_test_recipient(recipient: str) -> str:
     if not allowed:
         raise ValueError("AIVAN_EMAIL_ALLOWED_RECIPIENTS is not configured")
     if normalized not in allowed:
-        raise ValueError("real_test email recipient is not allowlisted")
+        raise EmailTransportValidationError("EMAIL_RECIPIENT_NOT_ALLOWED", "real_test email recipient is not allowlisted")
     return normalized
 
 
@@ -217,14 +225,14 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     submitted = False
     try:
         if real_test_email_gateway() != "openclaw_real_test":
-            raise ValueError("AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email sending")
+            raise EmailTransportValidationError("EMAIL_GATEWAY_REQUIRED", "AIVAN_EMAIL_GATEWAY must be openclaw_real_test for real_test email sending")
         recipient_address = validate_real_test_recipient(recipient)
         sender_address = _single_email_address(sender)
         username_address = _single_email_address(username)
         if not sender_address:
             raise ValueError("real_test sender is not configured")
         if sender_address != username_address:
-            raise ValueError("real_test sender must match SMTP username")
+            raise EmailTransportValidationError("EMAIL_SENDER_MISMATCH", "real_test sender must match SMTP username")
         if not password:
             raise ValueError("AIVAN_SMTP_PASSWORD is not configured")
         host = _required_text_setting("AIVAN_SMTP_HOST")
@@ -261,4 +269,6 @@ def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
         uncertain = submitted and not isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError))
         error_id = log_exception_safely(logger, "SMTP test send failed", exc=exc)
         error = "Outbound delivery is unconfirmed" if uncertain else ("SMTP rejected the message" if submitted else f"EMAIL_TRANSPORT_FAILED:{error_id}")
+        if not submitted and isinstance(exc, EmailTransportValidationError):
+            error = exc.code
         return OpenClawSendResponse(success=False, outcome_uncertain=uncertain, error=error)
