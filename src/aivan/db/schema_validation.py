@@ -6,6 +6,15 @@ from sqlalchemy import inspect
 from aivan.db.models import Base
 
 
+
+def table_is_required(table_name: str) -> bool:
+    """Return the existing feature selection without relaxing other tables."""
+    if table_name != "ui_test_ticket_receipts":
+        return True
+    return os.environ.get("AIVAN_UI_TEST_ACCOUNT_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
 def schema_issues(engine) -> list[str]:
     """Return missing table/column identifiers without mutating the database."""
 
@@ -16,9 +25,7 @@ def schema_issues(engine) -> list[str]:
         # The optional test-login endpoint is closed when disabled. Its own
         # production configuration validation requires this migrated table
         # before enabling or consuming a ticket; normal login does not use it.
-        if table_name == "ui_test_ticket_receipts" and os.environ.get(
-            "AIVAN_UI_TEST_ACCOUNT_ENABLED", ""
-        ).strip().lower() not in {"1", "true", "yes", "on"}:
+        if not table_is_required(table_name):
             continue
         if table_name not in actual_tables:
             issues.append(f"missing_table:{table_name}")
