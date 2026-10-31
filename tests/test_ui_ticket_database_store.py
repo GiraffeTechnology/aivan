@@ -122,4 +122,3 @@ def test_ticket_store_mysql_and_postgresql_ddl_are_portable():
         ddl = str(CreateTable(UITestTicketReceipt.__table__).compile(dialect=dialect))
         assert "PRIMARY KEY" in ddl and "digest" in ddl
         assert "sqlite" not in ddl.lower()
-

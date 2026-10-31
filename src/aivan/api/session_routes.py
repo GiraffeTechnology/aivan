@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import time
+import uuid
+from aivan.api.ticket_store import TicketStoreUnavailable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
@@ -69,7 +71,7 @@ def _test_account_enabled() -> bool:
     }
 
 
-def _configured_test_identity() -> tuple[str, str, tuple[str, ...], str]:
+def _configured_test_identity(db: Session | None = None) -> tuple[str, str, tuple[str, ...], str]:
     if not _test_account_enabled():
         raise HTTPException(status_code=404, detail={"error": "TEST_ACCOUNT_DISABLED"})
     tenant_id = os.environ.get("AIVAN_UI_TEST_TENANT_ID", "").strip()
@@ -92,7 +94,7 @@ def _configured_test_identity() -> tuple[str, str, tuple[str, ...], str]:
             detail={"error": "TEST_ACCOUNT_MISCONFIGURED"},
         )
     try:
-        validate_test_ticket_configuration()
+        validate_test_ticket_configuration(db=db)
     except ValueError as exc:
         raise HTTPException(
             status_code=503, detail={"error": "TEST_ACCOUNT_MISCONFIGURED"}
@@ -162,7 +164,7 @@ def test_login(
 ):
     """Issue an isolated test session without the ordinary login ceremony."""
 
-    tenant_id, actor_id, allowed_roles, role = _configured_test_identity()
+    tenant_id, actor_id, allowed_roles, role = _configured_test_identity(db)
     tenant_models = (
         Project,
         InquiryDraftRecord,
@@ -181,7 +183,11 @@ def test_login(
         raise HTTPException(status_code=503, detail={"error": "TEST_TENANT_NOT_EMPTY"})
     ticket = str((body or {}).get("ticket") or "").strip()
     try:
-        ticket_digest = consume_test_login_ticket(ticket)
+        ticket_digest = consume_test_login_ticket(ticket, db=db)
+    except TicketStoreUnavailable:
+        raise HTTPException(status_code=503, detail={
+            "error": "UI_TEST_TICKET_STORE_UNAVAILABLE", "trace_id": uuid.uuid4().hex,
+        }) from None
     except ValueError as exc:
         raise HTTPException(status_code=403, detail={"error": "INVALID_TEST_ACCESS"}) from exc
     token, csrf_token, expires_at = issue_ui_session(

@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
+from sqlalchemy.orm import Session
 from aivan.api.secure_compare import secure_compare_str
 
 
@@ -141,8 +142,14 @@ def _test_ticket_secret() -> bytes:
     return value.encode("utf-8")
 
 
-def validate_test_ticket_configuration() -> None:
+def validate_test_ticket_configuration(db: Session | None = None) -> None:
     _test_ticket_secret()
+    if db is not None:
+        from aivan.api.ticket_store import validate_ticket_store
+        validate_ticket_store(db)
+        return
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        raise ValueError("production test ticket database session is required")
     path = _test_ticket_ledger_path()
     _open_test_ticket_ledger(path)
 
@@ -202,9 +209,15 @@ def _open_test_ticket_ledger(path: str) -> None:
         os.close(descriptor)
 
 
-def _consume_test_ticket_digest(digest: str, expires_at: int, current: int) -> None:
+def _consume_test_ticket_digest(digest: str, expires_at: int, current: int, db: Session | None = None) -> None:
     """Atomically persist a consumed digest across workers and restarts."""
 
+    if db is not None:
+        from aivan.api.ticket_store import consume_ticket_digest
+        consume_ticket_digest(db, digest, expires_at=expires_at, current=current)
+        return
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        raise ValueError("production test ticket database session is required")
     path = _test_ticket_ledger_path()
     _open_test_ticket_ledger(path)
     connection = sqlite3.connect(path, timeout=5, isolation_level=None)
@@ -263,7 +276,7 @@ def issue_test_login_ticket(
     return f"{encoded}.{signature}"
 
 
-def consume_test_login_ticket(ticket: str, *, now: int | None = None) -> str:
+def consume_test_login_ticket(ticket: str, *, now: int | None = None, db: Session | None = None) -> str:
     """Validate and atomically consume one test-login ticket.
 
     Returns a non-secret digest prefix suitable for audit correlation.
@@ -298,7 +311,7 @@ def consume_test_login_ticket(ticket: str, *, now: int | None = None) -> str:
         raise ValueError("invalid test login ticket") from exc
 
     digest = hashlib.sha256(ticket.encode("utf-8")).hexdigest()
-    _consume_test_ticket_digest(digest, expires_at, current)
+    _consume_test_ticket_digest(digest, expires_at, current, db=db)
     return digest[:16]
 
 
