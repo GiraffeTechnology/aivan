@@ -80,16 +80,16 @@
     {
       "rule": "python_crypto_rule-hash-sha1",
       "path": "installer/build.py",
-      "sha256": "96c2028bcb30b607a5ba1824cbb25e050f5a5beb10a6b758ad3b4749faa55855",
+      "sha256": "e2941a54e52a5ab01c9dc47814eb3124aba4df0c611c4bae6b67e64a0d45db5e",
       "count": 2,
-      "reason": "Re-reviewed against the complete installer builder and real 79-rule scan: lines 49 and 86 reconstruct existing Git tree/blob object IDs, explicitly usedforsecurity=False. No password, credential, signature or package-integrity use exists. Wheel, source inventory, provenance and final installer integrity continue to use SHA-256. Re-reviewed for explicit deployment stages: the only builder change adds literal stage names to the output manifest. Git object hashing, executable selection, argv construction, source validation and SHA-256 integrity paths are unchanged. Existing finding counts remain enforced; a fresh scanner run is required."
+      "reason": "Re-reviewed against the complete installer builder and real 79-rule scan: lines 49 and 86 reconstruct existing Git tree/blob object IDs, explicitly usedforsecurity=False. No password, credential, signature or package-integrity use exists. Wheel, source inventory, provenance and final installer integrity continue to use SHA-256. Re-reviewed for the UI ticket migration inventory fix: a literal six-file inventory now drives source-manifest inclusion and safe payload copying, including migrate_ui_ticket_receipts.py. Git SHA-1 calls, subprocess argv/executable selection, safe_source_file validation and SHA-256 integrity code are unchanged. Existing rule/path/count constraints remain enforced; the changed file requires a fresh full scanner run."
     },
     {
       "rule": "python_exec_rule-subprocess-call",
       "path": "installer/build.py",
-      "sha256": "96c2028bcb30b607a5ba1824cbb25e050f5a5beb10a6b758ad3b4749faa55855",
+      "sha256": "e2941a54e52a5ab01c9dc47814eb3124aba4df0c611c4bae6b67e64a0d45db5e",
       "count": 2,
-      "reason": "Re-reviewed against the complete installer builder and real scan: lines 101 and 260 invoke literal git with separate -C, operator-selected source directory, ls-files and -z argv values, without a shell. Full commit/tree IDs are verified before staging and safe_source_file rejects traversal and symlinks. No application request selects the executable or arguments. Re-reviewed for explicit deployment stages: the only builder change adds literal stage names to the output manifest. Git object hashing, executable selection, argv construction, source validation and SHA-256 integrity paths are unchanged. Existing finding counts remain enforced; a fresh scanner run is required."
+      "reason": "Re-reviewed against the complete installer builder and real scan: lines 101 and 260 invoke literal git with separate -C, operator-selected source directory, ls-files and -z argv values, without a shell. Full commit/tree IDs are verified before staging and safe_source_file rejects traversal and symlinks. No application request selects the executable or arguments. Re-reviewed for the UI ticket migration inventory fix: a literal six-file inventory now drives source-manifest inclusion and safe payload copying, including migrate_ui_ticket_receipts.py. Git SHA-1 calls, subprocess argv/executable selection, safe_source_file validation and SHA-256 integrity code are unchanged. Existing rule/path/count constraints remain enforced; the changed file requires a fresh full scanner run."
     },
     {
       "rule": "python_urlopen_rule-urllib-urlopen",
