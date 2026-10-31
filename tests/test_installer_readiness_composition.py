@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from tests.test_installer_deployment_profile import module, write_private
 from aivan.governance.runtime_policy import enforce_runtime_policy, RuntimePolicyError
 from aivan.observability import dependency_probe as probes, readiness
+from aivan.integrations.giraffe_db_auth import service_auth_for_tenant
 
 runtime = module("runtime")
 deployment = module("deployment_config")
@@ -64,7 +65,7 @@ def synthetic_http_probes(monkeypatch, broken=""):
                     and str(request.url).startswith(os.environ[spec.base_url_env].rstrip("/") + "/"))
         if spec.dependency_id == "giraffe-db":
             assert request.headers["X-Service-Tenant-ID"] == "tenant-a"
-            assert request.headers["X-Service-Auth"] == os.environ["GIRAFFE_DB_SERVICE_AUTH_SECRET"]
+            assert request.headers["X-Service-Auth"] == service_auth_for_tenant("tenant-a")
             assert request.headers["X-AIVAN-Correlation-ID"] == request.headers["X-AIVAN-Trace-ID"]
             assert request.headers["X-GPM-Contract-Version"]
         if broken == spec.dependency_id + "-auth":
@@ -275,3 +276,34 @@ def test_invalid_supplied_profile_metadata_is_rejected(field, value):
             endpoint=runtime.endpoint, tenant_identities=runtime.fulfillment_tenants,
         )
         runtime.validate_config(after)
+
+
+def test_probe_uses_the_explicit_tenant_map_without_a_shared_fallback(tmp_path, monkeypatch):
+    installed_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "")
+    monkeypatch.setenv("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", json.dumps({
+        "tenant-a": "fixture-only-private-provider-key",
+    }))
+    requests = synthetic_http_probes(monkeypatch)
+    assert all(readiness.readiness_checks().values())
+    db_requests = [request for request in requests
+                   if str(request.url).startswith(os.environ["GIRAFFE_DB_BASE_URL"] + "/")]
+    assert db_requests
+    assert all(request.headers["X-Service-Auth"] == "fixture-only-private-provider-key"
+               for request in db_requests)
+
+
+@pytest.mark.parametrize("mapping", [
+    '{"other-tenant":"fixture-other"}', 'not-json',
+    '{"tenant-a":"fixture-first","tenant-a":"fixture-duplicate"}',
+])
+def test_bad_tenant_map_never_borrows_the_shared_key_or_sends_db_requests(
+    tmp_path, monkeypatch, mapping,
+):
+    installed_environment(tmp_path, monkeypatch)
+    monkeypatch.setenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "fixture-shared-must-not-be-used")
+    monkeypatch.setenv("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", mapping)
+    requests = synthetic_http_probes(monkeypatch)
+    assert readiness.readiness_checks()["critical_dependencies_ready"] is False
+    assert not any(str(request.url).startswith(os.environ["GIRAFFE_DB_BASE_URL"] + "/")
+                   for request in requests)
