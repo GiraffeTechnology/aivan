@@ -117,7 +117,13 @@ def schema_issues(engine, metadata):
     inspector = inspect(engine)
     actual = set(inspector.get_table_names())
     issues = []
-    for table in metadata.tables.values():
+    tables = list(metadata.tables.values())
+    if any(table.name == 'ui_test_ticket_receipts' for table in tables):
+        from aivan.db.models import Base as AivanBase
+        if metadata is AivanBase.metadata:
+            from aivan.db.schema_validation import table_is_required
+            tables = [table for table in tables if table_is_required(table.name)]
+    for table in tables:
         if table.name not in actual:
             issues.append('missing_table:' + table.name)
         else:
@@ -135,7 +141,7 @@ def schema_issues(engine, metadata):
                             (isinstance(expected, Text) or expected_length is not None and actual_length < expected_length)):
                         issues.append('insufficient_string_capacity:' + table.name + '.' + column.name)
     if engine.dialect.name == 'mysql':
-        identities = {(table.name, column.name) for table in metadata.tables.values() for column in table.columns
+        identities = {(table.name, column.name) for table in tables for column in table.columns
                       if column.primary_key or column.unique or column.name in {'id', 'created_by', 'updated_by'}
                       or column.name.endswith(('_id', '_key'))}
         with engine.connect() as connection:
