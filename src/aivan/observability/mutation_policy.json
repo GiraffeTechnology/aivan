@@ -204,6 +204,24 @@
       "path_template": "/api/workbench/cases/{case_id}/attachments",
       "classification": "guarded",
       "reason": "Persist an authenticated case attachment through the owning data API."
+    },
+    {
+      "method": "POST",
+      "path_template": "/api/workbench/cases/{case_id}/drafts/{draft_id}/copy",
+      "classification": "guarded",
+      "reason": "Record an authenticated manual-copy outcome and its audit lineage."
+    },
+    {
+      "method": "PATCH",
+      "path_template": "/api/workbench/cases/{case_id}/requirement",
+      "classification": "guarded",
+      "reason": "Revise version-bound requirement facts and invalidate superseded workflow outputs."
+    },
+    {
+      "method": "POST",
+      "path_template": "/api/workbench/cases/{case_id}/order-confirmation",
+      "classification": "guarded",
+      "reason": "Persist a human-authorized selected quote and verify authoritative order readback."
     }
   ]
 }

@@ -3,6 +3,7 @@ import os
 import logging
 from aivan.observability.safe_logging import log_exception_safely
 import httpx
+from aivan.governance.runtime_policy import is_production
 from aivan.openclaw.contracts import OpenClawSendRequest, OpenClawSendResponse
 from aivan.utils.time_utils import utcnow_iso
 
@@ -13,6 +14,8 @@ class OpenClawClient:
         self.base_url = os.environ.get("OPENCLAW_BASE_URL", "")
         self.api_key = os.environ.get("OPENCLAW_API_KEY", "")
         self.mock_mode = os.environ.get("OPENCLAW_MOCK_MODE", "true").lower() == "true"
+        if self.mock_mode and is_production():
+            raise RuntimeError("OPENCLAW_MOCK_FORBIDDEN")
         self.timeout = 30
 
     def _headers(self) -> dict:

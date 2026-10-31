@@ -31,10 +31,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import logging
+from aivan.governance.runtime_policy import reject_test_transport_in_production
+from aivan.observability.safe_logging import log_exception_safely
 from aivan.utils.env import env_bool
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8788"
 DEFAULT_TIMEOUT_SECONDS = 10.0
+logger = logging.getLogger(__name__)
 
 # Explicit test transport injection isolates unit branches; it is not evidence
 # of a live language-skill integration or a production fallback.
@@ -43,6 +47,7 @@ _DEFAULT_TRANSPORT: "httpx.BaseTransport | None" = None
 
 def set_default_transport(transport: "httpx.BaseTransport | None") -> None:
     """Install (or clear) a process-wide default transport for the client."""
+    reject_test_transport_in_production(transport, component="language-skill-client")
     global _DEFAULT_TRANSPORT
     _DEFAULT_TRANSPORT = transport
 
@@ -88,6 +93,7 @@ class LanguageSkillClient:
         # Injectable transport keeps unit tests off the network
         # (httpx.MockTransport). Falls back to the process-wide default.
         self._transport = transport if transport is not None else _DEFAULT_TRANSPORT
+        reject_test_transport_in_production(self._transport, component="language-skill-client")
 
     # ------------------------------------------------------------------ #
     # transport
@@ -97,23 +103,39 @@ class LanguageSkillClient:
         try:
             with httpx.Client(timeout=self.timeout, transport=self._transport, follow_redirects=False) as client:
                 resp = client.request(method, url, json=json)
-        except httpx.TimeoutException:
-            return LanguageSkillResult(False, None, "language-skill request timed out", None)
-        except httpx.HTTPError:
-            return LanguageSkillResult(False, None, "language-skill connection error", None)
+        except httpx.TimeoutException as exc:
+            error_id = log_exception_safely(
+                logger, "Language-skill request timed out", exc=exc
+            )
+            return LanguageSkillResult(
+                False, None, f"LANGUAGE_SKILL_TIMEOUT:{error_id}", None
+            )
+        except httpx.HTTPError as exc:
+            error_id = log_exception_safely(
+                logger, "Language-skill connection failed", exc=exc
+            )
+            return LanguageSkillResult(
+                False, None, f"LANGUAGE_SKILL_CONNECTION_FAILED:{error_id}", None
+            )
 
         if resp.status_code != 200:
             return LanguageSkillResult(
                 False,
                 None,
-                f"language-skill returned HTTP {resp.status_code}",
+                f"LANGUAGE_SKILL_HTTP_{resp.status_code}",
                 resp.status_code,
             )
         try:
             return LanguageSkillResult(True, resp.json(), None, resp.status_code)
-        except ValueError:
+        except ValueError as exc:
+            error_id = log_exception_safely(
+                logger, "Language-skill returned invalid JSON", exc=exc
+            )
             return LanguageSkillResult(
-                False, None, "language-skill returned invalid JSON", resp.status_code
+                False,
+                None,
+                f"LANGUAGE_SKILL_INVALID_RESPONSE:{error_id}",
+                resp.status_code,
             )
 
     # ------------------------------------------------------------------ #
@@ -256,3 +278,4 @@ class LanguageSkillClient:
         if tone:
             payload["tone"] = tone
         return self._request("POST", "/v1/outbound/render", json=payload)
+

@@ -311,7 +311,12 @@ def consume_test_login_ticket(ticket: str, *, now: int | None = None, db: Sessio
         raise ValueError("invalid test login ticket") from exc
 
     digest = hashlib.sha256(ticket.encode("utf-8")).hexdigest()
-    _consume_test_ticket_digest(digest, expires_at, current, db=db)
+    try:
+        _consume_test_ticket_digest(digest, expires_at, current, db=db)
+    except ValueError as exc:
+        # The HTTP authentication boundary does not distinguish valid replays
+        # from invalid tickets. Storage unavailability remains a separate 503.
+        raise ValueError("invalid test login ticket") from exc
     return digest[:16]
 
 
