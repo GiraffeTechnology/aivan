@@ -116,6 +116,7 @@ class GPMGuidanceClient:
             "X-AIVAN-Tenant-ID": tenant_id,
             "X-AIVAN-Actor-ID": actor_id,
             "X-AIVAN-Role": actor_role,
+            "X-AIVAN-Role-Context": actor_role,
             "X-AIVAN-Trace-ID": trace_id,
             "Idempotency-Key": idempotency_key,
         }
@@ -312,3 +313,4 @@ class GPMGuidanceClient:
             gltg_api_version=gltg_api_version,
             verified_replay=verified_replay,
         )
+

@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 import pytest
 
 from aivan.gpm.packet_store import GPMPacketStore
-from aivan.gpm.router import _reset_store, require_gpm_tenant, router
+from aivan.gpm.router import _reset_store, require_gpm_principal, router
+from tests.unit.gpm.principal_fixture import principal_for_tenant
 from aivan.gpm.request_identity import request_fingerprint
 
 PAYLOAD = {"case_id": "case-1", "quote_id": "quote-1", "sku": "Cotton shirts", "supplier_id": "supplier-1",
@@ -26,6 +27,12 @@ def boundary(monkeypatch):
     monkeypatch.delenv("GPM_LLM_RUNTIME_MODE", raising=False)
     persisted = {}
     provider = MagicMock()
+    provider.check_schema_version.return_value = {"schema_version": "0.2.0"}
+    provider.check_packet_capabilities.return_value = {
+        "api_version": "gpm.packet-persistence.v1",
+        "capabilities": {"create_packet": True, "read_packet": True,
+                         "idempotent_create": True, "quote_lineage": True},
+    }
     provider.get_packet.side_effect = lambda identity, **kwargs: copy.deepcopy(persisted.get(identity))
     def create(packet, **kwargs):
         persisted[packet["packet_id"]] = copy.deepcopy(packet)
@@ -34,7 +41,7 @@ def boundary(monkeypatch):
     store = GPMPacketStore(provider)
     _reset_store(store)
     app = FastAPI(); app.include_router(router, prefix="/api/gpm")
-    app.dependency_overrides[require_gpm_tenant] = lambda: "tenant-1"
+    app.dependency_overrides[require_gpm_principal] = principal_for_tenant("tenant-1")
     model = MagicMock(side_effect=[{"recommendation": "negotiate", "confidence": "medium",
                     "quote_position": "within_mid_range", "reasoning": "Synthetic analysis first response.",
                     "runtime_status": "synthetic-test", "model_provider": "synthetic-test"},
@@ -139,3 +146,4 @@ def test_explicit_zero_model_does_not_mask_persistence_failure(boundary, monkeyp
     response = client.post("/api/gpm/quote-guidance", json=PAYLOAD, headers=HEADERS)
     assert response.status_code == 503
     model.assert_not_called()
+

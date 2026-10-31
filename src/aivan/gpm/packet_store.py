@@ -176,6 +176,19 @@ class GPMPacketStore:
         if not isinstance(packet_tenant, str) or not packet_tenant or (
                 tenant_id is not None and tenant_id != packet_tenant):
             raise HTTPException(status_code=422, detail={"error": "GPM_PACKET_TENANT_REQUIRED"})
+        if _is_production() and not tenant_id:
+            # Never substitute packet identity for the authenticated caller.
+            # Preserve the versioned legacy adapter's explicit None rejection;
+            # the HTTP adapter itself rejects it before network I/O.
+            if self._legacy_durable and self._db is not None:
+                try:
+                    self._db.create_packet(packet, tenant_id=None, correlation_id=correlation_id)
+                except Exception as exc:
+                    _raise_production_unavailable(_redact_adapter_error(exc, correlation_id=correlation_id))
+                raise HTTPException(status_code=503, detail={
+                    "error": "GPM_PERSISTENCE_OUTCOME_UNKNOWN", "packet_id": pid,
+                })
+            _raise_production_unavailable()
         tenant_id = packet_tenant
         if self.ensure_tenant_ready(tenant_id, correlation_id=correlation_id):
             assert self._db is not None

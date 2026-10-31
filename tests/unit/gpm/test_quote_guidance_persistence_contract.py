@@ -14,9 +14,10 @@ from aivan.gpm.packet_store import GPMPacketStore
 from aivan.gpm.persistence_contract import GPM_PERSISTENCE_CONTRACT_VERSION, PersistenceContractError
 from aivan.gpm.router import (
     _reset_store,
-    require_gpm_tenant,
+    require_gpm_principal,
     router,
 )
+from tests.unit.gpm.principal_fixture import principal_for_tenant
 
 
 @pytest.fixture(autouse=True)
@@ -87,7 +88,7 @@ def test_packet_capability_probe_is_separate_from_database_schema(
     with patch.object(client._session, "get", return_value=_response(200, body)) as request:
         assert client.check_packet_capabilities(TENANT, correlation_id="trace-002") == body
 
-    assert request.call_args.args[0].endswith("/api/data/gpm/capabilities")
+    assert str(request.call_args.args[0]).endswith("/api/data/gpm/capabilities")
     assert request.call_args.kwargs["headers"]["X-Service-Tenant-ID"] == TENANT
     assert request.call_args.kwargs["headers"]["X-Service-Auth"] == "service-secret"
 
@@ -157,6 +158,7 @@ def test_production_save_requires_provider_readback(monkeypatch: pytest.MonkeyPa
 
     result = store.save(
         PACKET,
+        tenant_id=TENANT,
         idempotency_key="idem-002",
         correlation_id="trace-004",
     )
@@ -194,6 +196,7 @@ def test_production_save_marks_possible_commit_unknown_when_readback_fails(
     with pytest.raises(HTTPException) as exc_info:
         store.save(
             PACKET,
+            tenant_id=TENANT,
             idempotency_key="idem-003",
             correlation_id="trace-005",
         )
@@ -226,7 +229,7 @@ def quote_guidance_client(monkeypatch: pytest.MonkeyPatch):
     _reset_store(store)  # type: ignore[arg-type]
     app = FastAPI()
     app.include_router(router, prefix="/api/gpm")
-    app.dependency_overrides[require_gpm_tenant] = lambda: TENANT
+    app.dependency_overrides[require_gpm_principal] = principal_for_tenant(TENANT)
     with patch(
         "aivan.gpm.router.analyze_quote",
         return_value={
@@ -397,7 +400,7 @@ def test_status_query_rejects_invalid_correlation_before_provider_read(
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"] == "GPM_CORRELATION_ID_INVALID"
+    assert response.json()["detail"]["error"] == "GPM_INVALID_CORRELATION_ID"
     store.get.assert_not_called()
 
 

@@ -270,6 +270,8 @@ class GiraffeDBClient:
             if response.status_code == 404:
                 return None
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             value = self._json(response, correlation_id=correlation_id)
             return require_response_tenant(
                 value, expected_tenant=tenant_id, correlation_id=correlation_id
@@ -337,6 +339,8 @@ class GiraffeDBClient:
             if response.status_code == 404:
                 return None
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             value = self._json(response, correlation_id=correlation_id)
             return require_response_tenant(
                 value, expected_tenant=tenant_id or "", correlation_id=correlation_id
@@ -368,6 +372,8 @@ class GiraffeDBClient:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             envelope = self._json(response, correlation_id=correlation_id)
             packets = envelope.get("packets")
             if not isinstance(packets, list) or not all(

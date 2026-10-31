@@ -52,6 +52,12 @@ def readiness_client(monkeypatch):
     monkeypatch.setenv('AIVAN_TENANT_ID', 'tenant-a')
     provider = MagicMock()
     provider.get_tenant.return_value = {'status': 'active', 'tenant_id': 'tenant-a'}
+    provider.check_schema_version.return_value = {"schema_version": "0.2.0"}
+    provider.check_packet_capabilities.return_value = {
+        "api_version": "gpm.packet-persistence.v1",
+        "capabilities": {"create_packet": True, "read_packet": True,
+                         "idempotent_create": True, "quote_lineage": True},
+    }
     store = GPMPacketStore(provider)
     monkeypatch.setattr(router_module, '_packet_store', store)
     app = FastAPI()
@@ -68,7 +74,7 @@ def headers(tenant='tenant-a'):
 def test_authenticated_route_reprobes_and_never_writes(readiness_client):
     client, provider, store = readiness_client
     first = client.get('/api/gpm/readiness', headers=headers())
-    assert first.status_code == 200
+    assert first.status_code == 200, first.text
     assert first.json() == {'status': 'ok', 'tenant_id': 'tenant-a', 'packet_persistence': 'durable'}
     assert client.get('/api/gpm/readiness', headers=headers()).status_code == 200
     assert provider.check_schema_version.call_count == 2
