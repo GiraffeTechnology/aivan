@@ -71,22 +71,6 @@ class OpenClawClient:
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            error_id = log_exception_safely(logger, "OpenClaw send failed", exc=exc)
-            return OpenClawSendResponse(
-                success=False,
-                error=f"OPENCLAW_REQUEST_FAILED:{error_id}",
-            )
-
-    def check_account_status(self, account_connection_id: str) -> dict:
-        if self.mock_mode:
-            return {"status": "connected", "account_connection_id": account_connection_id}
-        if not self.base_url:
-            return {"status": "error", "error": "OPENCLAW_BASE_URL not configured"}
-        try:
-            resp = httpx.get(f"{self.base_url}/accounts/{account_connection_id}", headers=self._headers(), timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except Exception as exc:
             error_id = log_exception_safely(logger, "OpenClaw account status failed", exc=exc)
             return {"status": "error", "error": f"OPENCLAW_REQUEST_FAILED:{error_id}"}
 

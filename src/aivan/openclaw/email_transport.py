@@ -211,7 +211,7 @@ def fetch_real_test_pop3_messages(*, limit: int = 20) -> list[RealTestEmailMessa
 
 def send_real_test_email(draft: InquiryDraftRecord) -> OpenClawSendResponse:
     recipient = (draft.target_peer_id or "").strip()
-    sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "")
+    sender = os.environ.get("AIVAN_PRESET_MAILBOX") or os.environ.get("AIVAN_SMTP_USERNAME", "") or ""
     username = os.environ.get("AIVAN_SMTP_USERNAME", "")
     password = os.environ.get("AIVAN_SMTP_PASSWORD", "")
     submitted = False
