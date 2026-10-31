@@ -11,8 +11,9 @@ business facts (quantity, destination, lead time, product) are never lost to a
 small local LLM.
 
 This client is the ONLY way AIVAN talks to the language skill. It never parses
-locally as a substitute; failures are surfaced as structured results so callers
-can fail soft (preserve the raw message, do not hallucinate missing fields).
+locally as a substitute. Failures return stable, sanitized results; canonical
+intake rejects unavailable translation before workflow or business persistence.
+Raw non-English input is not retained as a fallback business record.
 
 Configuration (environment):
     AIVAN_LANGUAGE_SKILL_ENABLED          default false
@@ -24,28 +25,24 @@ Configuration (environment):
 from __future__ import annotations
 
 import os
-import logging
+import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from aivan.utils.env import env_bool
-from aivan.governance.runtime_policy import reject_test_transport_in_production
-from aivan.observability.safe_logging import log_exception_safely
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8788"
 DEFAULT_TIMEOUT_SECONDS = 10.0
-logger = logging.getLogger(__name__)
 
-# Process-wide transport override. Tests install an httpx.MockTransport here so
-# the whole app talks to a faithful in-memory language-skill without a live
-# server.
+# Explicit test transport injection isolates unit branches; it is not evidence
+# of a live language-skill integration or a production fallback.
 _DEFAULT_TRANSPORT: "httpx.BaseTransport | None" = None
 
 
 def set_default_transport(transport: "httpx.BaseTransport | None") -> None:
     """Install (or clear) a process-wide default transport for the client."""
-    reject_test_transport_in_production(transport, component="language-skill-client")
     global _DEFAULT_TRANSPORT
     _DEFAULT_TRANSPORT = transport
 
@@ -56,7 +53,7 @@ def is_enabled() -> bool:
 
 
 def is_fail_soft() -> bool:
-    """True when language-skill failures must be swallowed (the safe default)."""
+    """Legacy setting; canonical intake still requires validated English output."""
     return env_bool("AIVAN_LANGUAGE_SKILL_FAIL_SOFT", True)
 
 
@@ -79,14 +76,8 @@ class LanguageSkillClient:
         timeout_seconds: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        effective_transport = transport if transport is not None else _DEFAULT_TRANSPORT
-        reject_test_transport_in_production(
-            effective_transport, component="language-skill-client"
-        )
         self.base_url = (
-            base_url
-            or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL")
-            or DEFAULT_BASE_URL
+            base_url or os.environ.get("AIVAN_LANGUAGE_SKILL_BASE_URL") or DEFAULT_BASE_URL
         ).rstrip("/")
         if timeout_seconds is not None:
             self.timeout = timeout_seconds
@@ -96,7 +87,7 @@ class LanguageSkillClient:
             )
         # Injectable transport keeps unit tests off the network
         # (httpx.MockTransport). Falls back to the process-wide default.
-        self._transport = effective_transport
+        self._transport = transport if transport is not None else _DEFAULT_TRANSPORT
 
     # ------------------------------------------------------------------ #
     # transport
@@ -104,41 +95,25 @@ class LanguageSkillClient:
     def _request(self, method: str, path: str, json: dict | None = None) -> LanguageSkillResult:
         url = f"{self.base_url}{path}"
         try:
-            with httpx.Client(timeout=self.timeout, transport=self._transport) as client:
+            with httpx.Client(timeout=self.timeout, transport=self._transport, follow_redirects=False) as client:
                 resp = client.request(method, url, json=json)
-        except httpx.TimeoutException as exc:
-            error_id = log_exception_safely(
-                logger, "Language-skill request timed out", exc=exc
-            )
-            return LanguageSkillResult(
-                False, None, f"LANGUAGE_SKILL_TIMEOUT:{error_id}", None
-            )
-        except httpx.HTTPError as exc:
-            error_id = log_exception_safely(
-                logger, "Language-skill connection failed", exc=exc
-            )
-            return LanguageSkillResult(
-                False, None, f"LANGUAGE_SKILL_CONNECTION_FAILED:{error_id}", None
-            )
+        except httpx.TimeoutException:
+            return LanguageSkillResult(False, None, "language-skill request timed out", None)
+        except httpx.HTTPError:
+            return LanguageSkillResult(False, None, "language-skill connection error", None)
 
-        if resp.status_code >= 400:
+        if resp.status_code != 200:
             return LanguageSkillResult(
                 False,
                 None,
-                f"LANGUAGE_SKILL_HTTP_{resp.status_code}",
+                f"language-skill returned HTTP {resp.status_code}",
                 resp.status_code,
             )
         try:
             return LanguageSkillResult(True, resp.json(), None, resp.status_code)
-        except ValueError as exc:
-            error_id = log_exception_safely(
-                logger, "Language-skill returned invalid JSON", exc=exc
-            )
+        except ValueError:
             return LanguageSkillResult(
-                False,
-                None,
-                f"LANGUAGE_SKILL_INVALID_RESPONSE:{error_id}",
-                resp.status_code,
+                False, None, "language-skill returned invalid JSON", resp.status_code
             )
 
     # ------------------------------------------------------------------ #
@@ -170,7 +145,66 @@ class LanguageSkillClient:
             payload["source_channel"] = source_channel
         if conversation_context:
             payload["conversation_context"] = conversation_context
-        return self._request("POST", "/v1/inbound/normalize", json=payload)
+        result = self._request("POST", "/v1/inbound/normalize", json=payload)
+        if not result.ok:
+            return result
+        # A successful transport is not a successful translation. Reuse the
+        # intake residual-script guard; do not impose ASCII-only business text.
+        from aivan.integrations.language_skill import has_non_latin_text
+
+        data = result.data
+        text = data.get("canonical_text") if isinstance(data, dict) else None
+        translation = data.get("translation") if isinstance(data, dict) else None
+        warnings = data.get("warnings") if isinstance(data, dict) else None
+        model_unavailable = (
+            isinstance(translation, dict) and translation.get("model") == "unavailable"
+        )
+        model_missing = isinstance(warnings, list) and any(
+            isinstance(warning, dict) and warning.get("code") == "TRANSLATION_MODEL_MISSING"
+            for warning in warnings
+        )
+        language = data.get("language") if isinstance(data, dict) else None
+        detected = language.get("detected") if isinstance(language, dict) else None
+        confidence = language.get("confidence") if isinstance(language, dict) else None
+        detection_valid = (
+            isinstance(detected, str) and re.fullmatch(r"[a-z]{2,3}(?:-[A-Z]{2})?", detected)
+            and detected not in {"und", "zxx", "auto"}
+            and isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+            and math.isfinite(confidence) and 0.6 <= confidence <= 1.0
+            and (source_language in {"", "auto"} or detected == source_language)
+        )
+        passthrough = isinstance(translation, dict) and translation.get("model") == "passthrough"
+        if (
+            not isinstance(data, dict)
+            or data.get("canonical_language") != canonical_language
+            or not isinstance(text, str)
+            or not text.strip()
+            or (canonical_language == "en" and has_non_latin_text(text))
+            or model_unavailable
+            or model_missing
+            or not detection_valid
+            or (passthrough and detected != "en")
+        ):
+            return LanguageSkillResult(
+                False, None, "language-skill returned invalid canonical result", result.status_code
+            )
+        if canonical_language == "en":
+            # Latin script and an English label do not prove English. The
+            # language service owns statistical identification: validate the
+            # actual canonical text through its existing read-only API, even
+            # for auto-detected passthrough. Never create a local translator or
+            # accept an old/unavailable validator as a successful fallback.
+            verification = self._request("POST", "/api/language/canonical-db/validate", json={
+                "repository": "aivan", "table_name": "aivan_normalized_intake",
+                "record": {"canonical_text": text}, "policy": "standard_english_canonical_db_v1",
+            })
+            verified = verification.data
+            if (not verification.ok or not isinstance(verified, dict)
+                    or verified.get("valid") is not True or verified.get("violations") != []):
+                return LanguageSkillResult(
+                    False, None, "language-skill could not verify canonical English", result.status_code
+                )
+        return result
 
     def structure_rfq(
         self,

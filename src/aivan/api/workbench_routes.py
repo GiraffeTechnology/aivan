@@ -354,6 +354,15 @@ def _markdown_export(payload: dict) -> str:
         f"- Candidate: {os.environ.get('AIVAN_CANDIDATE_SHA', '').strip() or 'unfrozen'}",
         "",
     ]
+    metadata = {
+        "title": case.get("title")
+        or (case.get("requirement_summary") or {}).get("product_name")
+        or (case.get("requirement") or {}).get("product_name"),
+        "created_at": case.get("created_at"),
+        "updated_at": case.get("updated_at"),
+    }
+    lines.extend(["## Case metadata", "", "```json",
+                  json.dumps(metadata, ensure_ascii=False, indent=2), "```", ""])
     for title, key in (
         ("Conversations", "conversations"),
         ("Participants", "participants"),

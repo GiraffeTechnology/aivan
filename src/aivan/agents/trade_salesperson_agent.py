@@ -218,6 +218,7 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
     reply = parse_supplier_reply(
         raw_text=event.message_text,
         project_id=project_id,
+        supplier_id=event.sender_id,
         channel=event.channel,
     )
     append_event(db_session, project_id, "PRODUCTION_UPDATE_RECEIVED", f"Supplier reply received: price={reply.unit_price}", actor="supplier_response_agent")
@@ -233,7 +234,11 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
     if not requirement:
         return AgentTurnResult(project_id=project_id, action="reply_received", message="Supplier reply received but no requirement found.", errors=["No requirement found"])
 
-    lt = calculate_leadtime_for_requirement(requirement, supplier_reply=reply)
+    lt = calculate_leadtime_for_requirement(
+        requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None,
+        tenant_id=project.tenant_id or event.tenant_id,
+        source_trace_id=event.source_trace_id,
+    )
     append_event(db_session, project_id, "LEADTIME_ESTIMATE_CREATED", f"Lead time estimate: {lt.expected_days} days", actor="leadtime_calculator")
 
     options = generate_buyer_options(requirement, [reply], [lt], project_id)

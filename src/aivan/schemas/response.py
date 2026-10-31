@@ -7,7 +7,7 @@ class SupplierReply(BaseModel):
     raw_text: str
     channel: str = ""
     unit_price: float | None = None
-    currency: str = "USD"
+    currency: str = ""
     moq: int | None = None
     capacity_per_day: int | None = None
     capacity_per_month: int | None = None
@@ -21,4 +21,5 @@ class SupplierReply(BaseModel):
     missing_info: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     raw_payload: dict = Field(default_factory=dict)
+    material_declarations: dict = Field(default_factory=dict)
     received_at: str = ""

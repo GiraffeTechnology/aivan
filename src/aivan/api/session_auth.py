@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import sqlite3
+import stat
 import time
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
-
 from aivan.api.secure_compare import secure_compare_str
 
 
 SESSION_COOKIE = "aivan_session"
 CSRF_COOKIE = "aivan_csrf"
 SESSION_TTL_SECONDS = 8 * 60 * 60
+TEST_SESSION_TTL_SECONDS = 30 * 60
+TEST_TICKET_TTL_SECONDS = 5 * 60
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,8 @@ class UISession:
     allowed_roles: tuple[str, ...]
     csrf_digest: str
     expires_at: int
+    test_account: bool = False
+    authorization_reference: str = ""
 
 
 def _b64encode(value: bytes) -> str:
@@ -99,10 +105,17 @@ def configured_ui_identity(requested_role: str = "") -> tuple[str, tuple[str, ..
 
 
 def issue_ui_session(
-    *, tenant_id: str, actor_id: str, role: str, allowed_roles: tuple[str, ...]
+    *,
+    tenant_id: str,
+    actor_id: str,
+    role: str,
+    allowed_roles: tuple[str, ...],
+    test_account: bool = False,
+    ttl_seconds: int = SESSION_TTL_SECONDS,
+    authorization_reference: str = "",
 ) -> tuple[str, str, int]:
     csrf_token = secrets.token_urlsafe(32)
-    expires_at = int(time.time()) + SESSION_TTL_SECONDS
+    expires_at = int(time.time()) + ttl_seconds
     payload = {
         "v": 1,
         "tenant_id": tenant_id,
@@ -111,12 +124,182 @@ def issue_ui_session(
         "allowed_roles": list(allowed_roles),
         "csrf_digest": hashlib.sha256(csrf_token.encode("utf-8")).hexdigest(),
         "expires_at": expires_at,
+        "test_account": test_account,
+        "authorization_reference": authorization_reference,
     }
     encoded = _b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
     signature = _b64encode(
         hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
     )
     return f"{encoded}.{signature}", csrf_token, expires_at
+
+
+def _test_ticket_secret() -> bytes:
+    value = os.environ.get("AIVAN_UI_TEST_TICKET_SECRET", "").strip()
+    if len(value) < 32:
+        raise ValueError("AIVAN_UI_TEST_TICKET_SECRET must contain at least 32 characters")
+    return value.encode("utf-8")
+
+
+def validate_test_ticket_configuration() -> None:
+    _test_ticket_secret()
+    path = _test_ticket_ledger_path()
+    _open_test_ticket_ledger(path)
+
+
+def _test_ticket_ledger_path() -> str:
+    path = os.environ.get("AIVAN_UI_TEST_TICKET_LEDGER_PATH", "").strip()
+    if not path or not os.path.isabs(path):
+        raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH must be an absolute regular path")
+    parent = os.path.dirname(path)
+    if not os.path.isdir(parent):
+        raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH parent must already exist")
+    parent_metadata = os.stat(parent, follow_symlinks=False)
+    if not stat.S_ISDIR(parent_metadata.st_mode):
+        raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH parent must not be a symlink")
+    if os.name != "nt" and (
+        parent_metadata.st_uid != os.geteuid() or parent_metadata.st_mode & 0o077
+    ):
+        raise ValueError(
+            "AIVAN_UI_TEST_TICKET_LEDGER_PATH parent must be owned by the "
+            "service user and inaccessible to group/other users"
+        )
+    if os.path.lexists(path):
+        metadata = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("AIVAN_UI_TEST_TICKET_LEDGER_PATH must be a regular file")
+    normalized_path = os.path.normcase(os.path.realpath(path))
+    database_url = os.environ.get("AIVAN_DB_URL", "").strip()
+    database_paths = {"data/aivan.db", "data/aiven.db"}
+    if database_url.startswith("sqlite:///"):
+        configured_database = database_url.removeprefix("sqlite:///")
+        if configured_database != ":memory:":
+            database_paths.add(configured_database)
+    if normalized_path in {
+        os.path.normcase(os.path.realpath(database_path)) for database_path in database_paths
+    }:
+        raise ValueError("test ticket ledger must not share the business database path")
+    return path
+
+
+def _open_test_ticket_ledger(path: str) -> None:
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise ValueError("unable to safely open test ticket ledger") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("test ticket ledger must be a regular file")
+        if os.name != "nt" and (metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077):
+            raise ValueError("test ticket ledger must be owned by the service user and mode 0600")
+    finally:
+        os.close(descriptor)
+
+
+def _consume_test_ticket_digest(digest: str, expires_at: int, current: int) -> None:
+    """Atomically persist a consumed digest across workers and restarts."""
+
+    path = _test_ticket_ledger_path()
+    _open_test_ticket_ledger(path)
+    connection = sqlite3.connect(path, timeout=5, isolation_level=None)
+    try:
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS consumed_test_tickets ("
+            "digest TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)"
+        )
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DELETE FROM consumed_test_tickets WHERE expires_at <= ?", (current,))
+        connection.execute(
+            "INSERT INTO consumed_test_tickets (digest, expires_at) VALUES (?, ?)",
+            (digest, expires_at),
+        )
+        connection.execute("COMMIT")
+    except sqlite3.IntegrityError as exc:
+        connection.execute("ROLLBACK")
+        raise ValueError("test login ticket already consumed") from exc
+    except sqlite3.Error:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+    finally:
+        connection.close()
+
+
+def test_session_ttl_seconds() -> int:
+    try:
+        configured = int(
+            os.environ.get("AIVAN_UI_TEST_SESSION_TTL_SECONDS", str(TEST_SESSION_TTL_SECONDS))
+        )
+    except ValueError:
+        configured = TEST_SESSION_TTL_SECONDS
+    return max(60, min(configured, 60 * 60))
+
+
+def issue_test_login_ticket(
+    *, now: int | None = None, ttl_seconds: int = TEST_TICKET_TTL_SECONDS
+) -> str:
+    """Create a short-lived test-login ticket for offline/server-side tooling."""
+
+    issued_at = int(time.time()) if now is None else int(now)
+    ttl = max(30, min(int(ttl_seconds), 10 * 60))
+    payload = {
+        "v": 1,
+        "purpose": "myaivan_ui_test_login",
+        "jti": secrets.token_urlsafe(18),
+        "issued_at": issued_at,
+        "expires_at": issued_at + ttl,
+    }
+    encoded = _b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    signature = _b64encode(
+        hmac.new(_test_ticket_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
+    )
+    return f"{encoded}.{signature}"
+
+
+def consume_test_login_ticket(ticket: str, *, now: int | None = None) -> str:
+    """Validate and atomically consume one test-login ticket.
+
+    Returns a non-secret digest prefix suitable for audit correlation.
+    """
+
+    current = int(time.time()) if now is None else int(now)
+    try:
+        encoded, signature = ticket.split(".", 1)
+        expected = _b64encode(
+            hmac.new(_test_ticket_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
+        )
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError("signature")
+        payload = json.loads(_b64decode(encoded))
+        if not isinstance(payload, dict):
+            raise ValueError("payload")
+        if payload.get("v") != 1 or payload.get("purpose") != "myaivan_ui_test_login":
+            raise ValueError("purpose")
+        issued_at = int(payload["issued_at"])
+        expires_at = int(payload["expires_at"])
+        if not str(payload["jti"]) or issued_at > current + 30:
+            raise ValueError("issued_at")
+        if expires_at <= current or expires_at - issued_at > 10 * 60:
+            raise ValueError("expires_at")
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("invalid test login ticket") from exc
+
+    digest = hashlib.sha256(ticket.encode("utf-8")).hexdigest()
+    _consume_test_ticket_digest(digest, expires_at, current)
+    return digest[:16]
 
 
 def read_ui_session(request: Request) -> UISession | None:
@@ -128,7 +311,7 @@ def read_ui_session(request: Request) -> UISession | None:
         expected = _b64encode(
             hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest()
         )
-        if not hmac.compare_digest(signature, expected):
+        if not secure_compare_str(signature, expected):
             raise ValueError("signature")
         payload = json.loads(_b64decode(encoded))
         session = UISession(
@@ -138,8 +321,16 @@ def read_ui_session(request: Request) -> UISession | None:
             allowed_roles=tuple(str(item) for item in payload["allowed_roles"]),
             csrf_digest=str(payload["csrf_digest"]),
             expires_at=int(payload["expires_at"]),
+            test_account=bool(payload.get("test_account", False)),
+            authorization_reference=str(payload.get("authorization_reference", "")),
         )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         raise HTTPException(status_code=401, detail={"error": "INVALID_UI_SESSION"}) from exc
     if session.expires_at <= int(time.time()):
         raise HTTPException(status_code=401, detail={"error": "UI_SESSION_EXPIRED"})
