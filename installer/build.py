@@ -18,6 +18,14 @@ import tarfile
 import tempfile
 
 HERE = Path(__file__).resolve().parent
+AIVAN_MIGRATION_SCRIPTS = (
+    "run_aivan_migrations.py",
+    "migrate_stage1_tenant_context.py",
+    "migrate_stage2_role_domain.py",
+    "migrate_stage4_relay.py",
+    "migrate_stage5a_event_correction.py",
+    "migrate_ui_ticket_receipts.py",
+)
 
 
 def run(*args, **kwargs):
@@ -62,6 +70,13 @@ def safe_source_file(source: Path, name: str):
     return path
 
 
+def copy_aivan_migrations(source: Path, payload: Path):
+    migration_assets = payload / "provider-assets/aivan/scripts"
+    migration_assets.mkdir(parents=True)
+    for name in AIVAN_MIGRATION_SCRIPTS:
+        shutil.copy2(safe_source_file(source, "scripts/" + name), migration_assets / name)
+
+
 def require_builder_source(source: Path):
     if HERE != source.resolve() / "installer":
         raise ValueError("Run the builder from the selected pinned Aivan source")
@@ -78,7 +93,7 @@ def source_evidence(source: Path, revision: str, expected_tree: str, source_mani
         runtime_prefixes = ("src/", "api/", "generators/", "alembic/")
         prefixes = (*runtime_prefixes, "scripts/", "installer/")
         names = {"pyproject.toml", "README.md", "alembic.ini", "LICENSE", "LICENSE_NOTICE.md", "PATENT_NOTICE.md"}
-        names.update("scripts/" + name for name in ("run_aivan_migrations.py", "migrate_stage1_tenant_context.py", "migrate_stage2_role_domain.py", "migrate_stage4_relay.py", "migrate_stage5a_event_correction.py"))
+        names.update("scripts/" + name for name in AIVAN_MIGRATION_SCRIPTS)
         required = {entry["path"]: entry for entry in entries if entry["type"] == "blob" and (entry["path"].startswith(prefixes) or entry["path"] in names)}
         for name, entry in required.items():
             path = safe_source_file(source, name)
@@ -283,10 +298,7 @@ def main():
         provider_assets.mkdir(parents=True)
         shutil.copytree(sources["database"] / "alembic", provider_assets / "alembic", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copy2(sources["database"] / "alembic.ini", provider_assets / "alembic.ini")
-        migration_assets = payload / "provider-assets/aivan/scripts"
-        migration_assets.mkdir(parents=True)
-        for name in ("run_aivan_migrations.py", "migrate_stage1_tenant_context.py", "migrate_stage2_role_domain.py", "migrate_stage4_relay.py", "migrate_stage5a_event_correction.py"):
-            shutil.copy2(safe_source_file(sources["aivan"], "scripts/" + name), migration_assets / name)
+        copy_aivan_migrations(sources["aivan"], payload)
         for name in ("runtime.py", "bootstrap.py", "service.py", "abcdyi_service.py", "database_config.py", "databases.py", "deployment_config.py", "healthcheck.py", "operator_setup.py", "buyer_setup.py", "requirements.lock", "README.md"):
             shutil.copy2(HERE / name, payload / name)
         licenses = payload / "licenses"

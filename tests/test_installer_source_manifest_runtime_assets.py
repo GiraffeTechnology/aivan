@@ -62,3 +62,40 @@ def test_builder_helpers_cannot_come_from_a_different_checkout(tmp_path, monkeyp
     build.require_builder_source(selected)
     with pytest.raises(ValueError, match="selected pinned Aivan source"):
         build.require_builder_source(tmp_path / "different-checkout")
+
+def test_packaged_migrations_cover_the_runner_imports():
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    runner = ast.parse((root / "scripts/run_aivan_migrations.py").read_text())
+    required = {"run_aivan_migrations.py"}
+    for node in ast.walk(runner):
+        if isinstance(node, ast.ImportFrom) and node.module == "scripts":
+            required.update(alias.name + ".py" for alias in node.names)
+    assert required <= set(builder().AIVAN_MIGRATION_SCRIPTS)
+
+
+def test_builder_copies_exact_pinned_migration_assets(tmp_path):
+    build = builder()
+    root = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload"
+    build.copy_aivan_migrations(root, payload)
+    copied = payload / "provider-assets/aivan/scripts"
+    assert {path.name for path in copied.iterdir()} == set(build.AIVAN_MIGRATION_SCRIPTS)
+    for name in build.AIVAN_MIGRATION_SCRIPTS:
+        assert (copied / name).read_bytes() == (root / "scripts" / name).read_bytes()
+
+
+def test_builder_rejects_a_missing_pinned_ticket_migration(tmp_path):
+    import shutil
+
+    build = builder()
+    root = Path(__file__).resolve().parents[1]
+    source = tmp_path / "source"
+    scripts = source / "scripts"
+    scripts.mkdir(parents=True)
+    for name in build.AIVAN_MIGRATION_SCRIPTS:
+        if name != "migrate_ui_ticket_receipts.py":
+            shutil.copy2(root / "scripts" / name, scripts / name)
+    with pytest.raises(ValueError, match="regular file"):
+        build.copy_aivan_migrations(source, tmp_path / "payload")
