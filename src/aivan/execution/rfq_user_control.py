@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from aivan.agents.supplier_material_questions import (
+    MATERIAL_CONFIRMATION_QUESTIONS,
+    with_material_confirmation_questions,
+)
 from aivan.db.repositories.draft_repo import DraftRepository
 from aivan.execution.channel_policy import USER_CONTROL_CHANNELS, normalize_channel
 from aivan.llm.gateway import llm_complete_json
@@ -123,6 +127,7 @@ def draft_supplier_email(
         "requirement": requirement.model_dump(),
         "strategy": strategy.model_dump(),
         "gltg": gltg.model_dump(),
+        "required_supplier_confirmation_questions": list(MATERIAL_CONFIRMATION_QUESTIONS),
     }
     raw = {}
     if env_bool("AIVAN_SUPPLIER_DRAFT_LLM_ENABLED"):
@@ -135,8 +140,8 @@ def draft_supplier_email(
             )
         except Exception:
             raw = {}
-    if raw.get("message_text"):
-        return raw["message_text"]
+    if isinstance(raw.get("message_text"), str) and raw["message_text"].strip():
+        return with_material_confirmation_questions(raw["message_text"])
     subject = (
         f"RFQ: {requirement.quantity or 'TBD'} "
         f"{requirement.product_type or requirement.category or 'Products'} "
@@ -175,13 +180,13 @@ def draft_supplier_email(
         "Best regards,",
         "AIVAN",
     ]
-    return "\n".join(lines)
+    return with_material_confirmation_questions("\n".join(lines))
 
 
 def _should_use_chinese_user_message(requirement: BuyerRequirement) -> bool:
-    return requirement.language == "zh" or any(
-        "\u4e00" <= char <= "\u9fff" for char in requirement.raw_text
-    )
+    # Kept for existing consumers. Workflow drafts/audit are canonical English;
+    # a recipient's requested language is rendered by the language service.
+    return False
 
 
 def _risk_label_for_user(risk_level: str) -> str:
@@ -202,31 +207,24 @@ def build_user_control_message(
     routing: SupplierRoutingDecision,
     drafts_created: list[str],
 ) -> str:
-    if _should_use_chinese_user_message(requirement):
-        deadline = (
-            f"目标交期 {requirement.delivery_days} 天"
-            if requirement.delivery_days
-            else "目标交期待确认"
-        )
-        return (
-            f"RFQ 已创建，等待人工审批：{requirement.quantity or 'TBD'} "
-            f"{requirement.quantity_unit} "
-            f"{requirement.product_type or requirement.category or 'product'}，"
-            f"目的地 {requirement.destination or 'TBD'}，{deadline}。"
-            f"策略={strategy.priority}/{strategy.supplier_scope}，"
-            f"GLTG {strategy.lead_time_confidence}={gltg.selected_confidence_days} 天，"
-            f"交期风险={_risk_label_for_user(gltg.deadline_risk_level)}。"
-            f"已生成 {len(routing.selected_supplier_ids)} 封供应商邮件草稿，"
-            f"仍需人工审批后才会发送：{', '.join(drafts_created)}。"
-        )
+    """Canonical business summary; recipient translation belongs at the boundary.
+
+    Do not expose internal record IDs or implementation/debug strategy labels.
+    Draft creation is neither approval nor evidence of external delivery.
+    """
+    quantity = (f"{requirement.quantity} {requirement.quantity_unit}"
+                if requirement.quantity is not None else "quantity awaiting confirmation")
+    product = requirement.product_type or requirement.category or "product awaiting confirmation"
+    destination = requirement.destination or "destination awaiting confirmation"
+    delivery = (f"within {requirement.delivery_days} days"
+                if requirement.delivery_days is not None else "delivery target awaiting confirmation")
+    count = len(drafts_created)
     return (
-        f"RFQ ready for approval: {requirement.quantity or 'TBD'} "
-        f"{requirement.quantity_unit} {requirement.color} "
-        f"{requirement.product_type or requirement.category} to "
-        f"{requirement.destination or 'TBD'}. "
-        f"Strategy={strategy.priority}/{strategy.supplier_scope}, "
-        f"GLTG {strategy.lead_time_confidence}={gltg.selected_confidence_days} days, "
-        f"deadline risk={gltg.deadline_risk_level}. "
-        f"{len(routing.selected_supplier_ids)} supplier email drafts are pending "
-        f"approval: {', '.join(drafts_created)}."
+        f"RFQ recorded for human review: {quantity} {product}, "
+        f"delivery to {destination} {delivery}. "
+        f"{count} supplier inquiry draft{'s' if count != 1 else ''} prepared. "
+        "Review the requirements, returned lead-time assessment and draft content. "
+        "All drafts are pending approval. Human approval is required before any external message. "
+        "No message has been sent."
     )
+

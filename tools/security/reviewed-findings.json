@@ -17,9 +17,121 @@
     {
       "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
       "path": "tests/myaivan-i18n-runtime.test.mjs",
-      "sha256": "99e454c085860e44af2e536b739c70b487aa9c40391122cc32f17ebbb3a148f7",
+      "sha256": "0da4a9bcc1f1da2a1b39301cff24c7b908b14a57dc8ea8b7b593b9b536d3324c",
+      "count": 3,
+      "reason": "Re-reviewed after first-visit locale regressions. Exact reads at lines 8, 192 and 289 resolve literal i18n.js, app.js and index.html URLs relative to import.meta.url. No request, environment, argument or fixture controls these paths; saved locale values only select in-memory catalogs."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-attachments-runtime.test.mjs",
+      "sha256": "edb7a199ed85f877ef7b86980d42baf45677e775fc5d84fecb19a9eb2dee7111",
+      "count": 2,
+      "reason": "Exact reads at lines 14 and 75 use literal attachments.js and app.js URLs relative to import.meta.url. Upload filenames and API responses never reach either filesystem read."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-clipboard-runtime.test.mjs",
+      "sha256": "13447d32b4978960e8f42a1b4c9b1178eb2596fa823f4022d06f803ceb3fe6bd",
       "count": 1,
-      "reason": "Test reads the constant ../src/aivan/app/static/i18n.js URL resolved from import.meta.url; no user-controlled path. Present only on the web branch."
+      "reason": "The line 4 filesystem read uses a literal app.js URL relative to import.meta.url. Clipboard content and denial fixtures do not control the filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-conversation-runtime.test.mjs",
+      "sha256": "200ec4ba4d6bc64f307180d796112f6d4b66c7354bee82abc66daede0ee7ba81",
+      "count": 2,
+      "reason": "Re-reviewed after delegated order-confirmation click regressions. Reads at lines 4 and 5 remain literal app.js and index.html URLs relative to import.meta.url. Conversation data, synthetic click targets and confirmation responses never control filesystem paths."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-copy-audit-runtime.test.mjs",
+      "sha256": "df0664352119208792326f5afc2057e93cb4f69dc4e0ab4d91bf0341201bf791",
+      "count": 1,
+      "reason": "The line 5 filesystem read uses a literal app.js URL relative to import.meta.url. Draft content, digest and audit payload fixtures do not control the filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-inquiry-runtime.test.mjs",
+      "sha256": "13b0fb6610f45eafb81a8e8c93db859d66dba1bee322456cbd181239ceb40732",
+      "count": 1,
+      "reason": "The line 7 read uses the literal app.js URL resolved from import.meta.url through fileURLToPath. Inquiry text and HTTP result fixtures cannot change the source filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-message-readback-runtime.test.mjs",
+      "sha256": "c955daaec62d777ca7ea8a2cbaa9b2a8ea2482182a00f20094694d7d5b637f9e",
+      "count": 1,
+      "reason": "The line 5 read uses a literal app.js URL relative to import.meta.url. Saved-message content is only renderer input, never a filesystem filename."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-welcome-runtime.test.mjs",
+      "sha256": "48903637ea7e044d4e25f1964d8fc7f79d6f396886e8b675a3905a034c4c5e7e",
+      "count": 2,
+      "reason": "Re-reviewed the complete fixture after adding the literal state object and null DOM selector required by host invalidation. The only reads at lines 5 and 6 remain literal index.html and app.js URLs relative to import.meta.url. Neither the added VM state nor the selector, navigation fragments, fixture responses, environment or request input reaches either filename; no filesystem write exists. Existing navigation assertions remain unchanged."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-draft-preview-runtime.test.mjs",
+      "sha256": "07a8c8adeb40056a8c5ab6160375c5d9d7c3f42c03440c8ce236d4e3e35088bc",
+      "count": 1,
+      "reason": "Re-reviewed after asynchronous preview/copy and focus-recovery regressions. The only filesystem read at line 5 still resolves the literal draft-preview.js URL relative to import.meta.url. Draft bodies, response fixtures, clipboard values and asynchronous controls cannot affect that filename. This is an offline DOM runtime test, not application file access."
+    },
+    {
+      "rule": "python_crypto_rule-hash-sha1",
+      "path": "installer/build.py",
+      "sha256": "96c2028bcb30b607a5ba1824cbb25e050f5a5beb10a6b758ad3b4749faa55855",
+      "count": 2,
+      "reason": "Re-reviewed against the complete installer builder and real 79-rule scan: lines 49 and 86 reconstruct existing Git tree/blob object IDs, explicitly usedforsecurity=False. No password, credential, signature or package-integrity use exists. Wheel, source inventory, provenance and final installer integrity continue to use SHA-256. Re-reviewed for explicit deployment stages: the only builder change adds literal stage names to the output manifest. Git object hashing, executable selection, argv construction, source validation and SHA-256 integrity paths are unchanged. Existing finding counts remain enforced; a fresh scanner run is required."
+    },
+    {
+      "rule": "python_exec_rule-subprocess-call",
+      "path": "installer/build.py",
+      "sha256": "96c2028bcb30b607a5ba1824cbb25e050f5a5beb10a6b758ad3b4749faa55855",
+      "count": 2,
+      "reason": "Re-reviewed against the complete installer builder and real scan: lines 101 and 260 invoke literal git with separate -C, operator-selected source directory, ls-files and -z argv values, without a shell. Full commit/tree IDs are verified before staging and safe_source_file rejects traversal and symlinks. No application request selects the executable or arguments. Re-reviewed for explicit deployment stages: the only builder change adds literal stage names to the output manifest. Git object hashing, executable selection, argv construction, source validation and SHA-256 integrity paths are unchanged. Existing finding counts remain enforced; a fresh scanner run is required."
+    },
+    {
+      "rule": "python_urlopen_rule-urllib-urlopen",
+      "path": "installer/runtime.py",
+      "sha256": "a696c1429bd5c29872751fdffc98c38d2dcba96698d3b139c8c6b10b338bc3c7",
+      "count": 1,
+      "reason": "Re-reviewed against the six-service runtime and exact scan: health() at line 335 first validates private operator-owned configuration; endpoint() allows HTTP(S), rejects embedded credentials/query/fragment, and service paths are literal. Loopback or operator-configured dependency endpoints carry no credential headers, retain a three-second timeout and default TLS verification. No application request or tenant key selects the URL. Health remains explicitly distinct from public/workflow acceptance."
+    },
+    {
+      "rule": "python_crypto_rule-hash-sha1",
+      "path": "tests/test_myaivan_installer.py",
+      "sha256": "fd9bb9cfd28c0b090f5309aa602f932d0d21aab2d56c310da52c4eca49e9a3dd",
+      "count": 1,
+      "reason": "Re-reviewed after credential-preflight configuration was added to two service-control fixtures. The real 79-rule scan still reports one SHA-1 call at line 180, constructing known synthetic Git blob object IDs for comparison with git write-tree. SHA-1 is required by the existing Git object format, not used for passwords, credentials or package integrity. The builder's payload inventory and installer digests remain SHA-256."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "scripts/verify_installed_first_ui.cjs",
+      "sha256": "2685549e3c32924f76c04a3f949d11b9b4d8e55915fb22898af257d9ebbfd61c",
+      "count": 12,
+      "reason": "Reviewed all twelve real scanner matches in the operator-invoked synthetic browser verifier: lines 75, 76, 77, 85, 86, 89, 112, 114, 119, 294, 526 and 562. Prefix, package and evidence roots are explicit operator CLI paths; manifest reads stay within the resolved installed release, which must be an immediate child of the real releases directory; the runner read is __filename. Evidence filenames are literal or formed from the validated alphanumeric/underscore/hyphen run ID and internal numeric sequence. Download content and suggested filenames never select filesystem destinations. No application request, conversation, upload name or fixture controls these paths. This narrow review does not certify browser acceptance or authorize restarts or external delivery."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-handoff-wiring.test.mjs",
+      "sha256": "f1a2d30a37f91edcf85044797c5d69c364a93b3eead99609ede54af052c5a14a",
+      "count": 2,
+      "reason": "Reviewed both scanner matches at lines 7 and 8 against the complete fixture. These are literal app.js and index.html URLs relative to import.meta.url. The synthetic API response and stale-view predicate are used only after these source reads and cannot select either path. There are no filesystem writes, CLI or environment path inputs."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/myaivan-r6-host-integration.test.mjs",
+      "sha256": "65400caeb8d806dc4c24dcd17e61cd9de8bb594472a055a689ccbf8e46c341c4",
+      "count": 3,
+      "reason": "Reviewed all three actual scanner matches at lines 10, 88 and 96. The helper reads literal app/context/binding filenames and the JS asset key from the checked-in r6-execution-assets.json; the asset loop reads keys from that same repository-controlled manifest and verifies bytes and SHA-256. HTML uses a literal index.html URL. All resolve from the fixed source-relative static root or literal template URL. No request, synthetic association, fetch response, environment or argument can select these filesystem paths. The manifest is trusted test source, not application input. Re-reviewed after stale-session restore and current-denial interleavings were appended: new session objects, deferred Responses and statuses stay in memory and add no filesystem reads or filename inputs. The three read sites and their count remain unchanged. Re-reviewed the appended superseded-login success/denial/invalid-JSON cases and current denial: only in-memory session and Response values were added; no new filesystem call or path source exists."
+    },
+    {
+      "rule": "javascript_pathtraversal_rule-non-literal-fs-filename",
+      "path": "tests/r6-host-vm-support.mjs",
+      "sha256": "8e92d70800846492a86c3aff3d8233b2b5dc16e88583dd83803783ca7422b35e",
+      "count": 1,
+      "reason": "Reviewed the actual scanner match at line 7 and every caller in this helper. The fixed source-relative static root is combined only with literal context/binding/manifest names or the JS key from the checked-in r6-execution-assets.json. No VM state, API response, upload, environment or CLI value selects a path. The helper performs read-only repository fixture loading; it does not expose a filesystem API to application requests."
     }
   ],
   "zizmor": [

@@ -43,10 +43,20 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
 
     captured_payloads: list[dict] = []
     captured_headers: list[dict] = []
+    methods = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json as _json
 
+        methods.append(request.method)
+        if request.method == "GET":
+            from tests.test_graph_readback_lineage import _graph
+            graph = _graph()
+            graph = _json.loads(_json.dumps(graph).replace(
+                "aivan:proj-readback:msg-readback", "aivan:proj_1:msg_graph_001",
+            ))
+            return httpx.Response(200, json=graph)
+        assert request.method == "POST"
         captured_payloads.append(_json.loads(request.content))
         captured_headers.append(dict(request.headers))
         return httpx.Response(200, json={
@@ -73,16 +83,21 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
 
     assert result["source_trace_id"] == "aivan:proj_1:msg_graph_001"
     assert result["idempotency_key"] == "aivan:proj_1:msg_graph_001"
-    assert captured_payloads, "expected at least one POST"
-    for payload in captured_payloads:
+    assert len(captured_payloads) == 7
+    assert methods == ["POST"] * 7 + ["GET"]
+    assert result["readback_verified"] is True
+    operations = ["buyer", "procurement-case", "rfq", "gltg-run", "pricing-input",
+                  "decision-option", "comparison-snapshot"]
+    for operation, payload, headers in zip(operations, captured_payloads, captured_headers, strict=True):
         assert payload["source_system"] == "aivan"
         assert payload["source_trace_id"] == "aivan:proj_1:msg_graph_001"
-        assert payload["idempotency_key"] == "aivan:proj_1:msg_graph_001"
-    for headers in captured_headers:
-        assert headers.get("idempotency-key") == "aivan:proj_1:msg_graph_001"
+        expected_key = f"aivan:proj_1:msg_graph_001:{operation}"
+        assert payload["idempotency_key"] == expected_key
+        assert headers.get("idempotency-key") == expected_key
 
 
 def test_graph_retry_uses_same_idempotency_key(monkeypatch):
     a = build_graph_trace_metadata(_event(), "proj_retry")
     b = build_graph_trace_metadata(_event(), "proj_retry")
     assert a["idempotency_key"] == b["idempotency_key"]
+

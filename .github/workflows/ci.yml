@@ -81,7 +81,7 @@ jobs:
           OPENCLAW_MOCK_MODE: "true"
 
       - name: Compile check (Python files)
-        run: python -m compileall src/aivan scripts tests -q
+        run: python -m compileall src/aivan scripts tests installer -q
 
       - name: Check for Unicode / line-ending issues
         run: |
@@ -136,6 +136,23 @@ jobs:
         with:
           node-version: "22"
 
+      - name: myAIVAN catalog browser-runtime contract
+        run: |
+          node ../../tests/myaivan-i18n-runtime.test.mjs
+          node ../../tests/myaivan-welcome-runtime.test.mjs
+          node ../../tests/myaivan-inquiry-runtime.test.mjs
+          node ../../tests/myaivan-clipboard-runtime.test.mjs
+          node ../../tests/myaivan-conversation-runtime.test.mjs
+          node ../../tests/myaivan-copy-audit-runtime.test.mjs
+          node ../../tests/myaivan-message-readback-runtime.test.mjs
+          node ../../tests/myaivan-attachments-runtime.test.mjs
+          node ../../tests/myaivan-draft-preview-runtime.test.mjs
+
+      - name: R6 execution host regression contract
+        run: |
+          node --test --test-reporter=tap ../../tests/myaivan-r6-host-integration.test.mjs
+          node ../../tests/myaivan-handoff-wiring.test.mjs
+
       - name: Install dependencies
         run: npm ci
 
@@ -179,7 +196,7 @@ jobs:
         run: uv run python scripts/check_module_size_budget.py
 
       - name: Ruff lint
-        run: uvx --from ruff==0.12.4 ruff check src scripts tests
+        run: uvx --from ruff==0.12.4 ruff check src scripts tests installer
 
       - name: Mypy safety-boundary type checks
         run: >-
@@ -212,10 +229,16 @@ jobs:
           src/aivan/execution/approval_state.py
           src/aivan/risk/search_providers.py
           src/aivan/llm/gateway.py
+          src/aivan/api/attachment_routes.py
+          src/aivan/integrations/attachment_client.py
+          src/aivan/api/ui_catalog_routes.py
+          src/aivan/app/ui_catalog.py
+          src/aivan/integrations/outbound_translation.py
+          scripts/generate_myaivan_ui_catalogs.py
           scripts/run_stage7f_predeployment.py
 
       - name: Bandit high-severity security scan
-        run: uvx --from bandit==1.8.6 bandit -q -lll -r src/aivan
+        run: uvx --from bandit==1.8.6 bandit -q -lll -r src/aivan installer
 
       - name: Coverage floor
         env:

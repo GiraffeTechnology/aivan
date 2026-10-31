@@ -31,6 +31,7 @@ class BuyerOption(BaseModel):
     option_type: str
     supplier_id: str = ""
     candidate_id: str = ""
+    source_quote_reference: str = ""
     supplier_display_name: str = ""
     lead_time_estimate: LeadTimeEstimate | None = None
     quote: QuoteCalculation | None = None

@@ -7,6 +7,7 @@ decision operation remains an external Stage dependency and is not claimed.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 from typing import Any
@@ -24,6 +25,8 @@ from aivan.gpm.persistence_contract import (
 from aivan.observability.safe_logging import log_exception_safely
 
 logger = logging.getLogger(__name__)
+GPM_PACKET_API_VERSION = "gpm.packet-persistence.v1"
+REQUIRED_PACKET_CAPABILITIES = ("create_packet", "read_packet", "idempotent_create", "quote_lineage")
 
 _SAFE_OUTBOUND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$")
 _DECISION_PROVIDER_ERRORS = {
@@ -42,12 +45,18 @@ class GiraffeDBClientError(PersistenceContractError):
         status_code: int | None = None,
         *,
         correlation_id: str = "gpm-adapter",
+        error_code: str | None = None,
     ) -> None:
-        super().__init__(message, correlation_id=correlation_id, status_code=status_code)
+        code = error_code or message
+        if not re.fullmatch(r"GPM_[A-Z0-9_]+", code):
+            code = "GPM_ADAPTER_UNAVAILABLE"
+        self.error_code = code
+        super().__init__(code, correlation_id=correlation_id, status_code=status_code)
 
 
 class GiraffeDBClient:
     contract_version = GPM_PERSISTENCE_CONTRACT_VERSION
+    packet_api_version = GPM_PACKET_API_VERSION
 
     def __init__(
         self,
@@ -58,12 +67,30 @@ class GiraffeDBClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._session = httpx.Client()
+        self._session = httpx.Client(follow_redirects=False)
         self._service_auth = (
             service_auth
             if service_auth is not None
             else os.getenv("GIRAFFE_DB_SERVICE_AUTH_SECRET", "")
         ).strip()
+        self._tenant_service_auth = self._load_tenant_service_auth() if service_auth is None else None
+
+    @staticmethod
+    def _load_tenant_service_auth() -> dict[str, str] | None:
+        raw = os.environ.get("GIRAFFE_DB_TENANT_SERVICE_AUTH_JSON", "").strip()
+        if not raw:
+            return None
+        try:
+            value = json.loads(raw)
+            if (not isinstance(value, dict) or not value
+                    or any(not isinstance(k, str) or not isinstance(v, str)
+                           or not k.strip() or not v.strip() or not v.isascii()
+                           or any(ord(c) < 32 or ord(c) == 127 for c in v)
+                           for k, v in value.items())):
+                raise ValueError("invalid service profile")
+        except (ValueError, TypeError) as exc:
+            raise GiraffeDBClientError("GPM_SERVICE_AUTH_MISCONFIGURED") from exc
+        return value
 
     @staticmethod
     def _correlation(value: str | None) -> str:
@@ -108,8 +135,15 @@ class GiraffeDBClient:
         normalized_tenant = self._outbound_id(
             normalized_tenant, correlation_id=correlation_id
         )
+        secret = (self._tenant_service_auth.get(normalized_tenant, "")
+                  if self._tenant_service_auth is not None else self._service_auth)
+        if (not secret or not secret.isascii()
+                or any(ord(c) < 32 or ord(c) == 127 for c in secret)):
+            raise GiraffeDBClientError("GPM_SERVICE_AUTH_MISCONFIGURED", correlation_id=correlation_id)
         return {
-            **self._base_headers(correlation_id=correlation_id),
+            "X-Service-Auth": secret,
+            "X-GPM-Contract-Version": self.contract_version,
+            "X-AIVAN-Correlation-ID": correlation_id,
             "X-Service-Tenant-ID": normalized_tenant,
         }
 
@@ -170,29 +204,56 @@ class GiraffeDBClient:
             )
         return None
 
-    def check_schema_version(self) -> dict[str, Any]:
-        correlation_id = "gpm-schema-probe"
-        headers = self._base_headers(correlation_id=correlation_id)
+    def check_schema_version(
+        self, tenant_id: str | None = None, *, correlation_id: str = "gpm-schema-probe",
+    ) -> dict[str, Any]:
+        correlation_id = self._correlation(correlation_id)
+        headers = (self._service_headers(tenant_id, correlation_id=correlation_id)
+                   if tenant_id is not None else self._base_headers(correlation_id=correlation_id))
         try:
             response = self._session.get(
-                f"{self.base_url}/api/data/schema-version",
-                headers=headers,
-                timeout=self.timeout,
+                self._url("api", "data", "schema-version"), headers=headers, timeout=self.timeout,
             )
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             value = self._json(response, correlation_id=correlation_id)
         except PersistenceContractError:
             raise
         except Exception as exc:
-            raise self._transport_error(
-                "check_schema_version", exc, correlation_id=correlation_id
-            ) from exc
-        reported = value.get("gpm_contract_version") or value.get("contract_version")
-        if reported != self.contract_version:
-            raise PersistenceContractError(
-                "GPM_CONTRACT_VERSION_MISMATCH", correlation_id=correlation_id
-            )
+            raise self._transport_error("check_schema_version", exc, correlation_id=correlation_id) from exc
+        if tenant_id is not None:
+            if not isinstance(value.get("schema_version"), str) or not value["schema_version"]:
+                raise GiraffeDBClientError("GPM_DB_SCHEMA_IDENTITY_MISSING", correlation_id=correlation_id)
+        elif (value.get("gpm_contract_version") or value.get("contract_version")) != self.contract_version:
+            raise PersistenceContractError("GPM_CONTRACT_VERSION_MISMATCH", correlation_id=correlation_id)
         return value
+
+    def check_packet_capabilities(
+        self, tenant_id: str, *, correlation_id: str = "gpm-capability-probe",
+    ) -> dict[str, Any]:
+        correlation_id = self._correlation(correlation_id)
+        headers = self._service_headers(tenant_id, correlation_id=correlation_id)
+        try:
+            response = self._session.get(
+                self._url("api", "data", "gpm", "capabilities"), headers=headers, timeout=self.timeout,
+            )
+            response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_PACKET_CAPABILITY_MISMATCH", correlation_id=correlation_id)
+            value = self._json(response, correlation_id=correlation_id)
+            capabilities = value.get("capabilities")
+            if (value.get("api_version") != GPM_PACKET_API_VERSION
+                    or not isinstance(capabilities, dict)
+                    or any(capabilities.get(name) is not True for name in REQUIRED_PACKET_CAPABILITIES)):
+                raise GiraffeDBClientError("GPM_PACKET_CAPABILITY_MISMATCH", correlation_id=correlation_id)
+            if "tenant_id" in value:
+                require_response_tenant(value, expected_tenant=tenant_id, correlation_id=correlation_id)
+            return value
+        except PersistenceContractError:
+            raise
+        except Exception as exc:
+            raise self._transport_error("check_packet_capabilities", exc, correlation_id=correlation_id) from exc
 
     def get_tenant(
         self, tenant_id: str, *, correlation_id: str = "gpm-tenant-check"
@@ -209,6 +270,8 @@ class GiraffeDBClient:
             if response.status_code == 404:
                 return None
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             value = self._json(response, correlation_id=correlation_id)
             return require_response_tenant(
                 value, expected_tenant=tenant_id, correlation_id=correlation_id
@@ -226,9 +289,12 @@ class GiraffeDBClient:
         tenant_id: str | None = None,
         *,
         correlation_id: str = "gpm-create",
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         correlation_id = self._correlation(correlation_id)
         headers = self._service_headers(tenant_id, correlation_id=correlation_id)
+        if idempotency_key:
+            headers["Idempotency-Key"] = self._correlation(idempotency_key)
         if packet.get("tenant_id") != tenant_id:
             raise PersistenceContractError(
                 "GPM_REQUEST_TENANT_MISMATCH", correlation_id=correlation_id
@@ -241,6 +307,8 @@ class GiraffeDBClient:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+            if response.status_code not in {200, 201}:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             value = self._json(response, correlation_id=correlation_id)
             return require_response_tenant(
                 value, expected_tenant=tenant_id or "", correlation_id=correlation_id
@@ -271,6 +339,8 @@ class GiraffeDBClient:
             if response.status_code == 404:
                 return None
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             value = self._json(response, correlation_id=correlation_id)
             return require_response_tenant(
                 value, expected_tenant=tenant_id or "", correlation_id=correlation_id
@@ -302,6 +372,8 @@ class GiraffeDBClient:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+            if response.status_code != 200:
+                raise GiraffeDBClientError("GPM_ADAPTER_INVALID_RESPONSE", correlation_id=correlation_id)
             envelope = self._json(response, correlation_id=correlation_id)
             packets = envelope.get("packets")
             if not isinstance(packets, list) or not all(
@@ -379,3 +451,4 @@ class GiraffeDBClient:
             "GPM_LEGACY_NONATOMIC_AUDIT_DISABLED",
             correlation_id="gpm-legacy-audit",
         )
+

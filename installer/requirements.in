@@ -1,0 +1,29 @@
+# Build-machine inputs. The delivered installer never invokes a package manager.
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+pydantic[email]
+# Keep email-validation DNS parsing above GHSA-45c3-73f7-pv4m.
+dnspython>=2.9.0
+python-dotenv
+httpx
+jinja2
+alembic
+PyMySQL
+pydantic-settings
+py3langid==0.4.0
+ctranslate2
+sentencepiece
+# SQL drivers are runtime dependencies; the target never installs packages.
+aiomysql
+asyncpg
+psycopg[binary]
+psycopg2-binary
+# SQLite remains an explicit disposable unit-test compatibility profile only.
+aiosqlite>=0.22.1
+PyJWT[crypto]>=2.15.1
+cryptography>=50.0.2
+passlib[bcrypt]==1.7.4
+# Preserve the application's supported Passlib bcrypt backend.
+bcrypt>=3.2.2,<4
+python-multipart>=0.0.32

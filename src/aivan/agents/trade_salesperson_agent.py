@@ -9,6 +9,7 @@ from aivan.agents.clarification_agent import generate_clarification_message
 from aivan.agents.supplier_inquiry_agent import draft_supplier_inquiry
 from aivan.agents.supplier_response_agent import parse_supplier_reply
 from aivan.agents.buyer_option_agent import generate_buyer_options
+from aivan.pricing.customer_quote import format_customer_quote_draft
 from aivan.sourcing.supplier_matcher import match_suppliers_for_requirement
 from aivan.sourcing.supplier_registry import list_active as list_active_suppliers
 from aivan.sourcing.marketplaces.search_query_builder import build_marketplace_queries
@@ -21,6 +22,10 @@ from aivan.execution.event_log import append_event
 from aivan.utils.ids import new_project_id
 from aivan.utils.time_utils import utcnow_iso
 from aivan.utils.tenant import tenant_for_new_record
+from aivan.integrations.language_skill import (
+    LanguageNormalizationRequired, LanguageSkillUnavailable,
+    canonicalize_rfq, canonical_english_text, english_provenance,
+)
 
 @dataclass
 class AgentTurnResult:
@@ -40,6 +45,19 @@ def handle_trade_salesperson_event(
     db_session,
 ) -> AgentTurnResult:
     """Main entry point: handle an incoming OpenClaw event."""
+    try:
+        canonicalization = canonicalize_rfq(
+            event.message_text, source_channel=event.channel,
+            tenant_id=event.tenant_id, sender_role=event.business_role or "buyer",
+        )
+    except LanguageSkillUnavailable:
+        raise LanguageNormalizationRequired() from None
+    if canonicalization is None:
+        raise LanguageNormalizationRequired()
+    event = event.model_copy(update={
+        "message_text": canonical_english_text(canonicalization),
+        "attachments": english_provenance(event.attachments),
+    })
     from aivan.db.repositories.project_repo import ProjectRepository
     project_repo = ProjectRepository(db_session)
 
@@ -75,9 +93,9 @@ def handle_trade_salesperson_event(
     if is_supplier_reply(event):
         return _handle_supplier_reply(event, project_id, project, db_session)
 
-    return _handle_customer_message(event, project_id, project, db_session)
+    return _handle_customer_message(event, project_id, project, db_session, canonicalization)
 
-def _handle_customer_message(event, project_id, project, db_session) -> AgentTurnResult:
+def _handle_customer_message(event, project_id, project, db_session, canonicalization=None) -> AgentTurnResult:
     from aivan.db.repositories.project_repo import ProjectRepository
     project_repo = ProjectRepository(db_session)
 
@@ -95,6 +113,7 @@ def _handle_customer_message(event, project_id, project, db_session) -> AgentTur
         existing_requirement=existing_req,
         project_id=project_id,
         source_channel=event.channel,
+        canonicalization=canonicalization,
     )
 
     project_repo.update_requirement(project_id, req.model_dump())
@@ -218,6 +237,7 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
     reply = parse_supplier_reply(
         raw_text=event.message_text,
         project_id=project_id,
+        supplier_id=event.sender_id,
         channel=event.channel,
     )
     append_event(db_session, project_id, "PRODUCTION_UPDATE_RECEIVED", f"Supplier reply received: price={reply.unit_price}", actor="supplier_response_agent")
@@ -233,7 +253,11 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
     if not requirement:
         return AgentTurnResult(project_id=project_id, action="reply_received", message="Supplier reply received but no requirement found.", errors=["No requirement found"])
 
-    lt = calculate_leadtime_for_requirement(requirement, supplier_reply=reply)
+    lt = calculate_leadtime_for_requirement(
+        requirement, supplier_reply=reply, supplier_id=reply.supplier_id or None,
+        tenant_id=project.tenant_id or event.tenant_id,
+        source_trace_id=event.source_trace_id,
+    )
     append_event(db_session, project_id, "LEADTIME_ESTIMATE_CREATED", f"Lead time estimate: {lt.expected_days} days", actor="leadtime_calculator")
 
     options = generate_buyer_options(requirement, [reply], [lt], project_id)
@@ -241,10 +265,6 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
 
     drafts_created = []
     if options:
-        option_summary = "\n".join(
-            f"{opt.option_label}: {opt.reasoning} | Lead time: {opt.lead_time_estimate.expected_days if opt.lead_time_estimate else 'N/A'} days | Price: {opt.quote.buyer_unit_price if opt.quote else 'N/A'} {opt.quote.currency if opt.quote else ''}"
-            for opt in options
-        )
         draft_id = create_draft_in_db(
             db_session=db_session,
             project_id=project_id,
@@ -252,7 +272,7 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
             channel=event.channel,
             target_peer_id=project.customer_id,
             target_role="customer",
-            message_text=f"We have received supplier quotes. Here are your Top-3 options:\n\n{option_summary}\n\nPlease let us know which option you prefer.",
+            message_text=format_customer_quote_draft(options, requirement),
             created_by_agent="buyer_option_agent",
         )
         drafts_created.append(draft_id)
@@ -268,4 +288,3 @@ def _handle_supplier_reply(event, project_id, project, db_session) -> AgentTurnR
         buyer_options=options,
         lead_time_estimates=[lt],
     )
-

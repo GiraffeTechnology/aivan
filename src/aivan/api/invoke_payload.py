@@ -43,15 +43,19 @@ def _normalize_invoke_payload(raw: dict) -> dict:
             "message_type": "text",
             "mode": _first_non_empty(context.get("mode")) or "auto",
         }
-        if _first_non_empty(context.get("project_id")):
-            event["project_id"] = context["project_id"]
+        # Preserve provider routing/replay identity; authentication and role
+        # authority still come from apply_trusted_identity after normalization.
+        for key in ("message_id", "channel_account_id", "idempotency_key", "project_id"):
+            value = _first_non_empty(context.get(key), raw.get(key))
+            if value:
+                event[key] = value
         if _first_non_empty(context.get("role_context")):
             event["role_context"] = context["role_context"]
         return event
 
     # WeChat webhook delivery.
     if "content" in raw:
-        return {
+        event = {
             "source": "wechat",
             "channel": "wechat",
             "conversation_id": _first_non_empty(raw.get("room_id"), raw.get("from_user"))
@@ -61,6 +65,12 @@ def _normalize_invoke_payload(raw: dict) -> dict:
             "message_type": _first_non_empty(raw.get("msg_type")) or "text",
             "mode": "auto",
         }
+        for key in ("message_id", "channel_account_id", "idempotency_key", "project_id"):
+            value = _first_non_empty(raw.get(key))
+            if value:
+                event[key] = value
+        return event
 
     raise ValueError(f"unrecognized payload keys: {sorted(raw.keys())}")
+
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import json
 
 from pydantic import BaseModel
@@ -7,7 +8,10 @@ from aivan.llm.gateway import llm_complete_json
 from aivan.llm.policy import ExternalModelApiRequiresApprovalError
 from aivan.llm.prompts import REQUIREMENT_STRUCTURING_SYSTEM
 from aivan.utils.language import detect_language
-from aivan.integrations.language_skill import apply_to_requirement, canonicalize_rfq
+from aivan.integrations.language_skill import (
+    apply_to_requirement, canonicalize_rfq, english_provenance,
+    has_non_latin_text, source_digest,
+)
 
 
 def _coerce_nulls(data: dict, model: type[BaseModel]) -> dict:
@@ -143,6 +147,7 @@ def structure_customer_requirement_with_llm(
     existing_requirement: BuyerRequirement | None = None,
     project_id: str = "",
     source_channel: str | None = None,
+    canonicalization: dict | None = None,
 ) -> BuyerRequirement:
     """Structure a customer requirement using LLM, with deterministic fallback.
 
@@ -151,14 +156,16 @@ def structure_customer_requirement_with_llm(
     canonicalized there. Its deterministic extraction is authoritative for the
     explicit business facts a small local LLM tends to drop (quantity,
     destination, lead time, product), and the full provenance chain is recorded
-    under ``requirement.extra["language_skill"]``. The call is fail-soft.
+    under ``requirement.extra["language_skill"]`` with source digests instead of
+    multilingual raw copies. The workflow rejects unavailable normalization.
     """
     language = detect_language(raw_text)
 
     # Canonicalize inbound RFQ via the language skill (no-op when disabled).
-    canonicalization = canonicalize_rfq(
-        raw_text, source_channel=source_channel, tenant_id=project_id or "default"
-    )
+    if canonicalization is None:
+        canonicalization = canonicalize_rfq(
+            raw_text, source_channel=source_channel, tenant_id=project_id or "default"
+        )
 
     attach_note = ""
     if attachments:
@@ -174,7 +181,8 @@ def structure_customer_requirement_with_llm(
     normalize_data = (canonicalization or {}).get("normalize") or {}
     canonical_text = normalize_data.get("canonical_text") or None
     has_valid_language_skill = _has_valid_language_skill_rfq(canonicalization)
-    non_english = language != "en"
+    detected = (normalize_data.get("language") or {}).get("detected")
+    non_english = has_non_latin_text(raw_text) or detected not in (None, "en")
     block_non_english_local_extraction = non_english and not has_valid_language_skill
 
     if has_valid_language_skill and non_english and not attachments and existing_requirement is None:
@@ -209,19 +217,26 @@ def structure_customer_requirement_with_llm(
             result["confidence"] = 0.5
             llm_used = False
 
+    inherited_fields: set[str] = set()
     if existing_requirement:
         for field in BuyerRequirement.model_fields:
-            if field not in result and getattr(existing_requirement, field, None):
-                existing_val = getattr(existing_requirement, field)
-                if existing_val is not None and existing_val != "" and existing_val != []:
-                    result[field] = existing_val
+            existing_val = getattr(existing_requirement, field, None)
+            # An omitted/empty extraction is not an instruction to erase a
+            # saved fact. Explicit changes still use the current input value.
+            if (result.get(field) in (None, "", [])
+                    and existing_val not in (None, "", [])):
+                result[field] = copy.deepcopy(existing_val)
+                inherited_fields.add(field)
 
     missing_raw = result.pop("missing_fields", [])
 
     safe_data = {k: v for k, v in result.items() if k in BuyerRequirement.model_fields and k not in ("missing_fields", "project_id", "raw_text")}
     safe_data = _coerce_nulls(safe_data, BuyerRequirement)
     safe_data = _coerce_field_shapes(safe_data, BuyerRequirement)
-    req = BuyerRequirement(project_id=project_id, raw_text=raw_text, **safe_data)
+    stored_text = canonical_text or ("" if non_english else raw_text)
+    req = BuyerRequirement(project_id=project_id, raw_text=stored_text, **safe_data)
+    if non_english and not canonical_text:
+        req.extra["source_text_sha256"] = source_digest(raw_text)
 
     # Record provenance for the fields the structuring layer produced. The RFQ
     # structuring model's *structured* output is provisional canonical evidence
@@ -229,10 +244,20 @@ def structure_customer_requirement_with_llm(
     # is NOT authoritative for canonical product/destination.
     field_source = "llm_structured" if llm_used else "raw_text_only"
     sources: dict[str, str] = {}
+    prior_sources = (existing_requirement.extra or {}).get("field_sources", {}) if existing_requirement else {}
+    if not isinstance(prior_sources, dict):
+        prior_sources = {}
     for field in ("product_type", "category", "destination", "quantity",
                   "delivery_days", "color", "fabric_material"):
         if safe_data.get(field) not in (None, "", []):
-            sources[field] = field_source
+            if field in inherited_fields:
+                # Keep the authority of the persisted value, not the source of
+                # this later message. No prior evidence means no new authority.
+                prior_source = prior_sources.get(field)
+                if isinstance(prior_source, str) and prior_source:
+                    sources[field] = prior_source
+            else:
+                sources[field] = field_source
     req.extra["field_sources"] = sources
 
     # Overlay the language-skill canonicalization (authoritative for explicit
@@ -257,6 +282,7 @@ def structure_customer_requirement_with_llm(
     if not req.category:
         req.category = "general"
 
+    req.extra = english_provenance(req.extra)
     return req
 
 
@@ -275,14 +301,8 @@ def _record_language_skill_sources(req: BuyerRequirement, canonicalization: dict
         value = structured.get(src_field)
         if value not in (None, "", []):
             sources[req_attr] = "language_skill"
-    # Preserve raw evidence spans for confirmation prompts.
-    normalize_data = (canonicalization or {}).get("normalize") or {}
-    evidence = normalize_data.get("field_evidence") or {}
-    if isinstance(evidence, dict):
-        if evidence.get("destination"):
-            req.extra.setdefault("destination_raw", _evidence_text(evidence["destination"]))
-        if evidence.get("product") or evidence.get("product_name"):
-            req.extra.setdefault("product_raw", _evidence_text(evidence.get("product") or evidence.get("product_name")))
+    # Use canonical evidence for confirmation. Never duplicate original spans.
+    req.extra["field_sources"] = english_provenance(sources)
 
 
 def _evidence_text(value) -> str:

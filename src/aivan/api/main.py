@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
@@ -22,8 +23,8 @@ from aivan.api.relay_routes import router as _relay_router
 from aivan.api.session_routes import router as _session_router
 from aivan.api.security_headers import add_security_headers
 from aivan.api.workbench_routes import router as _workbench_router
+from aivan.api.ui_catalog_routes import router as _ui_catalog_router
 from aivan.api.serializers import (
-    draft_type_from_notes as _draft_type_from_notes,
     serialize_draft as _serialize_draft,
     serialize_preference as _serialize_preference,
 )
@@ -38,6 +39,8 @@ from aivan.observability.metrics import record_request_metrics, router as _metri
 from aivan.observability.readiness import router as _readiness_router
 from aivan.observability.dependency_probe import dependency_side_effect_gate
 from aivan.governance.runtime_policy import enforce_runtime_policy
+from aivan.integrations.language_skill import LanguageNormalizationRequired
+from aivan.integrations.skill_reply import render_skill_reply
 
 logger = logging.getLogger("aivan.api")
 
@@ -45,7 +48,6 @@ logger = logging.getLogger("aivan.api")
 def _require_api_key(request: Request) -> RequestContext:
     """Authenticate and return the shared tenant/trace request context."""
     return resolve_request_context(request)
-
 
 def _load_supplier_registry_on_startup() -> int:
     from aivan.db.session import db_session
@@ -78,8 +80,10 @@ async def lifespan(app: FastAPI):
     app.state.giraffe_db_client = get_db_client()
     yield
 
-app = FastAPI(title="AIVAN - Monitoring and Takeover Control Plane", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="AIVAN - AI Trade Salesperson", version="0.3.0", lifespan=lifespan)
 
+from aivan.api.draft_preview_routes import ApprovalRequest, RejectionRequest, router as draft_preview_router
+app.include_router(draft_preview_router)
 
 def _cors_origins() -> list[str]:
     """Return an explicit CORS allowlist; production defaults to no origins."""
@@ -125,6 +129,7 @@ app.include_router(_gpm_router, prefix="/api/gpm", tags=["gpm"])
 app.include_router(_relay_router, tags=["relay"])
 app.include_router(_session_router)
 app.include_router(_workbench_router)
+app.include_router(_ui_catalog_router)
 app.include_router(_metrics_router)
 app.include_router(_readiness_router)
 
@@ -135,17 +140,30 @@ app.middleware("http")(record_request_metrics)
 
 
 # OpenClaw-facing skill routes: an exception here must fail soft, never raw 500.
-SKILL_INVOKE_PATHS = frozenset({
+SKILL_INVOKE_PATHS = frozenset(
+    {
         "/invoke",
         "/api/openclaw/events",
         "/api/skill/invoke",
         "/api/rfq/create-from-event",
         "/api/relay/inbound",
-})
+    }
+)
 
 # WeChat-visible degraded reply when the backend pipeline fails. Must be
 # human-readable and must never leak a traceback or raw exception text.
 ERROR_REPLY_TEXT = "AIVAN encountered a backend dependency error while processing your request. Please try again later."
+
+
+@app.exception_handler(LanguageNormalizationRequired)
+async def language_normalization_required(request: Request, exc: LanguageNormalizationRequired) -> JSONResponse:
+    """Reject unnormalized intake without persisting or echoing its source."""
+    context = getattr(request.state, "aivan_context", None)
+    trace_id = context.trace_id if context else uuid.uuid4().hex
+    return JSONResponse(status_code=503, content={"detail": {
+        "code": "LANGUAGE_NORMALIZATION_REQUIRED", "trace_id": trace_id,
+        "message": "Canonical English normalization is unavailable. Retry when the language service is ready.",
+    }})
 
 
 @app.exception_handler(Exception)
@@ -197,6 +215,7 @@ def _skill_response(result) -> dict:
         data.get("message"),
         "Your request has been received.",
     )
+    reply_text = render_skill_reply(data, reply_text)
     return {**data, "status": "ok", "output": reply_text, "reply_text": reply_text}
 
 
@@ -383,7 +402,7 @@ async def create_rfq_from_event_api(
 
 
 def _do_approve_draft(
-    draft_id: str, db: Session, context: RequestContext
+    draft_id: str, db: Session, context: RequestContext, preview_id: str | None = None
 ) -> dict:
     from aivan.db.repositories.domain_repo import CaseDomainRepository
     from aivan.domain.roles import Capability
@@ -405,9 +424,11 @@ def _do_approve_draft(
             status_code=409,
             detail=f"Draft {draft_id} cannot be approved: current status is '{draft.status}'",
         )
-    from aivan.execution.channel_policy import DeliveryMode, get_channel_capability
+    from aivan.execution.channel_policy import DeliveryMode
 
-    channel_capability = get_channel_capability(draft.channel)
+    from aivan.execution.draft_approval_binding import reviewed_channel, claim_pending_approval, missing_relay_bindings
+    from aivan.execution.draft_preview import bind_approval
+    preview, channel_capability = reviewed_channel(db, draft, preview_id, identity, context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.UNSUPPORTED:
         CaseDomainRepository(db).record_audit(
             tenant_id=draft.tenant_id,
@@ -427,15 +448,7 @@ def _do_approve_draft(
             },
         )
     if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
-        missing_binding = [
-            field
-            for field, value in (
-                ("channel_account_id", draft.channel_account_id),
-                ("conversation_id", draft.conversation_id),
-                ("target_peer_id", draft.target_peer_id),
-            )
-            if not (value or "").strip()
-        ]
+        missing_binding = missing_relay_bindings(draft, preview)
         if missing_binding:
             CaseDomainRepository(db).record_audit(
                 tenant_id=draft.tenant_id,
@@ -464,14 +477,10 @@ def _do_approve_draft(
         requested_by_actor_id=draft.created_by_actor_id,
         requested_by_actor_role=draft.created_by_actor_role,
     )
-    if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
-        repo.mark_approved_pending_send(draft_id, identity.actor_id)
-        approved_status = "approved_pending_send"
-    else:
-        repo.approve(draft_id, identity.actor_id)
-        approved_status = "approved"
+    approved_status = claim_pending_approval(db, draft, identity.actor_id, channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY)
     draft.approval_id = approval.approval_id
     draft.authorization_basis = identity.authorization_basis
+    bind_approval(db, draft, preview, identity=identity, trace_id=context.trace_id)
     CaseDomainRepository(db).record_audit(
         tenant_id=draft.tenant_id,
         case_id=draft.project_id,
@@ -485,16 +494,8 @@ def _do_approve_draft(
             "delivery_mode": channel_capability.delivery_mode.value,
         },
     )
-    project = ProjectRepository(db).get(
-        draft.project_id, tenant_id=draft.tenant_id
-    )
-    if project is not None and project.case_state == "awaiting_approval":
-        CaseDomainRepository(db).transition_case(
-            project=project,
-            after="approved",
-            identity=identity,
-            source_trace_id=context.trace_id,
-        )
+    from aivan.api.draft_state import advance_case_after_quote_approval
+    advance_case_after_quote_approval(db=db, draft=draft, identity=identity, source_trace_id=context.trace_id)
     if channel_capability.delivery_mode == DeliveryMode.GUIDED_RELAY:
         CaseDomainRepository(db).record_audit(
             tenant_id=draft.tenant_id,
@@ -522,7 +523,7 @@ def _do_approve_draft(
     CaseDomainRepository(db).record_audit(
         tenant_id=draft.tenant_id,
         case_id=draft.project_id,
-        event_type="DRAFT_SENT" if response.success else "DRAFT_SEND_FAILED",
+        event_type="DRAFT_SENT" if response.success else ("DRAFT_DELIVERY_UNCONFIRMED" if response.outcome_uncertain else "DRAFT_SEND_FAILED"),
         identity=identity,
         source_trace_id=context.trace_id,
         before={"draft_id": draft.draft_id, "status": "approved"},
@@ -540,9 +541,10 @@ def _do_approve_draft(
     }
 
 
-def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dict:
-    from aivan.db.repositories.domain_repo import CaseDomainRepository
+def _do_reject_draft(draft_id: str, db: Session, context: RequestContext, reason: str | None = None) -> dict:
     from aivan.domain.roles import Capability
+    from aivan.execution.approval_state import DraftStateError
+    from aivan.execution.draft_rejection import canonical_rejection_reason, reject_draft_atomically
 
     repo = DraftRepository(db)
     draft = repo.get(draft_id, tenant_id=context.tenant_id)
@@ -556,70 +558,29 @@ def _do_reject_draft(draft_id: str, db: Session, context: RequestContext) -> dic
         source_trace_id=context.trace_id,
         db=db,
     )
+    canonical_reason = canonical_rejection_reason(
+        reason, identity=identity, tenant_id=draft.tenant_id,
+    ) if draft.status == "pending_approval" else ""
+    project_repo = ProjectRepository(db)
+    project_repo.get_for_update(draft.project_id, tenant_id=draft.tenant_id)
+    db.refresh(draft)
     if draft.status != "pending_approval":
         raise HTTPException(
             status_code=409,
             detail=f"Draft {draft_id} cannot be rejected: current status is '{draft.status}'",
         )
-    repo.reject(draft_id)
-    CaseDomainRepository(db).record_approval(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        draft_id=draft.draft_id,
-        identity=identity,
-        source_trace_id=context.trace_id,
-        status="rejected",
-        requested_by_actor_id=draft.created_by_actor_id,
-        requested_by_actor_role=draft.created_by_actor_role,
-    )
-    CaseDomainRepository(db).record_audit(
-        tenant_id=draft.tenant_id,
-        case_id=draft.project_id,
-        event_type="DRAFT_REJECTED",
-        identity=identity,
-        source_trace_id=context.trace_id,
-        before={"draft_id": draft.draft_id, "status": "pending_approval"},
-        after={"draft_id": draft.draft_id, "status": "rejected"},
-    )
-    project = ProjectRepository(db).get(
-        draft.project_id, tenant_id=draft.tenant_id
-    )
-    is_customer_quote = (
-        draft.target_role == "customer"
-        and _draft_type_from_notes(draft) == "customer_quote_email"
-    )
-    pending_customer_quotes = [
-        pending
-        for pending in repo.list_pending(
-            draft.project_id, tenant_id=draft.tenant_id
+    try:
+        outcome = reject_draft_atomically(
+            db=db, draft=draft, identity=identity, source_trace_id=context.trace_id,
+            canonical_reason=canonical_reason,
         )
-        if pending.target_role == "customer"
-        and _draft_type_from_notes(pending) == "customer_quote_email"
-    ]
-    reopened_quote_flow = False
-    if (
-        project is not None
-        and project.case_state == "awaiting_approval"
-        and is_customer_quote
-        and not pending_customer_quotes
-    ):
-        project.case_state = "supplier_replied"
-        project.source_trace_id = context.trace_id or project.source_trace_id
-        CaseDomainRepository(db).record_audit(
-            tenant_id=draft.tenant_id,
-            case_id=draft.project_id,
-            event_type="CASE_STATE_TRANSITION",
-            identity=identity,
-            source_trace_id=context.trace_id,
-            before={"case_state": "awaiting_approval"},
-            after={"case_state": "supplier_replied"},
-        )
-        db.flush()
-        reopened_quote_flow = True
+    except DraftStateError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Draft is no longer pending approval") from exc
     db.commit()
-    result = {"draft_id": draft_id, "status": "rejected"}
-    if reopened_quote_flow:
-        result["case_state"] = project.case_state
+    result = {"draft_id": draft_id, "status": outcome.status}
+    if outcome.reopened_case_state is not None:
+        result["case_state"] = outcome.reopened_case_state
     return result
 
 
@@ -678,20 +639,21 @@ def _do_retry_draft(draft_id: str, db: Session, context: RequestContext) -> dict
 @app.post("/api/openclaw/drafts/{draft_id}/approve")
 def approve_draft(
     draft_id: str,
-    body: dict = None,
+    body: ApprovalRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, db, context)
+    return _do_approve_draft(draft_id, db, context, preview_id=body.preview_id if body else None)
 
 
 @app.post("/api/openclaw/drafts/{draft_id}/reject")
 def reject_draft(
     draft_id: str,
+    body: RejectionRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db, context)
+    return _do_reject_draft(draft_id, db, context, reason=body.reason if body else None)
 
 
 @app.get("/api/openclaw/drafts/{draft_id}")
@@ -718,20 +680,21 @@ def get_draft(
 @app.post("/api/drafts/{draft_id}/approve")
 def approve_draft_alias(
     draft_id: str,
-    body: dict = None,
+    body: ApprovalRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_approve_draft(draft_id, db, context)
+    return _do_approve_draft(draft_id, db, context, preview_id=body.preview_id if body else None)
 
 
 @app.post("/api/drafts/{draft_id}/reject")
 def reject_draft_alias(
     draft_id: str,
+    body: RejectionRequest | None = None,
     db: Session = Depends(get_db),
     context: RequestContext = Depends(_require_api_key),
 ):
-    return _do_reject_draft(draft_id, db, context)
+    return _do_reject_draft(draft_id, db, context, reason=body.reason if body else None)
 
 
 @app.get("/api/drafts/{draft_id}")
@@ -1028,7 +991,12 @@ def run_project_gltg(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy: {e}")
     giraffe = GiraffeDBClient(db, tenant_id=context.tenant_id).build_context(requirement, customer_id=project.customer_id)
-    simulation = GLTGClient().simulate(requirement, strategy, supplier_count=len(giraffe.suppliers))
+    simulation = GLTGClient().simulate(
+        requirement,
+        strategy,
+        supplier_count=len(giraffe.suppliers),
+        tenant_id=context.tenant_id,
+    )
     payload["strategy"] = strategy.model_dump()
     payload["gltg_simulation"] = simulation.model_dump()
     project_repo.update_requirement(project_id, payload)
@@ -1294,11 +1262,11 @@ def reverse_execution_event(
             status_code=409,
             detail={"error": "AUTOMATIC_REVERSAL_UNSAFE", "impact": exc.impact},
         ) from exc
-    except ReversalConflict:
+    except ReversalConflict as exc:
         raise HTTPException(
             status_code=409,
             detail={"error": "REVERSAL_CONFLICT"},
-        )
+        ) from exc
 
     if not result.idempotent_replay:
         CaseDomainRepository(db).record_audit(

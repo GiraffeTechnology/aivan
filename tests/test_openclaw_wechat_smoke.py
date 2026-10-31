@@ -74,7 +74,7 @@ def test_invoke_wechat_webhook_payload(client):
     resp = client.post(
         "/invoke",
         json={
-            "content": "帮我询价1000件T恤",
+            "content": "Please request a quote for 1000 T-shirts",
             "from_user": "wxid_test",
             "room_id": "room@chatroom",
         },

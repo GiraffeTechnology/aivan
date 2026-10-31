@@ -16,7 +16,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
         "form-action 'self'; object-src 'none'; script-src 'self'; "
-        "style-src 'self'; img-src 'self' data:"
+        "style-src 'self'; img-src 'self' data: blob:"
     )
     candidate = os.environ.get("AIVAN_CANDIDATE_SHA", "").strip()
     if _SHA.fullmatch(candidate):

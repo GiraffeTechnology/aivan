@@ -13,6 +13,7 @@ from aivan.integrations.gltg_client import GLTGClient, GLTGClientResult
 
 def _handler(captured: dict):
     def handle(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
         captured["method"] = request.method
         captured["url"] = str(request.url)
         captured["content"] = request.content.decode() if request.content else ""
@@ -117,11 +118,13 @@ def test_connection_error_does_not_fall_back():
     assert res.data is None  # never a locally computed value
 
 
-def test_simulate_lead_time_v2_posts_payload():
+def test_simulate_lead_time_v2_posts_payload(monkeypatch):
+    monkeypatch.setenv("GLTG_SERVICE_AUTH_SECRET", "synthetic-gltg-auth")
     cap: dict = {}
     res = _client(cap).simulate_lead_time_v2(
         {
             "request_id": "REQ_test",
+            "tenant_id": "synthetic-gltg-tenant",
             "source_system": "aivan",
             "order": {"quantity": 10000, "product_type": "apparel"},
             "supplier": {"supplier_id": "M1"},
@@ -131,6 +134,8 @@ def test_simulate_lead_time_v2_posts_payload():
     assert res.data["gltg_run_id"] == "GLTG_test_001"
     assert cap["method"] == "POST"
     assert cap["url"].endswith("/v2/lead-time/simulate")
+    assert cap["headers"]["x-service-auth"] == "synthetic-gltg-auth"
+    assert cap["headers"]["x-service-tenant-id"] == "synthetic-gltg-tenant"
 
 
 def test_facade_uses_v2_when_configured(monkeypatch):

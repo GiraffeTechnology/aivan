@@ -4,14 +4,15 @@ class SupplierReply(BaseModel):
     project_id: str
     supplier_id: str = ""
     candidate_id: str = ""
+    source_event_id: str = ""
     raw_text: str
     channel: str = ""
     unit_price: float | None = None
-    currency: str = "USD"
+    currency: str = ""
     moq: int | None = None
     capacity_per_day: int | None = None
     capacity_per_month: int | None = None
-    lead_time_days: int | None = None
+    lead_time_days: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     material_availability: str = ""
     qc_commitment: str = ""
     logistics_note: str = ""
@@ -21,4 +22,5 @@ class SupplierReply(BaseModel):
     missing_info: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     raw_payload: dict = Field(default_factory=dict)
+    material_declarations: dict = Field(default_factory=dict)
     received_at: str = ""

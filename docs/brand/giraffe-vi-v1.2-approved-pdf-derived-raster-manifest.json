@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "packageType": "approved-pdf-derived-raster-assets",
+  "createdAt": "2026-08-24T01:13:09.036118+00:00",
+  "source": {
+    "file": "Giraffe_Technology_VI_Guidelines_CN_v1.2.pdf",
+    "sha256": "DCBC6B2E81572B474BAA6922DEB392785F126CE8D844409E09E0F2FE4B9F3E97",
+    "viVersion": "1.2",
+    "year": 2026,
+    "pages": 23
+  },
+  "vectorSourceAvailable": false,
+  "extractionTool": {
+    "file": "extract_logo_assets.py",
+    "sha256": "B4457A904EA51D240BA4E39EF95B0BFB56773579AB2D1A11AFEC870EE09BDF93",
+    "method": "pypdf decoded RGB Image XObject + SMask; Pillow lossless PNG"
+  },
+  "approvedUseBoundary": "Lossless transparent PNG derivatives reconstructed from the authoritative VI PDF image objects. They are traceable raster derivatives, not original vector masters.",
+  "assets": [
+    {
+      "key": "graphic-mark",
+      "label": "Standalone graphic mark",
+      "usageConstraint": "When used independently, the mark must have a white, perfectly circular background. On a white page, the circle may have no outline, but its protected circular area must remain. Do not replace it with an ellipse, rounded square, or another shape. The graphic outline must stay inside the circular safe area.",
+      "sourcePage": 4,
+      "sourceObjectId": 7,
+      "sourceXObjectName": "/FormXob.0245d01ded46c3b3ffe045261060aca0",
+      "sourceType": "PDF /Image XObject with /SMask (not vector)",
+      "sourceCanvasPixels": [
+        615,
+        802
+      ],
+      "alphaContentBBox": [
+        0,
+        0,
+        615,
+        802
+      ],
+      "rawPng": {
+        "file": "giraffe-logo-graphic-mark-pdf-object7-raw.png",
+        "pixels": [
+          615,
+          802
+        ],
+        "bytes": 271381,
+        "sha256": "00ED394F7711D2CA7A801F52049D688F1EC6D4920F0BC0EC83E4166885D0EB51"
+      },
+      "trimmedTransparentPng": {
+        "file": "giraffe-logo-graphic-mark-transparent.png",
+        "pixels": [
+          615,
+          802
+        ],
+        "bytes": 271382,
+        "sha256": "DFD19B25AE703DD1F4584CC255D822A26A967BE3100EB2C94202CCC541724E4F"
+      }
+    },
+    {
+      "key": "english-combination",
+      "label": "English combination logo",
+      "usageConstraint": "The official English name is fixed as Giraffe Technology. The graphic, horizontal rule, and text form an inseparable combination. Do not rename, abbreviate, or use alternative spellings.",
+      "sourcePage": 5,
+      "sourceObjectId": 3,
+      "sourceXObjectName": "/FormXob.b585460f5ceecc40fdbc1d18ca5eee4b",
+      "sourceType": "PDF /Image XObject with /SMask (not vector)",
+      "sourceCanvasPixels": [
+        1064,
+        968
+      ],
+      "alphaContentBBox": [
+        0,
+        0,
+        1064,
+        968
+      ],
+      "rawPng": {
+        "file": "giraffe-logo-english-combination-pdf-object3-raw.png",
+        "pixels": [
+          1064,
+          968
+        ],
+        "bytes": 357636,
+        "sha256": "CF41D5DE13EF0D85898A6F1D6765BF80E8CAE2829EC148A2AE73AD794EB21FC5"
+      },
+      "trimmedTransparentPng": {
+        "file": "giraffe-logo-english-combination-transparent.png",
+        "pixels": [
+          1064,
+          968
+        ],
+        "bytes": 357637,
+        "sha256": "FA4BC481AD0327AA07BFC93B1C61D411869D0CE71FB1822753F291728F0D68ED"
+      }
+    }
+  ]
+}

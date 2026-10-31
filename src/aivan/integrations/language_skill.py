@@ -5,15 +5,19 @@ calls ``/v1/inbound/normalize`` then ``/v1/structure/rfq`` and overlays the
 service's deterministic business facts onto a :class:`BuyerRequirement`,
 recording the full provenance chain in ``requirement.extra["language_skill"]``.
 
-Fail-soft contract (default): if the service is disabled or unavailable, these
-helpers return ``None`` / leave the requirement untouched so the caller keeps
-the raw message and does not hallucinate missing fields. Set
-``AIVAN_LANGUAGE_SKILL_FAIL_SOFT=false`` to surface failures as exceptions.
+The optional low-level helper may return ``None`` when unavailable. The workflow
+intake boundary rejects untranslated non-English input before classification or
+storage. Requirements store canonical English and source digests, never original
+non-English text or nested raw evidence. No historical records are migrated here.
 """
 
 from __future__ import annotations
 
+import json
+import hashlib
+import unicodedata
 from typing import Any
+from pydantic import TypeAdapter, ValidationError
 
 from aivan.integrations.language_skill_client import (
     LanguageSkillClient,
@@ -27,6 +31,60 @@ class LanguageSkillUnavailable(RuntimeError):
     """Raised (only when fail-soft is disabled) when the service call fails."""
 
 
+class LanguageNormalizationRequired(RuntimeError):
+    """Safe, retryable intake failure with no raw message in its error."""
+
+    def __init__(self) -> None:
+        super().__init__("LANGUAGE_NORMALIZATION_REQUIRED")
+
+
+def source_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def has_non_latin_text(text: str) -> bool:
+    """Reject untranslated scripts, not English punctuation or Latin proper names.
+
+    This is a residual-script guard, not a replacement language detector or
+    translator. The service's canonical-language declaration remains required.
+    """
+    return any(char.isalpha() and "LATIN" not in unicodedata.name(char, "") for char in text)
+
+
+def english_provenance(value: Any) -> Any:
+    """Keep canonical metadata and hash original spans at every nesting level."""
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            key = str(key)
+            if key in {"raw", "raw_text", "source_text", "span", "original_text"}:
+                result[f"{key}_sha256"] = source_digest(str(item))
+            elif has_non_latin_text(key):
+                result[f"source_key_{source_digest(key)}"] = {
+                    "source_value_sha256": source_digest(str(item)),
+                }
+            else:
+                result[key] = english_provenance(item)
+        return result
+    if isinstance(value, list):
+        return [english_provenance(item) for item in value]
+    if isinstance(value, str) and has_non_latin_text(value):
+        return {"source_text_sha256": source_digest(value)}
+    return value
+
+
+def canonical_english_text(canon: dict[str, Any]) -> str:
+    norm = canon.get("normalize") or {}
+    text = norm.get("canonical_text")
+    if (norm.get("canonical_language") != "en" or not isinstance(text, str)
+            or not text.strip() or has_non_latin_text(text)):
+        raise LanguageNormalizationRequired()
+    structured = (canon.get("structure") or {}).get("structured") or {}
+    if any(has_non_latin_text(str(value)) for value in structured.values()):
+        raise LanguageNormalizationRequired()
+    return text
+
+
 # Map trade_rfq.v1 structured field -> BuyerRequirement attribute. Fields not
 # listed here are preserved under requirement.extra["language_skill"].
 _RFQ_TO_REQUIREMENT = {
@@ -36,6 +94,9 @@ _RFQ_TO_REQUIREMENT = {
     "product_category": "category",
     "destination": "destination",
     "lead_time_days": "delivery_days",
+    "fabric": "fabric_material", "fabric_material": "fabric_material", "material": "fabric_material",
+    "color": "color", "gsm": "gsm", "fabric_weight_gsm": "gsm",
+    "size_ratio": "size_ratio", "size_breakdown": "size_ratio", "packaging": "packaging",
 }
 
 
@@ -69,7 +130,8 @@ def canonicalize_rfq(
             raise LanguageSkillUnavailable(norm.error or "normalize failed")
         return None
 
-    normalize_data = norm.data
+    normalize_data = dict(norm.data)
+    normalize_data["source_text_sha256"] = source_digest(raw_text)
     struct = client.structure_rfq(
         raw_text=raw_text,
         canonical_text=normalize_data.get("canonical_text"),
@@ -92,6 +154,7 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
     corresponding requirement field. Values the service does not provide are
     left as-is (never nulled out).
     """
+    original_text = req.raw_text
     normalize_data = canon.get("normalize") or {}
     structure_data = canon.get("structure")
 
@@ -100,13 +163,19 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
         req.language = detected
 
     canonical_text = normalize_data.get("canonical_text")
+    if canonical_text:
+        if has_non_latin_text(canonical_text):
+            raise LanguageNormalizationRequired()
+        req.raw_text = canonical_text
+    elif has_non_latin_text(req.raw_text):
+        raise LanguageNormalizationRequired()
     requested_output_language = (
         normalize_data.get("requested_output_language")
         or detected
         or "en"
     )
     ls_meta: dict[str, Any] = {
-        "raw_text": normalize_data.get("raw_text"),
+        "source_text_sha256": normalize_data.get("source_text_sha256") or source_digest(normalize_data.get("raw_text") or original_text),
         "detected_language": detected,
         "source_language": detected,
         "canonical_english_text": canonical_text,
@@ -121,8 +190,26 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
         "warnings": normalize_data.get("warnings", []),
     }
 
+    # Normalization can supply explicit domain facts that trade_rfq.v1 does
+    # not repeat. Use only its canonical value, never parse original spans.
+    evidence_fields = {}
+    for name, evidence in (normalize_data.get("field_evidence") or {}).items():
+        if name in _RFQ_TO_REQUIREMENT and isinstance(evidence, dict) and evidence.get("value") is not None:
+            value = evidence["value"]
+            if has_non_latin_text(str(value)):
+                raise LanguageNormalizationRequired()
+            evidence_fields[name] = value
+    _overlay_fields(req, evidence_fields, None)
+    sources = req.extra.setdefault("field_sources", {})
+    for name, value in evidence_fields.items():
+        if value not in (None, "", []):
+            sources[_RFQ_TO_REQUIREMENT[name]] = "language_skill"
+
     if structure_data:
         structured = structure_data.get("structured") or {}
+        # Semantic fields cannot be silently replaced with digest objects.
+        if any(has_non_latin_text(str(value)) for value in structured.values()):
+            raise LanguageNormalizationRequired()
         _overlay_fields(req, structured, structure_data.get("confidence_score"))
         ls_meta.update(
             {
@@ -135,10 +222,11 @@ def apply_to_requirement(req: BuyerRequirement, canon: dict[str, Any]) -> BuyerR
             }
         )
 
+    ls_meta = english_provenance(ls_meta)
     req.extra["language_skill"] = ls_meta
-    req.extra.setdefault("canonical_english_text", canonical_text)
-    req.extra.setdefault("canonical_packet", ls_meta.get("canonical_packet") or ls_meta.get("structured"))
-    req.extra.setdefault("field_evidence", ls_meta.get("field_evidence"))
+    req.extra["canonical_english_text"] = canonical_text
+    req.extra["canonical_packet"] = ls_meta.get("canonical_packet") or ls_meta.get("structured")
+    req.extra["field_evidence"] = ls_meta.get("field_evidence")
     if isinstance(ls_meta.get("field_sources"), dict):
         req.extra.setdefault("field_sources", ls_meta.get("field_sources"))
     req.extra.setdefault("language_skill_trace_id", ls_meta.get("language_skill_trace_id"))
@@ -152,6 +240,12 @@ def _overlay_fields(req: BuyerRequirement, structured: dict[str, Any], confidenc
         value = structured.get(src_field)
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
+        if req_attr == "size_ratio" and isinstance(value, dict):
+            value = json.dumps(value, sort_keys=True, ensure_ascii=True)
+        try:
+            value = TypeAdapter(BuyerRequirement.model_fields[req_attr].annotation).validate_python(value)
+        except ValidationError as exc:
+            raise LanguageNormalizationRequired() from exc
         setattr(req, req_attr, value)
 
     # Preserve extra domain signals that have no dedicated requirement field.

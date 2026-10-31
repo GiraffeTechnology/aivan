@@ -206,6 +206,7 @@ def make_require_auth(db_client=None):
                 fail_closed=True,
                 correlation_id=context.trace_id,
             )
+            request.state.aivan_context = context
             return context.tenant_id
 
         if not secret:
@@ -280,3 +281,4 @@ async def require_principal(request: Request) -> GPMPrincipal:
         ),
         correlation_id=correlation_id,
     )
+

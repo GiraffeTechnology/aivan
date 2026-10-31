@@ -49,7 +49,7 @@ CHANNEL_CAPABILITY_REGISTRY: dict[str, ChannelCapability] = {
     "wechat": ChannelCapability(
         "wechat",
         DeliveryMode.GUIDED_RELAY,
-        aliases=("weixin", "we-chat"),
+        aliases=("weixin", "we-chat", "openclaw-weixin"),
         supports_inbound_relay=True,
     ),
     "wangwang": ChannelCapability(
