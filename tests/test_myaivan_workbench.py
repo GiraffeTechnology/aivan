@@ -275,9 +275,14 @@ def test_myaivan_ui_has_compact_accessible_persistent_language_entry(workbench):
     assert "canonical_english" not in response.text
 
 
-def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatch):
+def test_readiness_fails_closed_until_production_contract_is_complete(
+    monkeypatch, production_runtime_policy, ready_dependency_probes,
+):
     import aivan.observability.readiness as readiness
 
+    from aivan.observability import dependency_probe
+
+    monkeypatch.setattr(readiness, "run_dependency_probes", dependency_probe.run_dependency_probes)
     readiness_checks = readiness.readiness_checks
     monkeypatch.setattr(readiness, "ready_locales", lambda _candidate: ["fr", "es", "de", "ko", "ja"])
 
@@ -326,6 +331,7 @@ def test_readiness_fails_closed_until_production_contract_is_complete(monkeypatc
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:9b")
     monkeypatch.setenv("AIVAN_NON_CHINA_EGRESS_POLICY", "abcdyi-sin")
+    monkeypatch.setenv("AIVAN_EXPECTED_EGRESS_POLICY", "abcdyi-sin")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_ENABLED", "true")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_BASE_URL", "http://127.0.0.1:8788")
     monkeypatch.setenv("AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER", "ctranslate2")
