@@ -86,15 +86,18 @@ def test_graph_payloads_include_trace_metadata_and_idempotency_header(monkeypatc
     assert len(captured_payloads) == 7
     assert methods == ["POST"] * 7 + ["GET"]
     assert result["readback_verified"] is True
-    for payload in captured_payloads:
+    operations = ["buyer", "procurement-case", "rfq", "gltg-run", "pricing-input",
+                  "decision-option", "comparison-snapshot"]
+    for operation, payload, headers in zip(operations, captured_payloads, captured_headers, strict=True):
         assert payload["source_system"] == "aivan"
         assert payload["source_trace_id"] == "aivan:proj_1:msg_graph_001"
-        assert payload["idempotency_key"] == "aivan:proj_1:msg_graph_001"
-    for headers in captured_headers:
-        assert headers.get("idempotency-key") == "aivan:proj_1:msg_graph_001"
+        expected_key = f"aivan:proj_1:msg_graph_001:{operation}"
+        assert payload["idempotency_key"] == expected_key
+        assert headers.get("idempotency-key") == expected_key
 
 
 def test_graph_retry_uses_same_idempotency_key(monkeypatch):
     a = build_graph_trace_metadata(_event(), "proj_retry")
     b = build_graph_trace_metadata(_event(), "proj_retry")
     assert a["idempotency_key"] == b["idempotency_key"]
+

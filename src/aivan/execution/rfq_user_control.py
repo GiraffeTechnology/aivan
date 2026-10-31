@@ -224,5 +224,7 @@ def build_user_control_message(
         f"delivery to {destination} {delivery}. "
         f"{count} supplier inquiry draft{'s' if count != 1 else ''} prepared. "
         "Review the requirements, returned lead-time assessment and draft content. "
-        "Human approval is required before any external message. No message has been sent."
+        "All drafts are pending approval. Human approval is required before any external message. "
+        "No message has been sent."
     )
+

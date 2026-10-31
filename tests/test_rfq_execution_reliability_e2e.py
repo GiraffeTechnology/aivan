@@ -32,7 +32,8 @@ def synthetic_language_contract(monkeypatch):
             chinese = text == "询价 5000 件格子衬衫，45天交东京，高品质"
             return httpx.Response(200, json={
                 "canonical_text": english if chinese else text, "canonical_language": "en",
-                "language": {"detected": "zh" if chinese else "en"}, "field_evidence": {},
+                "language": {"detected": "zh" if chinese else "en", "confidence": 0.99},
+                "field_evidence": {},
             })
         if request.url.path == "/api/language/canonical-db/validate":
             return httpx.Response(200, json={"valid": True, "violations": []})
@@ -177,3 +178,4 @@ def test_gltg_unavailable_returns_structured_dependency_recovery(db_session, mon
     reply = result.user_control_message
     assert "GLTG" in reply
     assert "后端依赖错误" not in reply
+
