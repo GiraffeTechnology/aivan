@@ -63,7 +63,12 @@ def mysql_descriptor(component: str, driver: str, *, input_value=input, secret_v
 
 def configure_databases(config: dict, path: Path, *, validator, replace=False):
     require_terminal()
-    names = [("aivan", "pymysql"), ("abcdyi", "aiomysql")]
+    stage = config.get("deployment_stage", "integrated")
+    if stage not in ("aivan", "integrated"):
+        raise ValueError("Deployment stage must be aivan or integrated")
+    names = [("aivan", "pymysql")]
+    if stage == "integrated":
+        names.append(("abcdyi", "aiomysql"))
     if not config.get("external", {}).get("database"):
         names.append(("database", "pymysql"))
     databases = {name: mysql_descriptor(name, driver) for name, driver in names}

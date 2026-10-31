@@ -201,6 +201,8 @@ def main():
     parser.add_argument('--email')
     parser.add_argument('--full-name')
     args = parser.parse_args()
+    if args.command != 'verify-import' and os.environ.get('MYAIVAN_DEPLOYMENT_STAGE', 'integrated') != 'integrated':
+        raise RuntimeError('Fulfillment is not enabled in this deployment stage')
     if args.command == 'buyer-create':
         spec = importlib.util.spec_from_file_location('myaivan_buyer_inputs', Path(__file__).with_name('buyer_setup.py'))
         inputs = importlib.util.module_from_spec(spec); spec.loader.exec_module(inputs)

@@ -97,7 +97,7 @@ def plan(root, components=None):
             raise CONFIG.safe_error(name, 'inspection') from None
     if len({v['namespace_sha256'] for v in snapshots.values()}) != len(snapshots):
         raise ValueError('The connected components share a physical database namespace')
-    result = {'format': 1, 'release': manifest['release'], 'manifest_sha256': hashlib.sha256((HERE / 'manifest.json').read_bytes()).hexdigest(),
+    result = {'format': 1, 'deployment_stage': config.get('deployment_stage', 'integrated'), 'release': manifest['release'], 'manifest_sha256': hashlib.sha256((HERE / 'manifest.json').read_bytes()).hexdigest(),
               'components': snapshots, 'private_provider_http': 'database' in config.get('external', {}),
               'candidate_revisions': {name: value['revision'] for name, value in manifest['components'].items()}}
     result['plan_sha256'] = digest(result)

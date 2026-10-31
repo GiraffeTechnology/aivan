@@ -8,6 +8,13 @@ from pathlib import Path
 import stat
 
 
+def stage(config: dict) -> str:
+    value = config.get("deployment_stage", "integrated")
+    if value not in ("aivan", "integrated"):
+        raise ValueError("Deployment stage must be aivan or integrated")
+    return value
+
+
 def private_json(path: str | Path) -> dict:
     path = Path(path)
     if not path.is_absolute():
@@ -98,14 +105,14 @@ def reserved_ports(config: dict) -> set[int]:
 
 def profile(config: dict, value: dict, *, endpoint, tenant_identities) -> dict:
     """Merge deployment inputs while preserving installation-owned identities."""
-    allowed = {"version", "origin", "host_profile", "reserved_ports", "requested_ports", "runtime_threads", "tenant_ids",
+    allowed = {"version", "deployment_stage", "origin", "host_profile", "reserved_ports", "requested_ports", "runtime_threads", "tenant_ids",
                "database_config_file", "service_credentials_file", "private_data_provider_id",
                "external", "language", "model", "channels"}
     if (not isinstance(value, dict) or set(value) - allowed
             or type(value.get("version")) is not int or value["version"] != 1):
         raise ValueError("Unsupported deployment profile; secrets belong in the credential file")
     result = copy.deepcopy(config)
-    for name in ("origin", "host_profile", "reserved_ports", "runtime_threads", "database_config_file", "service_credentials_file", "private_data_provider_id"):
+    for name in ("deployment_stage", "origin", "host_profile", "reserved_ports", "runtime_threads", "database_config_file", "service_credentials_file", "private_data_provider_id"):
         if name in value:
             result[name] = value[name]
     if value.get("database_config_file"):
@@ -145,11 +152,13 @@ def profile(config: dict, value: dict, *, endpoint, tenant_identities) -> dict:
             raise ValueError("Requested ports must name installed services")
         result["ports"].update(ports)
         result["fulfillment"]["port"] = result["ports"]["abcdyi"]
+    stage(result)
     result["fulfillment"]["tenants"] = tenant_identities(result["tenants"])
     return result
 
 
 def validate(config: dict, *, endpoint) -> None:
+    stage(config)
     threads = config.get("runtime_threads", 2)
     if type(threads) is not int or not 1 <= threads <= 64:
         raise ValueError("Runtime thread count must be an integer between 1 and 64")

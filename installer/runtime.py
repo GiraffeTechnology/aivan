@@ -206,13 +206,24 @@ def bind_available_port(requested: int, reserved: set[int], used: set[int]):
     raise RuntimeError("No free non-reserved service port could be allocated")
 
 
+def fulfillment_enabled(config: dict) -> bool:
+    return load_deployment_module().stage(config) == "integrated"
+
+
+def require_stage_support(config: dict, manifest: dict):
+    if not fulfillment_enabled(config) and "aivan" not in manifest.get("deployment_stages", []):
+        raise RuntimeError("The release cannot preserve the Aivan-only deployment stage")
+
+
 def publish_ports(root: Path, config: dict):
     write_json(root / "run/ports.json", {
         "version": 1,
         "public_origin": config["origin"],
+        "deployment_stage": load_deployment_module().stage(config),
         "services": {name: {"managed": name not in config["external"], "port": port,
                             "url": config["external"].get(name, f"http://127.0.0.1:{port}")}
-                     for name, port in config["ports"].items()},
+                     for name, port in config["ports"].items() if name != "abcdyi" or fulfillment_enabled(config)},
+        "fulfillment_status": "enabled_requires_health_check" if fulfillment_enabled(config) else "not_deployed",
     })
 
 
@@ -279,6 +290,7 @@ def upgrade_config(config):
 
 
 def config_for_release(config, target):
+    require_stage_support(config, read_json(target / "manifest.json"))
     if config.get("database_mode") == "external" and "database_config.py" not in read_json(target / "manifest.json").get("files", {}):
         raise RuntimeError("The previous release cannot preserve the configured external databases; rollback was not started")
     if ("deployment_config.py" not in read_json(target / "manifest.json").get("files", {})
@@ -355,6 +367,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
     env["LD_LIBRARY_PATH"] = ":".join(str(directory) for directory in library_dirs)
     env.update({
         "AIVAN_ENV": "production",
+        "MYAIVAN_DEPLOYMENT_STAGE": load_deployment_module().stage(config),
         "AIVAN_CANDIDATE_SHA": candidate_revision(read_json(rel / "manifest.json")),
         "AIVAN_DB_URL": targets["aivan"]["url"],
         "MYAIVAN_DATABASE_MODE": config.get("database_mode", "external"),
@@ -406,7 +419,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
         "GPM_TENANT_API_KEYS": json.dumps(config["tenants"]),
         "GPM_LLM_RUNTIME_MODE": "live",
     })
-    if "abcdyi" in config["ports"]:
+    if fulfillment_enabled(config) and "abcdyi" in config["ports"]:
         mapping = config["fulfillment"]["tenants"]
         env.update({
             "DATABASE_URL": targets["abcdyi"]["url"],
@@ -424,7 +437,8 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
 
 
 def active_services(config: dict):
-    return [name for name in SERVICES if name in config["ports"] and name not in config["external"]]
+    return [name for name in SERVICES if name in config["ports"] and name not in config["external"]
+            and (name != "abcdyi" or fulfillment_enabled(config))]
 
 
 def health(root: Path) -> dict:
@@ -434,7 +448,8 @@ def health(root: Path) -> dict:
     checks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checks)
     report = checks.probe(config, SERVICES, load_deployment_module().credentials(config))
-    return {"ok": status(root)["running"] and all(item["ok"] for item in report.values()), "services": report,
+    return {"ok": status(root)["running"] and all(item["ok"] for item in report.values() if item.get("required", True)), "services": report,
+            "deployment_stage": load_deployment_module().stage(config),
             "workflow_acceptance": "not_measured_by_health", "public_entry": {"origin": config["origin"], "status": "authorized_HTTPS_ingress_required_and_unverified"}, "optional_dependencies": {"language": "configured_requires_validation" if config["language"]["url"] or config["language"].get("model_dir") else "canonical_validator_bundled_translation_models_missing", "model": "configured" if config["model"]["url"] else "disabled_deterministic_human_review_guidance", "email": "configured_explicit_human_confirmation_required" if config.get("channels", {}).get("email_enabled") else "unconfigured_manual_copy_only"}}
 
 
@@ -643,6 +658,8 @@ def load_release_controller(target: Path):
 def restart_restored_release(root: Path):
     """Use the original controller only for an unchanged legacy isolated store."""
     config = read_json(root / "config.json")
+    if not fulfillment_enabled(config):
+        require_stage_support(config, read_json(release(root) / "manifest.json"))
     if ("database_mode" not in config and config.get("host_profile") == "isolated"
             and not config.get("database_config_file")
             and not config.get("external", {}).get("aivan_database_url")
@@ -686,6 +703,7 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
     elif isolated_sqlite:
         config.update(database_mode="isolated", database_config_file="")
     validate_config(config)
+    require_stage_support(config, manifest)
     load_deployment_module().credentials(config, require_external=not no_start)
     if config.get("database_config_file"):
         load_database_module().configured_targets(config, root)
@@ -736,7 +754,7 @@ def install(root: Path, payload: Path, tenants: list[str], port: int, no_start: 
                     restart_restored_release(root)
             raise
     config = read_json(config_path)
-    return {"installed": version, "prefix": str(root), "started": not no_start, "web_url": f"http://127.0.0.1:{config['ports']['web']}", "fulfillment_url": f"http://127.0.0.1:{config['ports']['abcdyi']}", "fulfillment_auth": "reuse tenant API credential at /api/installation/session", "credentials_file": str(config_path), "data_retained": True, "ports_file": str(root / "run/ports.json"), "workflow_acceptance": "not_measured_by_installation", "pending_configuration": (["authorized private SQL configuration and explicit schema migration"] if config.get("database_mode") == "external" and not config.get("database_config_file") else []) + ["verified HTTPS ingress for public browser access"], "optional_capabilities": {"model": "configured" if config["model"]["url"] else "disabled_deterministic_human_review_guidance", "non_English_translation": "configured_requires_verification" if config["language"]["url"] or config["language"].get("model_dir") else "requires_verified_models_or_provider"}}
+    return {"installed": version, "prefix": str(root), "started": not no_start, "web_url": f"http://127.0.0.1:{config['ports']['web']}", "deployment_stage": load_deployment_module().stage(config), "fulfillment_url": f"http://127.0.0.1:{config['ports']['abcdyi']}" if fulfillment_enabled(config) else None, "fulfillment_auth": "reuse tenant API credential at /api/installation/session" if fulfillment_enabled(config) else "not_deployed", "credentials_file": str(config_path), "data_retained": True, "ports_file": str(root / "run/ports.json"), "workflow_acceptance": "not_measured_by_installation", "pending_configuration": (["authorized private SQL configuration and explicit schema migration"] if config.get("database_mode") == "external" and not config.get("database_config_file") else []) + ["verified HTTPS ingress for public browser access"], "optional_capabilities": {"model": "configured" if config["model"]["url"] else "disabled_deterministic_human_review_guidance", "non_English_translation": "configured_requires_verification" if config["language"]["url"] or config["language"].get("model_dir") else "requires_verified_models_or_provider"}}
 
 
 def main(argv=None):
@@ -826,6 +844,9 @@ def main(argv=None):
                 rel = release(root)
                 verify_payload(rel)
                 config = read_json(root / "config.json")
+                validate_config(config)
+                if not fulfillment_enabled(config):
+                    raise RuntimeError("Buyer creation requires explicitly enabled fulfillment")
                 process = subprocess.run([python(rel), "-B", "-I", str(rel / "abcdyi_service.py"), "buyer-create",
                     "--tenant", args.tenant, "--email", args.email, "--full-name", args.full_name],
                     env=environment(root, rel, config), cwd=root, stdout=subprocess.PIPE, text=True)
@@ -915,6 +936,8 @@ def main(argv=None):
                         raise ValueError("The isolated bundled store retains its installation-owned provider identity")
                     updated["private_data_provider_id"] = args.database_provider_id
                 validate_config(updated)
+                if not fulfillment_enabled(updated):
+                    require_stage_support(updated, read_json(release(root) / "manifest.json"))
                 load_deployment_module().credentials(updated, require_external=args.restart)
                 if args.restart or updated.get("database_config_file") or updated.get("database_mode") == "isolated":
                     load_database_module().configured_targets(updated, root)
@@ -971,6 +994,8 @@ def main(argv=None):
                     raise RuntimeError("Stop services before changing configuration")
                 new = read_json(args.file)
                 validate_config(new)
+                if not fulfillment_enabled(new):
+                    require_stage_support(new, read_json(release(root) / "manifest.json"))
                 write_json(root / "config.json", new)
                 result = {"configured": True, "restart_required": True}
             elif args.command == "rollback":

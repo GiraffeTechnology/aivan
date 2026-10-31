@@ -46,9 +46,15 @@ def request_json(url: str, headers: dict | None = None) -> dict:
 
 
 def probe(config: dict, services: dict, credential_values: dict) -> dict:
+    stage = config.get("deployment_stage", "integrated")
+    if stage not in ("aivan", "integrated"):
+        raise ValueError("Deployment stage must be aivan or integrated")
     report = {}
     for name, (_application, path) in services.items():
         if name not in config["ports"]:
+            continue
+        if name == "abcdyi" and stage == "aivan":
+            report[name] = {"ok": False, "required": False, "status": "not_deployed"}
             continue
         external = config["external"].get(name)
         url = external or f"http://127.0.0.1:{config['ports'][name]}"

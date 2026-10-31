@@ -16,11 +16,16 @@ from giraffe_db.db.base import Base as ProviderBase
 from giraffe_db.db.models.core import Tenant
 
 
-def initialize(root: Path):
-    config = json.loads((root / "config.json").read_text())
+def database_helpers():
     spec = importlib.util.spec_from_file_location("myaivan_database_config", Path(__file__).with_name("database_config.py"))
     helpers = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helpers)
+    return helpers
+
+
+def initialize(root: Path):
+    config = json.loads((root / "config.json").read_text())
+    helpers = database_helpers()
     targets = helpers.configured_targets(config, root)
     helpers.verify_physical_namespaces(targets)
     isolated = config.get("database_mode") == "isolated"
@@ -32,7 +37,7 @@ def initialize(root: Path):
     require_current_schema(app)
     helpers.require_schema(app, AivanBase.metadata)
     app.dispose()
-    if "abcdyi" in config["ports"]:
+    if "abcdyi" in targets and "abcdyi" in config["ports"]:
         subprocess.run([sys.executable, "-B", "-I", str(Path(__file__).with_name("abcdyi_service.py")), "bootstrap", str(root)], check=True)
     if "database" in config["external"]:
         return
