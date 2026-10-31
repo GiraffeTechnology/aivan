@@ -15,6 +15,7 @@ from aivan.gpm.auth import (
     GPMDecisionAuthorizationError,
     GPMPrincipal,
     require_principal,
+    require_auth,
 )
 from aivan.gpm.llm_runtime import analyze_quote, mock_quote_analysis
 from aivan.gpm.packet_store import GPMPacketStore
@@ -64,6 +65,8 @@ async def require_gpm_principal(request: Request) -> GPMPrincipal:
         principal = await require_principal(request)
     except GPMDecisionAuthorizationError as exc:
         raise HTTPException(status_code=400, detail={"error": exc.code}) from exc
+    if os.environ.get("AIVAN_ENV", "local").strip().lower() == "production":
+        _packet_store.ensure_tenant_ready(principal.tenant_id, correlation_id=principal.correlation_id)
     if (
         os.environ.get("AIVAN_ENV", "local").strip().lower() == "production"
         and not _packet_store.is_durable
@@ -253,6 +256,21 @@ async def healthz() -> dict:
     }
 
 
+@router.get("/readiness")
+async def tenant_readiness(
+    request: Request, tenant_id: str = Depends(require_auth),
+) -> dict:
+    """Re-probe authenticated tenant capability without writing packets."""
+    from aivan.gpm.persistence_contract import require_safe_correlation_id
+
+    correlation_id = require_safe_correlation_id(request.headers.get("X-AIVAN-Trace-ID"))
+    if not _packet_store.ensure_tenant_ready(
+        tenant_id, correlation_id=correlation_id, force_probe=True,
+    ):
+        raise HTTPException(status_code=503, detail={"error": "GPM_PERSISTENCE_UNAVAILABLE"})
+    return {"status": "ok", "tenant_id": tenant_id, "packet_persistence": "durable"}
+
+
 @router.get("/capabilities")
 async def capabilities() -> dict:
     has_secret = bool(os.environ.get("AIVAN_AUTH_SECRET"))
@@ -294,3 +312,4 @@ async def capabilities() -> dict:
             "tenant_verification": "realtime_giraffe_db" if has_db else "hmac_only",
         },
     }
+

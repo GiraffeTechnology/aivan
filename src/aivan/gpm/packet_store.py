@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from typing import Optional
 
 from fastapi import HTTPException
 
 from aivan.gpm.auth import GPMPrincipal, authorize_gpm_decision
+from aivan.gpm.giraffe_db_client import GPM_PACKET_API_VERSION, REQUIRED_PACKET_CAPABILITIES
 from aivan.gpm.persistence_contract import (
     GPM_PERSISTENCE_CONTRACT_VERSION,
     DecisionCommand,
@@ -69,10 +71,14 @@ class GPMPacketStore:
         self._mem: dict[str, dict] = {}
         self._db = db_client
         self._durable = False
+        self._legacy_durable = False
+        self._verified_tenants: set[str] = set()
         self._decision_lock = threading.RLock()
         self._decision_receipts: dict[tuple[str, str], dict] = {}
 
-        if self._db is not None:
+        if (self._db is not None
+                and getattr(self._db, "contract_version", None) == GPM_PERSISTENCE_CONTRACT_VERSION
+                and getattr(self._db, "packet_api_version", None) != GPM_PACKET_API_VERSION):
             try:
                 version_info = self._db.check_schema_version()
                 reported_version = (
@@ -89,6 +95,7 @@ class GPMPacketStore:
                         correlation_id="gpm-schema-probe",
                     )
                 self._durable = True
+                self._legacy_durable = True
                 logger.info("GPMPacketStore: giraffe-db available — durable mode")
             except Exception as exc:
                 logger.warning(
@@ -96,11 +103,61 @@ class GPMPacketStore:
                     "local in-memory fallback; packets will not survive restart",
                     type(exc).__name__,
                 )
-        else:
+        elif self._db is None:
             logger.warning(
                 "GPMPacketStore: no db_client — in-memory only. "
                 "Set GIRAFFE_DB_BASE_URL to enable persistence."
             )
+
+    def ensure_tenant_ready(
+        self, tenant_id: str, *, correlation_id: str | None = None, force_probe: bool = False,
+    ) -> bool:
+        from aivan.gpm.persistence_contract import require_safe_correlation_id
+
+        correlation_id = require_safe_correlation_id(correlation_id or "gpm-tenant-probe")
+        if not isinstance(tenant_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,254}", tenant_id):
+            raise PersistenceContractError("GPM_TENANT_REQUIRED", correlation_id=correlation_id)
+        if self._db is None:
+            self._verified_tenants.clear()
+            self._durable = False
+            _raise_production_unavailable()
+            return False
+        if self._legacy_durable:
+            if not force_probe:
+                return True
+            try:
+                version = self._db.check_schema_version()
+                if (version.get("gpm_contract_version") or version.get("contract_version")) != GPM_PERSISTENCE_CONTRACT_VERSION:
+                    raise PersistenceContractError("GPM_CONTRACT_VERSION_MISMATCH", correlation_id=correlation_id)
+                return True
+            except Exception as exc:
+                self._durable = False
+                self._legacy_durable = False
+                _raise_production_unavailable(_redact_adapter_error(exc, correlation_id=correlation_id))
+                return False
+        if tenant_id in self._verified_tenants and not force_probe:
+            return True
+        try:
+            schema_probe = getattr(self._db, "check_schema_version")
+            capability_probe = getattr(self._db, "check_packet_capabilities")
+            schema = schema_probe(tenant_id=tenant_id, correlation_id=correlation_id)
+            capabilities = capability_probe(tenant_id, correlation_id=correlation_id)
+            flags = capabilities.get("capabilities") if isinstance(capabilities, dict) else None
+            if (not isinstance(schema, dict) or not isinstance(schema.get("schema_version"), str)
+                    or not schema["schema_version"]
+                    or not isinstance(capabilities, dict)
+                    or capabilities.get("api_version") != GPM_PACKET_API_VERSION
+                    or not isinstance(flags, dict)
+                    or any(flags.get(name) is not True for name in REQUIRED_PACKET_CAPABILITIES)):
+                raise PersistenceContractError("GPM_PACKET_CAPABILITY_MISMATCH", correlation_id=correlation_id)
+        except Exception as exc:
+            self._verified_tenants.discard(tenant_id)
+            self._durable = bool(self._verified_tenants)
+            _raise_production_unavailable(_redact_adapter_error(exc, correlation_id=correlation_id))
+            return False
+        self._verified_tenants.add(tenant_id)
+        self._durable = True
+        return True
 
     # ── public API ─────────────────────────────────────────────────────────
 
@@ -111,29 +168,39 @@ class GPMPacketStore:
             self._mem[packet_id] = packet
 
     def save(
-        self,
-        packet: dict,
-        *,
-        tenant_id: str | None = None,
-        correlation_id: str = "gpm-create",
+        self, packet: dict, *, tenant_id: str | None = None,
+        correlation_id: str = "gpm-create", idempotency_key: str | None = None,
     ) -> dict:
         pid = packet["packet_id"]
-        if self._durable:
+        packet_tenant = packet.get("tenant_id")
+        if not isinstance(packet_tenant, str) or not packet_tenant or (
+                tenant_id is not None and tenant_id != packet_tenant):
+            raise HTTPException(status_code=422, detail={"error": "GPM_PACKET_TENANT_REQUIRED"})
+        tenant_id = packet_tenant
+        if self.ensure_tenant_ready(tenant_id, correlation_id=correlation_id):
             assert self._db is not None
+            arguments = {"tenant_id": tenant_id, "correlation_id": correlation_id}
+            if idempotency_key:
+                arguments["idempotency_key"] = idempotency_key
+            error = None
             try:
-                saved = self._db.create_packet(
-                    packet,
-                    tenant_id=tenant_id,
-                    correlation_id=correlation_id,
-                )
+                self._db.create_packet(packet, **arguments)
+            except Exception as exc:
+                error = _redact_adapter_error(exc, correlation_id=correlation_id)
+            try:
+                saved = self._db.get_packet(pid, tenant_id=tenant_id, correlation_id=correlation_id)
+            except Exception as exc:
+                error = _redact_adapter_error(exc, correlation_id=correlation_id)
+                saved = None
+            if isinstance(saved, dict) and all(saved.get(k) == v for k, v in packet.items()):
                 self._remember(pid, saved)
                 return saved
-            except Exception as exc:
-                adapter_error = _redact_adapter_error(
-                    exc, correlation_id=correlation_id
-                )
-                _raise_production_unavailable(adapter_error)
-                logger.warning("GPMPacketStore.save: giraffe-db write failed — memory only")
+            if error is not None and error.status_code == 409:
+                raise HTTPException(status_code=409, detail={"error": "GPM_IDEMPOTENCY_CONFLICT", "packet_id": pid}) from error
+            if _is_production():
+                raise HTTPException(status_code=503, detail={
+                    "error": "GPM_PERSISTENCE_OUTCOME_UNKNOWN", "packet_id": pid,
+                }) from error
         _raise_production_unavailable()
         self._mem[pid] = packet
         return packet
@@ -151,6 +218,8 @@ class GPMPacketStore:
             if tenant_id is not None and cached.get("tenant_id") != tenant_id:
                 return None
             return cached
+        if tenant_id is not None:
+            self.ensure_tenant_ready(tenant_id, correlation_id=correlation_id)
         if self._durable:
             assert self._db is not None
             try:
@@ -360,3 +429,4 @@ class GPMPacketStore:
                 self._mem[packet_id] = updated
             self._decision_receipts[receipt_key] = dict(updated)
             return dict(updated)
+

@@ -14,6 +14,12 @@ from aivan.gpm import router as router_module
 def test_forced_probe_does_not_trust_previous_provider_success(monkeypatch):
     monkeypatch.setenv('AIVAN_ENV', 'production')
     provider = MagicMock()
+    provider.check_schema_version.return_value = {"schema_version": "0.2.0"}
+    provider.check_packet_capabilities.return_value = {
+        "api_version": "gpm.packet-persistence.v1",
+        "capabilities": {"create_packet": True, "read_packet": True,
+                         "idempotent_create": True, "quote_lineage": True},
+    }
     store = GPMPacketStore(provider)
     assert store.ensure_tenant_ready('tenant-a')
     provider.check_schema_version.side_effect = GiraffeDBClientError('Synthetic outage', 503)
@@ -45,7 +51,7 @@ def readiness_client(monkeypatch):
     monkeypatch.setenv('AIVAN_API_KEY', 'synthetic-readiness-deployment-key')
     monkeypatch.setenv('AIVAN_TENANT_ID', 'tenant-a')
     provider = MagicMock()
-    provider.get_tenant.return_value = {'status': 'active'}
+    provider.get_tenant.return_value = {'status': 'active', 'tenant_id': 'tenant-a'}
     store = GPMPacketStore(provider)
     monkeypatch.setattr(router_module, '_packet_store', store)
     app = FastAPI()
@@ -85,3 +91,35 @@ def test_route_rejects_auth_and_cross_tenant_before_probe(readiness_client):
     provider.check_schema_version.assert_not_called()
     provider.check_packet_capabilities.assert_not_called()
     assert store._verified_tenants == set()
+
+
+@pytest.mark.parametrize("missing", ["create_packet", "read_packet", "idempotent_create", "quote_lineage"])
+def test_empty_or_incomplete_capability_never_establishes_production_readiness(monkeypatch, missing):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    provider = MagicMock()
+    provider.check_schema_version.return_value = {"schema_version": "0.2.0"}
+    flags = {"create_packet": True, "read_packet": True, "idempotent_create": True, "quote_lineage": True}
+    flags[missing] = False
+    provider.check_packet_capabilities.return_value = {
+        "api_version": "gpm.packet-persistence.v1", "capabilities": flags,
+    }
+    store = GPMPacketStore(provider)
+    with pytest.raises(HTTPException) as error:
+        store.ensure_tenant_ready("tenant-a", force_probe=True)
+    assert error.value.status_code == 503
+    assert not store.is_durable
+    assert store._verified_tenants == set()
+    provider.create_packet.assert_not_called()
+    provider.apply_decision.assert_not_called()
+
+
+def test_blank_provider_probes_do_not_count_as_success(monkeypatch):
+    monkeypatch.setenv("AIVAN_ENV", "production")
+    provider = MagicMock()
+    store = GPMPacketStore(provider)
+    with pytest.raises(HTTPException) as error:
+        store.ensure_tenant_ready("tenant-a")
+    assert error.value.status_code == 503
+    assert not store.is_durable
+    provider.create_packet.assert_not_called()
+
