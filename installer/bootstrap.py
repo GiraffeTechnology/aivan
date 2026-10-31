@@ -6,8 +6,6 @@ from pathlib import Path
 import sys
 import subprocess
 
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 from aivan.db.models import Base as AivanBase
@@ -47,6 +45,11 @@ def initialize(root: Path):
     if not actual:
         if not isolated:
             raise RuntimeError("External provider schema is empty; run database-plan and explicit database-migrate")
+        # Migration tooling is required only for this explicit isolated-provider
+        # initialization path, not external-provider validation or stage selection.
+        from alembic import command
+        from alembic.config import Config
+
         assets = Path(__file__).resolve().parent / "provider-assets/giraffe-db"
         migration_config = Config(str(assets / "alembic.ini"))
         migration_config.set_main_option("script_location", str(assets / "alembic"))
