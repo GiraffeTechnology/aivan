@@ -365,8 +365,17 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
     urls.update({key: value for key, value in config["external"].items() if key in SERVICES})
     library_dirs = [rel / "runtime/lib", *sorted((rel / "runtime/lib/python3.12/site-packages").glob("*.libs"))]
     env["LD_LIBRARY_PATH"] = ":".join(str(directory) for directory in library_dirs)
+    channels = config.get("channels", {})
+    research = channels.get("risk_search_enabled", False)
+    gateway_selected = channels.get("email_enabled", False) or research
     env.update({
         "AIVAN_ENV": "production",
+        "AIVAN_PRODUCT_ROLE": "monitoring_takeover_control_plane",
+        "AIVAN_BUSINESS_FACT_AUTHORITY": "giraffe-db",
+        "AIVAN_LOCAL_STATE_SCOPE": "control_audit_cache_only",
+        "AIVAN_WEB_SEARCH_PROVIDER": "openclaw_search" if research else "disabled",
+        "AIVAN_ENABLE_UNKNOWN_SUPPLIER_RISK_SEARCH": "true" if research else "false",
+        "AIVAN_ALIBABA_MODE": "disabled",
         "MYAIVAN_DEPLOYMENT_STAGE": load_deployment_module().stage(config),
         "AIVAN_CANDIDATE_SHA": candidate_revision(read_json(rel / "manifest.json")),
         "AIVAN_DB_URL": targets["aivan"]["url"],
@@ -400,7 +409,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
         "TRANSFORMERS_OFFLINE": "1",
         "AIVAN_LANGUAGE_SKILL_EXPECTED_PROVIDER": config["language"]["provider"],
         "AIVAN_LANGUAGE_SKILL_EXPECTED_MODEL": config["language"]["model"],
-        "OPENCLAW_BASE_URL": config.get("channels", {}).get("openclaw_url", "") if config.get("channels", {}).get("email_enabled") else "",
+        "OPENCLAW_BASE_URL": channels.get("openclaw_url", "") if gateway_selected else "",
         "OPENCLAW_SEND_ENDPOINT": config.get("channels", {}).get("send_endpoint", "/messages/send"),
         "OPENCLAW_MOCK_MODE": "false",
         "AIVAN_EMAIL_SEND_MODE": "openclaw" if config.get("channels", {}).get("email_enabled") else "disabled",
@@ -432,6 +441,7 @@ def environment(root: Path, rel: Path, config: dict) -> dict:
             "MYAIVAN_EXECUTION_WEB_ACTOR_ID": "installation-operator",
             "ABCDYI_LANGUAGE_SKILL_BASE_URL": config["language"]["url"] or urls["language"],
         })
+    env.update(load_deployment_module().readiness_environment(config))
     env.update(load_deployment_module().credential_environment(config))
     return env
 

@@ -22,6 +22,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from aivan.governance.runtime_policy import is_production, reject_test_transport_in_production
+from aivan.integrations.giraffe_db_auth import ServiceAuthError, service_auth_for_tenant
 from aivan.gpm.persistence_contract import GPM_PERSISTENCE_CONTRACT_VERSION
 from aivan.observability.metrics import record_dependency_probe
 from aivan.observability.mutation_policy import (
@@ -145,6 +146,17 @@ def probe_total_timeout_seconds() -> float:
     return _positive_float("AIVAN_DEPENDENCY_PROBE_TOTAL_TIMEOUT_SECONDS", 6.0)
 
 
+
+def installer_profile_selected() -> bool:
+    return os.environ.get("MYAIVAN_DEPLOYMENT_STAGE", "").strip().lower() in {"aivan", "integrated"}
+
+
+def openclaw_required() -> bool:
+    """Only an explicitly unselected installed gateway is noncritical."""
+    manual = os.environ.get("AIVAN_EMAIL_SEND_MODE", "").strip().lower() == "disabled"
+    no_research = os.environ.get("AIVAN_ENABLE_UNKNOWN_SUPPLIER_RISK_SEARCH", "").strip().lower() == "false"
+    return not (installer_profile_selected() and manual and no_research)
+
 def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
     """Return the frozen B1-A probe declarations, never provider instances."""
 
@@ -244,7 +256,8 @@ def required_dependency_specs() -> tuple[DependencyProbeSpec, ...]:
                 version_path=version_path,
                 timeout_seconds=timeout,
                 stale_after_seconds=stale,
-                criticality="critical",
+                criticality=("optional" if dependency_id == "openclaw" and not openclaw_required()
+                             else "critical"),
                 auth_header_name=auth_header_name,
                 auth_value_env=auth_value_env,
                 header_contract=cast(HeaderContract, header_contract),
@@ -383,6 +396,11 @@ def _probe_one(
         os.environ.get(spec.auth_value_env, "").strip() if spec.auth_value_env else ""
     )
     tenant_id = _trusted_probe_tenant(spec)
+    if spec.header_contract == "giraffe-db" and tenant_id:
+        try:
+            auth_value = service_auth_for_tenant(tenant_id)
+        except ServiceAuthError:
+            auth_value = ""
     if (
         not base_url
         or not expected

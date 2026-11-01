@@ -19,6 +19,8 @@ from aivan.observability.dependency_probe import (
     DependencyProbeResult,
     critical_dependencies_ready,
     run_dependency_probes,
+    installer_profile_selected,
+    openclaw_required,
 )
 
 
@@ -152,6 +154,15 @@ def _readiness_snapshot(
         and os.environ.get("AIVAN_NON_CHINA_EGRESS_POLICY", "").strip()
         == os.environ.get("AIVAN_EXPECTED_EGRESS_POLICY", "").strip(),
     }
+    if installer_profile_selected():
+        # Omit unselected capability checks; never report them as live/configured.
+        if not openclaw_required():
+            checks.pop("openclaw_live_configured")
+        if (os.environ.get("AIVAN_LLM_API_ENABLED", "").strip().lower() == "false"
+                and os.environ.get("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "").strip().lower() == "false"):
+            checks.pop("local_model_configured")
+        if os.environ.get("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "").strip().lower() == "false":
+            checks.pop("qwen_proofreading_only")
     checks.update(production_policy_checks())
     results = run_dependency_probes(correlation_id=correlation_id)
     checks["critical_dependencies_ready"] = critical_dependencies_ready(results)
