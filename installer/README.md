@@ -391,3 +391,42 @@ but the published ports file does not advertise a dormant abcdYi endpoint.
 stop the managed installation and switch its release pointer. These options do
 not authorize operations on unrelated services, databases or shared storage.
 
+
+## Selected capabilities and readiness declarations
+
+Use the existing private version-1 deployment profile to provide
+`dependency_versions`, a mapping keyed by `giraffe-db`, `gltg`,
+`giraffe-language-skill` and, when selected, `openclaw`. Values are the actual
+API/schema versions reported by those services, not their source commit IDs.
+`dependency_probe_tenant_id` selects an already configured tenant; it never
+creates a tenant or borrows another tenant's credential. The existing tenant
+credential map remains authoritative, even when a shared key is also present.
+
+`egress_policy` accepts the explicit `expected` and `declared` policy labels
+from the authorized deployment. They must match for readiness. Missing declarations
+remain not-ready; a label does not verify network routing. Do not enter placeholders
+or a fabricated bridge declaration to pass a check. This profile mapping changes no
+network, proxy, account, credential, DNS or firewall configuration.
+
+Email and optional risk research are separate selections:
+`channels.email_enabled` and `channels.risk_search_enabled`. When both are
+explicitly off in an installed profile, the gateway is not a critical dependency
+and no live-gateway check is claimed. Research remains unknown/manual-review and
+email remains manual copy; neither result is advertised as an online verification
+or delivery. Selecting either capability requires the existing gateway,
+credential and exact version. Unconfigured marketplace research is not a live
+provider and cannot supply mock production candidates.
+
+A missing model URL selects existing zero-model guidance; it does not activate a
+model. `language.proofread_enabled` defaults to false. Selecting proofreading
+keeps the approved Qwen-only proofreading check and requires an actually configured
+model. It never permits Qwen to generate translations. The shared language service,
+its non-mock identity and real version/health probes remain critical, including
+canonical-English validation. Translation failures still fail closed.
+
+The controller supplies the existing backend policy identifiers required at
+startup; these are compatibility tags, not a replacement product definition.
+Legacy source profiles keep their existing strict requirements. Installer health
+is not public-entry or workflow acceptance: read `/readyz` and execute the selected
+business workflow against the actual installed inventory. Unit composition fixtures
+do not establish service, model, database, routing or public-UI acceptance.

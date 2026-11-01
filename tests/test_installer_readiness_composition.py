@@ -75,10 +75,17 @@ def synthetic_http_probes(monkeypatch, broken=""):
         version = os.environ[spec.expected_version_env]
         if broken == spec.dependency_id + "-version":
             version = "fixture-incompatible-version"
-        return httpx.Response(200, json={
-            "status": "ok", "version": version, "schema_version": version,
-            "contract_version": version,
-        })
+        if spec.health_path == spec.version_path:
+            payload = {"status": "ok", "contract_version": version}
+        elif request.url.path == spec.health_path:
+            payload = {"status": "ok"}
+        elif spec.dependency_id == "giraffe-db":
+            payload = {"schema_version": version}
+        elif spec.dependency_id == "gltg":
+            payload = {"api_version": version}
+        else:
+            payload = {"contract_version": version, "models": []}
+        return httpx.Response(200, json=payload)
 
     def fixture_client(*args, **kwargs):
         assert kwargs.get("transport") is None

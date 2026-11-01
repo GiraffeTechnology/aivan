@@ -91,6 +91,43 @@ def credential_environment(config: dict) -> dict[str, str]:
     return result
 
 
+
+def readiness_environment(config: dict) -> dict[str, str]:
+    """Map operator declarations; blank values remain unverified, never inferred."""
+    version_names = {
+        "giraffe-db": "AIVAN_GIRAFFE_DB_EXPECTED_VERSION",
+        "gltg": "AIVAN_GLTG_EXPECTED_VERSION",
+        "openclaw": "AIVAN_OPENCLAW_EXPECTED_VERSION",
+        "giraffe-language-skill": "AIVAN_LANGUAGE_SKILL_EXPECTED_VERSION",
+    }
+
+    def label(value):
+        return (isinstance(value, str) and bool(value) and value == value.strip()
+                and len(value) <= 256 and not any(ord(char) < 32 or ord(char) == 127 for char in value))
+
+    versions = config.get("dependency_versions", {})
+    if (not isinstance(versions, dict) or set(versions) - set(version_names)
+            or not all(label(value) for value in versions.values())):
+        raise ValueError("Dependency versions must be explicit nonblank provider labels")
+    tenant = config.get("dependency_probe_tenant_id", "")
+    if not isinstance(tenant, str) or tenant and tenant not in config["tenants"]:
+        raise ValueError("The probe tenant must belong to this installation")
+    egress = config.get("egress_policy", {})
+    if (not isinstance(egress, dict)
+            or egress and (set(egress) != {"expected", "declared"}
+                           or not all(label(value) for value in egress.values()))):
+        raise ValueError("Egress declarations require explicit expected and declared policy labels")
+    proofread = config.get("language", {}).get("proofread_enabled", False)
+    if type(proofread) is not bool:
+        raise ValueError("Translation proofreading selection must be boolean")
+    return {
+        **{environment: versions.get(name, "") for name, environment in version_names.items()},
+        "AIVAN_DEPENDENCY_PROBE_TENANT_ID": tenant,
+        "AIVAN_EXPECTED_EGRESS_POLICY": egress.get("expected", ""),
+        "AIVAN_NON_CHINA_EGRESS_POLICY": egress.get("declared", ""),
+        "AIVAN_TRANSLATION_PROOFREAD_ENABLED": "true" if proofread else "false",
+    }
+
 def reserved_ports(config: dict) -> set[int]:
     result = set(config.get("reserved_ports", []))
     raw = os.environ.get("AIVAN_RESERVED_PORTS", "")
@@ -107,21 +144,22 @@ def profile(config: dict, value: dict, *, endpoint, tenant_identities) -> dict:
     """Merge deployment inputs while preserving installation-owned identities."""
     allowed = {"version", "deployment_stage", "origin", "host_profile", "reserved_ports", "requested_ports", "runtime_threads", "tenant_ids",
                "database_config_file", "service_credentials_file", "private_data_provider_id",
+               "dependency_versions", "dependency_probe_tenant_id", "egress_policy",
                "external", "language", "model", "channels"}
     if (not isinstance(value, dict) or set(value) - allowed
             or type(value.get("version")) is not int or value["version"] != 1):
         raise ValueError("Unsupported deployment profile; secrets belong in the credential file")
     result = copy.deepcopy(config)
-    for name in ("deployment_stage", "origin", "host_profile", "reserved_ports", "runtime_threads", "database_config_file", "service_credentials_file", "private_data_provider_id"):
+    for name in ("deployment_stage", "origin", "host_profile", "reserved_ports", "runtime_threads", "database_config_file", "service_credentials_file", "private_data_provider_id", "dependency_versions", "dependency_probe_tenant_id", "egress_policy"):
         if name in value:
             result[name] = value[name]
     if value.get("database_config_file"):
         result["database_mode"] = "external"
     if "tenant_ids" in value and value["tenant_ids"] != list(config["tenants"]):
         raise ValueError("Tenant changes require an explicitly reviewed installation configuration; a profile cannot silently remove or replace tenants")
-    for group, fields in (("language", {"url", "provider", "model", "model_dir"}),
+    for group, fields in (("language", {"url", "provider", "model", "model_dir", "proofread_enabled"}),
                           ("model", {"url", "name"}),
-                          ("channels", {"openclaw_url", "send_endpoint", "email_enabled"})):
+                          ("channels", {"openclaw_url", "send_endpoint", "email_enabled", "risk_search_enabled"})):
         if group in value:
             if not isinstance(value[group], dict) or set(value[group]) - fields:
                 raise ValueError("Unsupported deployment-profile fields")
@@ -159,6 +197,7 @@ def profile(config: dict, value: dict, *, endpoint, tenant_identities) -> dict:
 
 def validate(config: dict, *, endpoint) -> None:
     stage(config)
+    readiness_environment(config)
     threads = config.get("runtime_threads", 2)
     if type(threads) is not int or not 1 <= threads <= 64:
         raise ValueError("Runtime thread count must be an integer between 1 and 64")
@@ -169,7 +208,7 @@ def validate(config: dict, *, endpoint) -> None:
     if path and (not isinstance(path, str) or not Path(path).is_absolute()):
         raise ValueError("Service credentials require an absolute private file path")
     channels = config.get("channels", {})
-    if not isinstance(channels, dict) or set(channels) - {"openclaw_url", "send_endpoint", "email_enabled"}:
+    if not isinstance(channels, dict) or set(channels) - {"openclaw_url", "send_endpoint", "email_enabled", "risk_search_enabled"}:
         raise ValueError("Unsupported channel settings")
     enabled = channels.get("email_enabled", False)
     if type(enabled) is not bool:
@@ -179,6 +218,11 @@ def validate(config: dict, *, endpoint) -> None:
         endpoint(url)
     if enabled and not url:
         raise ValueError("Configured email requires an existing OpenClaw gateway URL")
+    research = channels.get("risk_search_enabled", False)
+    if type(research) is not bool:
+        raise ValueError("Risk-search enablement must be explicit")
+    if research and not url:
+        raise ValueError("Configured risk search requires an existing OpenClaw gateway URL")
     send_path = channels.get("send_endpoint", "/messages/send")
     if (not isinstance(send_path, str) or not send_path.startswith("/") or send_path.startswith("//")
             or any(char in send_path for char in ("?", "#", "\\"))
