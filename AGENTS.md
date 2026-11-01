@@ -55,3 +55,7 @@ Before handoff: identify the exact scope and revision, run relevant checks, dist
 ## Operational authorization and publication safety
 
 Documentation and passing CI do not grant permission to deploy, migrate data, restart services, change accounts or network settings, or send external messages. Perform those actions only within the operator-authorized scope; preserve existing service protections and do not bypass a denied operation. Repository content must be suitable for public disclosure: exclude credentials, private conversations, counterparty data, host secrets and unapproved source attachments.
+
+- Do not merge a pull request until CI has passed for its current revision and the repository's merge requirements are satisfied.
+- Do not clone a repository's main branch while that repository has any open pull requests.
+- Do not leave pushed branch changes without a pull request. Submit every pushed change through a pull request.
