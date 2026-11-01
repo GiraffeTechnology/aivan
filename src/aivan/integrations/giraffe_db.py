@@ -402,9 +402,12 @@ def persist_rfq_gltg_graph(*, event, project_id: str, requirement, strategy, glt
             response = client.post(f"{base_url}{path}", json=enriched, headers=headers)
         except httpx.HTTPError as exc:
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_INDETERMINATE_COMMIT:{step}") from exc
-        if response.status_code >= 500 or 300 <= response.status_code < 400:
+        # Only synchronous write acknowledgements may supply dependent IDs.
+        # Keep explicit rejections distinct from a possibly committed write.
+        if 400 <= response.status_code < 500:
+            response.raise_for_status()
+        if response.status_code not in (200, 201):
             raise RuntimeError(f"GIRAFFE_DB_GRAPH_INDETERMINATE_COMMIT:{step}")
-        response.raise_for_status()
         try:
             result = response.json()
         except ValueError as exc:
