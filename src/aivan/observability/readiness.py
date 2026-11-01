@@ -158,7 +158,8 @@ def _readiness_snapshot(
         # Omit unselected capability checks; never report them as live/configured.
         if not openclaw_required():
             checks.pop("openclaw_live_configured")
-        if os.environ.get("AIVAN_LLM_API_ENABLED", "").strip().lower() == "false":
+        if (os.environ.get("AIVAN_LLM_API_ENABLED", "").strip().lower() == "false"
+                and os.environ.get("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "").strip().lower() == "false"):
             checks.pop("local_model_configured")
         if os.environ.get("AIVAN_TRANSLATION_PROOFREAD_ENABLED", "").strip().lower() == "false":
             checks.pop("qwen_proofreading_only")
