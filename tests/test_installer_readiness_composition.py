@@ -314,3 +314,13 @@ def test_bad_tenant_map_never_borrows_the_shared_key_or_sends_db_requests(
     assert readiness.readiness_checks()["critical_dependencies_ready"] is False
     assert not any(str(request.url).startswith(os.environ["GIRAFFE_DB_BASE_URL"] + "/")
                    for request in requests)
+
+
+def test_selected_proofreader_cannot_use_the_zero_model_exception(tmp_path, monkeypatch):
+    installed_environment(tmp_path, monkeypatch, model=False, proofread=True)
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:9b")
+    synthetic_http_probes(monkeypatch)
+    checks = readiness.readiness_checks()
+    assert checks["qwen_proofreading_only"] is True
+    assert checks["local_model_configured"] is False
+    assert not all(checks.values())
